@@ -1,17 +1,20 @@
 from functools import singledispatchmethod
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Protocol
 
 from llvmlite import ir
 import llvmlite.binding as llvm
 from xdsl.context import Context
-from xdsl.dialects.arith import Arith, ConstantOp
+from xdsl.dialects.arith import AndIOp, Arith, ConstantOp, OrIOp, XOrIOp
 from xdsl.dialects.builtin import Builtin, IntegerType, ModuleOp
 from xdsl.dialects.func import Func, FuncOp, ReturnOp
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import Parser
 from xdsl_smt.dialects.transfer import (
     AbstractValueType,
+    AddOp,
+    AndOp,
+    AShrOp,
     CmpOp,
     Constant,
     CountLOneOp,
@@ -24,55 +27,71 @@ from xdsl_smt.dialects.transfer import (
     GetSignedMaxValueOp,
     GetSignedMinValueOp,
     IsNegativeOp,
+    LShrOp,
     MakeOp,
+    MulOp,
+    NegOp,
+    OrOp,
     SAddOverflowOp,
+    SDivOp,
+    SelectOp,
+    # USubOverflowOp,
+    ShlOp,
     SMaxOp,
     SMinOp,
     SMulOverflowOp,
+    SRemOp,
     SShlOverflowOp,
+    SubOp,
     # SSubOverflowOp,
     Transfer,
     TransIntegerType,
     TupleType,
     UAddOverflowOp,
+    UDivOp,
     UMaxOp,
     UMinOp,
     UMulOverflowOp,
+    URemOp,
     UShlOverflowOp,
-    # USubOverflowOp,
+    XorOp,
 )
 
-# TODO make sure to add all proper constraints so that it works like z3
-# TODO clean up big map
-# TODO type this map better
-# BinaryFunc: Callable[[ir.IRBuilder, ir.Value, ir.Value, str], ir.Value] = ir.IRBuilder.not_
-# TODO just use str.endswith calls to remove duplicate elements in the bigmap
-_big_map: dict[str, Callable] = {
+
+class IRBuilderOp(Protocol):
+    __self__: ir.IRBuilder
+
+    def __call__(
+        self, b: ir.IRBuilder, *args: ir.Value, name: str = ""
+    ) -> ir.Instruction: ...
+
+
+# TODO split this file into lowering and jit
+# TODO do I need the SSA map or just an arg map
+# TODO should this map be owned by the lowerer
+_mlir_op_to_llvm: dict[type[Operation], IRBuilderOp] = {  # type: ignore
     # unary
-    "transfer.neg": ir.IRBuilder.neg,
+    NegOp: ir.IRBuilder.neg,
     # binary
-    "transfer.and": ir.IRBuilder.and_,
-    "arith.andi": ir.IRBuilder.and_,
-    "transfer.add": ir.IRBuilder.add,
-    "arith.addi": ir.IRBuilder.add,
-    "transfer.or": ir.IRBuilder.or_,
-    "arith.ori": ir.IRBuilder.or_,
-    "transfer.xor": ir.IRBuilder.xor,
-    "arith.xori": ir.IRBuilder.xor,
-    "transfer.sub": ir.IRBuilder.sub,
-    "arith.subi": ir.IRBuilder.sub,
-    "transfer.mul": ir.IRBuilder.mul,
-    "transfer.udiv": ir.IRBuilder.udiv,
-    "transfer.sdiv": ir.IRBuilder.sdiv,
-    "transfer.urem": ir.IRBuilder.urem,
-    "transfer.srem": ir.IRBuilder.srem,
-    "transfer.ashr": ir.IRBuilder.ashr,
-    "transfer.lshr": ir.IRBuilder.lshr,
-    "transfer.shl": ir.IRBuilder.shl,
+    AndOp: ir.IRBuilder.and_,
+    AndIOp: ir.IRBuilder.and_,
+    AddOp: ir.IRBuilder.add,
+    OrOp: ir.IRBuilder.or_,
+    OrIOp: ir.IRBuilder.or_,
+    XorOp: ir.IRBuilder.xor,
+    XOrIOp: ir.IRBuilder.xor,
+    SubOp: ir.IRBuilder.sub,
+    MulOp: ir.IRBuilder.mul,
+    UDivOp: ir.IRBuilder.udiv,
+    SDivOp: ir.IRBuilder.sdiv,
+    URemOp: ir.IRBuilder.urem,
+    SRemOp: ir.IRBuilder.srem,
+    AShrOp: ir.IRBuilder.ashr,
+    LShrOp: ir.IRBuilder.lshr,
+    ShlOp: ir.IRBuilder.shl,
     # # ternery
-    "transfer.select": ir.IRBuilder.select,
-    "arith.select": ir.IRBuilder.select,
-    # not impl'd yet
+    SelectOp: ir.IRBuilder.select,
+    # TODO impl these ops
     # "transfer.get_high_bits": ".getHiBits",
     # "transfer.get_low_bits": ".getLoBits",
     # "transfer.set_high_bits": ".setHighBits",
@@ -85,6 +104,125 @@ _big_map: dict[str, Callable] = {
     # "transfer.extract": ".extractBits",
     # "transfer.reverse_bits": ".reverseBits",
 }
+
+
+class OpConstraints:
+    def c(self, v: int) -> ir.Constant:
+        return ir.Constant(ir.IntType(self.bw), v)
+
+    def rhs_eq_zero(self, b: ir.IRBuilder, lhs: ir.Value, rhs: ir.Value):
+        return b.icmp_unsigned("==", rhs, self.c(0))
+
+    def val_uge_bw(self, b: ir.IRBuilder, lhs: ir.Value, rhs: ir.Value):
+        return b.icmp_unsigned(">=", rhs, self.c(self.bw))
+
+    def ashr_bad_bw_pos(self, b: ir.IRBuilder, lhs: ir.Value, rhs: ir.Value):
+        pos = b.icmp_signed(">=", lhs, self.c(0))
+        badbw = b.icmp_unsigned(">=", rhs, self.c(self.bw))
+        return b.and_(pos, badbw)
+
+    def ashr_bad_bw_neg(self, b: ir.IRBuilder, lhs: ir.Value, rhs: ir.Value):
+        neg = b.icmp_signed("<", lhs, self.c(0))
+        badbw = b.icmp_unsigned(">=", rhs, self.c(self.bw))
+        return b.and_(neg, badbw)
+
+    def sdiv_underflow(self, b: ir.IRBuilder, lhs: ir.Value, rhs: ir.Value):
+        int_min = self.c(2 ** (self.bw - 1))
+        neg_one = self.c((2**self.bw) - 1)
+        lhs_is_min = b.icmp_signed("==", lhs, int_min)
+        rhs_is_m1 = b.icmp_signed("==", rhs, neg_one)
+        return b.and_(lhs_is_min, rhs_is_m1)
+
+    def sdiv_by_zero_pos(self, b: ir.IRBuilder, lhs: ir.Value, rhs: ir.Value):
+        pos = b.icmp_signed(">=", lhs, self.c(0))
+        rhs0 = b.icmp_unsigned("==", rhs, self.c(0))
+        return b.and_(pos, rhs0)
+
+    def sdiv_by_zero_neg(self, b: ir.IRBuilder, lhs: ir.Value, rhs: ir.Value):
+        neg = b.icmp_signed("<", lhs, self.c(0))
+        rhs0 = b.icmp_unsigned("==", rhs, self.c(0))
+        return b.and_(neg, rhs0)
+
+    def ret_lhs(self, lhs: ir.Value):
+        return lhs
+
+    def ret_zero(self, lhs: ir.Value):
+        return self.c(0)
+
+    def ret_one(self, lhs: ir.Value):
+        return self.c(1)
+
+    def ret_ones(self, lhs: ir.Value):
+        return self.c((2**self.bw) - 1)
+
+    def ret_int_min(self, lhs: ir.Value):
+        return self.c(2 ** (self.bw - 1))
+
+    def __init__(self, bw: int):
+        self.bw = bw
+
+        self.ops: list[type[Operation]] = [
+            ShlOp,
+            LShrOp,
+            AShrOp,
+            UDivOp,
+            URemOp,
+            SRemOp,
+            SDivOp,
+        ]
+
+        self.constraints: dict[  # type: ignore
+            type[Operation],
+            list[
+                tuple[
+                    Callable[[ir.IRBuilder, ir.Value, ir.Value], ir.Value],
+                    Callable[[ir.Value], ir.Value],
+                ]
+            ],
+        ] = {
+            ShlOp: [(self.val_uge_bw, self.ret_zero)],
+            LShrOp: [(self.val_uge_bw, self.ret_zero)],
+            AShrOp: [
+                (self.ashr_bad_bw_pos, self.ret_zero),
+                (self.ashr_bad_bw_neg, self.ret_ones),
+            ],
+            UDivOp: [(self.rhs_eq_zero, self.ret_ones)],
+            URemOp: [(self.rhs_eq_zero, self.ret_lhs)],
+            SRemOp: [(self.rhs_eq_zero, self.ret_lhs)],
+            SDivOp: [
+                (self.sdiv_underflow, self.ret_int_min),
+                (self.sdiv_by_zero_pos, self.ret_ones),
+                (self.sdiv_by_zero_neg, self.ret_one),
+            ],
+        }
+
+    def compute(
+        self, b: ir.IRBuilder, op: Operation, lhs: ir.Value, rhs: ir.Value
+    ) -> ir.Instruction:
+        const_zero = ir.Constant(ir.IntType(self.bw), 0)
+        const_one = ir.Constant(ir.IntType(self.bw), 1)
+        const_false = ir.Constant(ir.IntType(1), 0)
+        const_true = ir.Constant(ir.IntType(1), 1)
+
+        ub_any = const_false
+        latched = const_false
+        chosen = const_zero
+
+        for pred, default in self.constraints[type(op)]:
+            p = pred(b, lhs, rhs)
+            ub_any = b.or_(ub_any, p)
+            dval = default(lhs)
+            take = b.and_(p, b.icmp_unsigned("==", latched, const_false))
+            chosen = b.select(take, dval, chosen)
+            latched = b.select(p, const_true, latched)
+
+        lhs_safe = b.select(ub_any, const_zero, lhs)
+        rhs_safe = b.select(ub_any, const_one, rhs)
+
+        raw_llvm_op = _mlir_op_to_llvm[type(op)]
+        raw = raw_llvm_op(b, lhs_safe, rhs_safe)
+
+        return b.select(ub_any, chosen, raw)
 
 
 # TODO broken rn
@@ -195,7 +333,9 @@ class LowerToLLVM:
         elif shim and self.is_transfer_fn(mlir_fn):
             return self.shim_xfer(self.fns[fn_name])
         elif shim:
-            raise ValueError(f"Cannot shim non concrete and non transfer function {fn_name}")
+            raise ValueError(
+                f"Cannot shim non concrete and non transfer function {fn_name}"
+            )
 
         return self.fns[fn_name]
 
@@ -225,53 +365,6 @@ class LowerToLLVM:
         b.ret(r64)
 
         return shim_fn
-
-    # def shim_xfer(self, old_fn: ir.Function) -> ir.Function:
-    #     lane_t = ir.IntType(self.bw)
-    #     wide_t = ir.IntType(self.bw * 2)
-
-    #     fn_name = f"{old_fn.name}_shim"
-    #     shim_ty = ir.FunctionType(wide_t, (wide_t, wide_t))
-    #     shim_fn = ir.Function(self.llvm_mod, shim_ty, name=fn_name)
-    #     shim_fn = self.add_attrs(shim_fn)
-
-    #     b = ir.IRBuilder(shim_fn.append_basic_block(name="entry"))
-    #     a0, a1 = shim_fn.args
-
-    #     shift_amt = ir.Constant(wide_t, self.bw)
-
-    #     def split_to_pair(wide_val: ir.Value) -> ir.Value:
-    #         high_wide = b.lshr(wide_val, shift_amt)
-
-    #         low_lane = b.trunc(wide_val, lane_t)
-    #         high_lane = b.trunc(high_wide, lane_t)
-
-    #         pair = ir.Constant(ir.ArrayType(lane_t, 2), None)
-    #         pair = b.insert_value(pair, low_lane, 0)
-    #         pair = b.insert_value(pair, high_lane, 1)
-    #         return pair
-
-    #     def combine_pair(pair_val: ir.Value) -> ir.Value:
-    #         low_lane = b.extract_value(pair_val, 0)
-    #         high_lane = b.extract_value(pair_val, 1)
-
-    #         low_wide = b.zext(low_lane, wide_t)
-    #         high_wide = b.zext(high_lane, wide_t)
-    #         high_wide = b.shl(high_wide, shift_amt)
-
-    #         return b.or_(high_wide, low_wide)  # type: ignore
-
-    #     a0_pair = split_to_pair(a0)
-    #     a1_pair = split_to_pair(a1)
-
-    #     res_pair = b.call(old_fn, (a0_pair, a1_pair))
-
-    #     res_wide = combine_pair(res_pair)
-    #     b.ret(res_wide)
-
-    #     self.fns[fn_name] = shim_fn
-
-    #     return shim_fn
 
     def shim_xfer(self, old_fn: ir.Function) -> ir.Function:
         lane_t = ir.IntType(self.bw)
@@ -352,9 +445,16 @@ class LowerFuncToLLVM:
 
     @add_op.register
     def _(self, op: Operation) -> None:
-        llvm_op = _big_map[op.name]
+        llvm_op = _mlir_op_to_llvm[type(op)]
         res_name = self.result_name(op)
-        self.ssa_map[res_name] = llvm_op(self.b, *self.operands(op), name=res_name)
+
+        constraints = OpConstraints(self.bw)
+        if type(op) in constraints.ops:
+            self.ssa_map[res_name] = constraints.compute(
+                self.b, op, self.operands(op)[0], self.operands(op)[1]
+            )
+        else:
+            self.ssa_map[res_name] = llvm_op(self.b, *self.operands(op), name=res_name)
 
     @add_op.register
     def _(self, op: CountLOneOp | CountLZeroOp) -> None:
@@ -404,9 +504,8 @@ class LowerFuncToLLVM:
     def _(self, op: UShlOverflowOp | SShlOverflowOp) -> None:
         res_name = self.result_name(op)
         oprnds = self.operands(op)
-        typ = lower_type(op.results[0].type, self.bw)
 
-        bw_const = ir.Constant(typ, self.bw)
+        bw_const = ir.Constant(ir.IntType(self.bw), self.bw)
         true_const = ir.Constant(ir.IntType(1), 1)
         cmp = self.b.icmp_unsigned(">=", oprnds[0], bw_const, name=f"{res_name}_cmp")
 
@@ -451,7 +550,6 @@ class LowerFuncToLLVM:
         | Constant
         | ConstantOp,
     ) -> None:
-        typ = lower_type(op.results[0].type, self.bw)
         res_name = self.result_name(op)
 
         if isinstance(op, GetSignedMaxValueOp):
@@ -465,7 +563,7 @@ class LowerFuncToLLVM:
         elif isinstance(op, Constant) or isinstance(op, ConstantOp):
             val: int = op.value.value.data  # type: ignore
 
-        self.ssa_map[res_name] = ir.Constant(typ, val)
+        self.ssa_map[res_name] = ir.Constant(ir.IntType(self.bw), val)
 
     @add_op.register
     def _(self, op: UMaxOp | UMinOp | SMaxOp | SMinOp) -> None:
@@ -487,9 +585,8 @@ class LowerFuncToLLVM:
     def _(self, op: IsNegativeOp) -> None:
         oprnds = self.operands(op)
         res_name = self.result_name(op)
-        typ = lower_type(op.results[0].type, self.bw)
 
-        const_zero = ir.Constant(typ, 0)
+        const_zero = ir.Constant(ir.IntType(self.bw), 0)
         self.ssa_map[res_name] = self.b.icmp_signed(
             "<", oprnds[0], const_zero, name=res_name
         )

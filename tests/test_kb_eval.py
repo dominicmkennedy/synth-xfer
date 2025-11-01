@@ -1,8 +1,8 @@
 from pathlib import Path
 
 from synth_xfer._eval_engine import enum_low_knownbits_4, eval_knownbits_4
-from synth_xfer.jit import Jit, LowerToLLVM, parse_mlir_funcs
 from synth_xfer._util.eval_result import get_per_bit
+from synth_xfer.jit import Jit, LowerToLLVM, parse_mlir_funcs
 
 # TODO make another file to store perfect xfers
 # TODO make tests for lowering of mlir to llvmir and shiming etc
