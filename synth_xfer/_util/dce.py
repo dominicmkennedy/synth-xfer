@@ -8,13 +8,9 @@ from xdsl.pattern_rewriter import PatternRewriter, PatternRewriteWalker, Rewrite
 
 class RemoveTransferDeadPattern(RewritePattern):
     def match_and_rewrite(self, op: Operation, rewriter: PatternRewriter):
-        if (
-            isinstance(op, ModuleOp)
-            or isinstance(op, FuncOp)
-            or isinstance(op, ReturnOp)
-        ):
+        if isinstance(op, ModuleOp) or isinstance(op, FuncOp) or isinstance(op, ReturnOp):
             return None
-        if all(len(result.uses) == 0 for result in op.results):
+        if all(len(list(result.uses)) == 0 for result in op.results):
             rewriter.erase_matched_op()
 
 

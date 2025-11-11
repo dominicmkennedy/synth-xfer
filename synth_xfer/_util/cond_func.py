@@ -22,14 +22,13 @@ class FunctionWithCondition:
 
     def set_func_name(self, new_func_name: str):
         self.func_name = new_func_name
-        self.func.sym_name = StringAttr(new_func_name + "_body")
+        self.func.sym_name = StringAttr(f"{new_func_name}_body")
         if self.cond is not None:
-            self.cond.sym_name = StringAttr(new_func_name + "_cond")
+            self.cond.sym_name = StringAttr(f"{new_func_name}_cond")
 
+    # TODO I'd like this to be a __str__ method
     def to_str(self, eliminate_dead_code: Callable[[FuncOp], FuncOp]):
-        cond_str = (
-            "True\n" if self.cond is None else str(eliminate_dead_code(self.cond))
-        )
+        cond_str = "True\n" if self.cond is None else str(eliminate_dead_code(self.cond))
         return f"Cond:\n{cond_str}\nFunc:{str(eliminate_dead_code(self.func))}"
 
     def get_function(self) -> FuncOp:
@@ -45,10 +44,6 @@ class FunctionWithCondition:
 
         whole_function = FuncOp(self.func_name, self.func.function_type)
         args = whole_function.args
-
-        whole_function.attributes["applied_to"] = self.func.attributes["applied_to"]
-        whole_function.attributes["CPPCLASS"] = self.func.attributes["CPPCLASS"]
-        whole_function.attributes["is_forward"] = self.func.attributes["is_forward"]
 
         if self.cond is None:
             call_op = CallOp(
@@ -108,16 +103,13 @@ class FunctionWithCondition:
         )
         return whole_function
 
+    # TODO probs needs some changing
     def get_function_str(
         self,
-        lower_to_cpp: Callable[[FuncOp], str],
-    ) -> tuple[str, list[str]]:
-        whole_function = self.get_function()
-        whole_function_str = lower_to_cpp(whole_function)
-        func_str = lower_to_cpp(self.func)
+        lower_to_str: Callable[[FuncOp], str],
+    ) -> tuple[str, str, str | None]:
+        func_str = lower_to_str(self.func)
+        cond_str = lower_to_str(self.cond) if self.cond else None
+        whole_function_str = lower_to_str(self.get_function())
 
-        if self.cond is None:
-            return whole_function_str, [func_str]
-        cond_str = lower_to_cpp(self.cond)
-
-        return whole_function_str, [func_str, cond_str]
+        return whole_function_str, func_str, cond_str

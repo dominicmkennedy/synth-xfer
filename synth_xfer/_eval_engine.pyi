@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Sequence
-from typing import Never, Optional, overload
+from typing import Never, overload
 
 class Results:
     def __str__(self) -> str: ...

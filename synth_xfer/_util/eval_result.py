@@ -54,11 +54,10 @@ class PerBitRes:
         return self.exacts / self.all_cases
 
 
-def get_per_bit(a) -> list[PerBitRes]:
+def get_per_bit(a: str) -> list[PerBitRes]:
     T = TypeVar("T")
 
-    # assert str(a) == ""
-    x = str(a).split("\n")
+    x = a.split("\n")
 
     def get(in_str: str, to_match: str, parser: Callable[[str], T]) -> T:
         og_str, to_parse = in_str.split(":")

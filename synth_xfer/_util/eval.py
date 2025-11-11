@@ -2,8 +2,8 @@ from enum import Enum
 from pathlib import Path
 from subprocess import PIPE, run
 
-from synth_xfer._eval_engine import enum_knownbits_4, eval_knownbits_4
-from synth_xfer._util.eval_result import EvalResult, PerBitRes
+from synth_xfer._eval_engine import enum_low_knownbits_4, eval_knownbits_4
+from synth_xfer._util.eval_result import EvalResult, PerBitRes, get_per_bit
 
 
 class AbstractDomain(Enum):
@@ -28,12 +28,10 @@ class AbstractDomain(Enum):
         return self.name
 
 
-
-
 def _parse_engine_output(output: str) -> list[EvalResult]:
     bw_evals = output.split("---\n")
     bw_evals.reverse()
-    per_bits = [_get_per_bit(x.split("\n")) for x in bw_evals if x != ""]
+    per_bits = [get_per_bit(x) for x in bw_evals if x != ""]
 
     ds: list[list[PerBitRes]] = [[] for _ in range(len(per_bits[0]))]
     for es in per_bits:
@@ -52,9 +50,10 @@ def setup_eval(
     # seed: int,
     # TODO should it be a ptr or an mlir mod?
     conc_op_ptr: int,
+    op_con_ptr: int | None,
     # TODO need op con ptr too
 ):
-    return enum_knownbits_4(conc_op_ptr)
+    return enum_low_knownbits_4(conc_op_ptr, op_con_ptr)
 
 
 # TODO may want to just pass whole jit in here

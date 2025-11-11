@@ -13,13 +13,14 @@ from synth_xfer._util.cost_model import (
     sound_and_precise_cost,
 )
 from synth_xfer._util.eval_result import EvalResult
+from synth_xfer._util.helper_funcs import HelperFuncs
 from synth_xfer._util.mcmc_sampler import MCMCSampler
 from synth_xfer._util.random import Random
 from synth_xfer._util.solution_set import SolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
 
 
-def build_eval_list(
+def _build_eval_list(
     mcmc_proposals: list[FuncOp],
     sp: range,
     p: range,
@@ -52,7 +53,7 @@ def build_eval_list(
     return lst
 
 
-def mcmc_setup(
+def _mcmc_setup(
     solution_set: SolutionSet, num_abd_proc: int, num_programs: int
 ) -> tuple[range, range, range, int, list[FuncOp]]:
     """
@@ -91,15 +92,13 @@ def mcmc_setup(
 
 def synthesize_one_iteration(
     ith_iter: int,
-    func: FuncOp,
     context_regular: SynthesizerContext,
     context_weighted: SynthesizerContext,
     context_cond: SynthesizerContext,
     random: Random,
     solution_set: SolutionSet,
     logger: logging.Logger,
-    concrete_func: FuncOp,
-    helper_funcs: list[FuncOp],
+    helper_funcs: HelperFuncs,
     ctx: Context,
     num_programs: int,
     program_length: int,
@@ -108,11 +107,12 @@ def synthesize_one_iteration(
     total_rounds: int,
     inv_temp: int,
     num_unsound_candidates: int,
+    bw: int,
 ) -> SolutionSet:
     "Given ith_iter, performs total_rounds mcmc sampling"
     mcmc_samplers: list[MCMCSampler] = []
 
-    sp_range, p_range, c_range, num_programs, prec_set_after_distribute = mcmc_setup(
+    sp_range, p_range, c_range, num_programs, prec_set_after_distribute = _mcmc_setup(
         solution_set, num_abd_procs, num_programs
     )
     sp_size = sp_range.stop - sp_range.start
@@ -121,8 +121,10 @@ def synthesize_one_iteration(
     for i in range(num_programs):
         if i in sp_range:
             spl = MCMCSampler(
-                func,
-                context_regular if i < (sp_range.start + sp_range.stop) // 2 else context_weighted,
+                helper_funcs.transfer_func,
+                context_regular
+                if i < (sp_range.start + sp_range.stop) // 2
+                else context_weighted,
                 sound_and_precise_cost,
                 program_length,
                 total_rounds,
@@ -130,8 +132,10 @@ def synthesize_one_iteration(
             )
         elif i in p_range:
             spl = MCMCSampler(
-                func,
-                context_regular if i < (p_range.start + p_range.stop) // 2 else context_weighted,
+                helper_funcs.transfer_func,
+                context_regular
+                if i < (p_range.start + p_range.stop) // 2
+                else context_weighted,
                 precise_cost,
                 program_length,
                 total_rounds,
@@ -139,7 +143,7 @@ def synthesize_one_iteration(
             )
         else:
             spl = MCMCSampler(
-                func,
+                helper_funcs.transfer_func,
                 context_cond,
                 abduction_cost,
                 cond_length,
@@ -151,7 +155,7 @@ def synthesize_one_iteration(
         mcmc_samplers.append(spl)
 
     transfers = [spl.get_current() for spl in mcmc_samplers]
-    func_with_cond_lst = build_eval_list(
+    func_with_cond_lst = _build_eval_list(
         transfers, sp_range, p_range, c_range, prec_set_after_distribute
     )
 
@@ -179,7 +183,7 @@ def synthesize_one_iteration(
     for rnd in range(total_rounds):
         transfers = [spl.sample_next().get_current() for spl in mcmc_samplers]
 
-        func_with_cond_lst = build_eval_list(
+        func_with_cond_lst = _build_eval_list(
             transfers, sp_range, p_range, c_range, prec_set_after_distribute
         )
 
@@ -205,7 +209,10 @@ def synthesize_one_iteration(
                 ):
                     sound_most_improve_tfs[i] = tmp_tuple
                 # Update most_exact_tfs
-                if res.get_unsolved_exacts() > most_improve_tfs[i][1].get_unsolved_exacts():
+                if (
+                    res.get_unsolved_exacts()
+                    > most_improve_tfs[i][1].get_unsolved_exacts()
+                ):
                     most_improve_tfs[i] = tmp_tuple
 
             else:
@@ -261,10 +268,10 @@ def synthesize_one_iteration(
             )
 
     new_solution_set: SolutionSet = solution_set.construct_new_solution_set(
+        bw,
         candidates_sp,
         candidates_p,
         candidates_c,
-        concrete_func,
         helper_funcs,
         num_unsound_candidates,
         ctx,

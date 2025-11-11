@@ -7,6 +7,6 @@
   %or2 = "transfer.or"(%inst,%arg01): (!transfer.integer, !transfer.integer)->!transfer.integer
   %cmp1="transfer.cmp"(%or1,%neg_inst){predicate=0:i64}:(!transfer.integer, !transfer.integer)->i1
   %cmp2="transfer.cmp"(%or2,%inst){predicate=0:i64}:(!transfer.integer, !transfer.integer)->i1
-  %result="transfer.and"(%cmp1,%cmp2):(i1,i1)->i1
+  %result="arith.andi"(%cmp1,%cmp2):(i1,i1)->i1
   "func.return"(%result) : (i1) -> ()
 }) {function_type = (!transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.integer) -> i1, sym_name = "getInstanceConstraint"} : () -> ()

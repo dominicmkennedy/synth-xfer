@@ -13,6 +13,7 @@ from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.synth_context import SynthesizerContext
 from synth_xfer._util.verifier import verify_transfer_function
+from synth_xfer.cli.main import HelperFuncs
 
 
 def rename_functions(lst: list[FunctionWithCondition], prefix: str) -> list[str]:
@@ -24,17 +25,27 @@ def rename_functions(lst: list[FunctionWithCondition], prefix: str) -> list[str]
 
 
 def verify_function(
+    bw: int,
     func: FunctionWithCondition,
-    concrete_op: FuncOp,
-    helper_funcs: list[FuncOp],
+    helper_funcs: HelperFuncs,
     ctx: Context,
     timeout: int,
 ) -> int | None:
     cur_helper = [func.func]
     if func.cond is not None:
         cur_helper.append(func.cond)
+
+    helpers = cur_helper + [
+            helper_funcs.get_top_func,
+            helper_funcs.instance_constraint_func,
+            helper_funcs.domain_constraint_func,
+            helper_funcs.op_constraint_func,
+            helper_funcs.meet_func,
+    ]
+    helpers = [x for x in helpers if x is not None]
+
     return verify_transfer_function(
-        func.get_function(), concrete_op, cur_helper + helper_funcs, ctx, 1, 32, timeout
+        func.get_function(), helper_funcs.crt_func, helpers, ctx, bw, bw, timeout
     )
 
 
@@ -44,7 +55,6 @@ class SolutionSet(ABC):
     solutions_size: int
     solutions: list[FunctionWithCondition]
     precise_set: list[FuncOp]
-    lower_to_cpp: Callable[[FuncOp], str]
     eliminate_dead_code: Callable[[FuncOp], FuncOp]
     is_perfect: bool
 
@@ -58,13 +68,11 @@ class SolutionSet(ABC):
         [list[FunctionWithCondition], list[FunctionWithCondition]], list[EvalResult]
     ]
 
-    tests_sampler: Callable[[list[FunctionWithCondition], int, int], None]
     logger: logging.Logger
 
     def __init__(
         self,
         initial_solutions: list[FunctionWithCondition],
-        lower_to_cpp: Callable[[FuncOp], str],
         eliminate_dead_code: Callable[[FuncOp], FuncOp],
         eval_func: Callable[
             [
@@ -73,17 +81,14 @@ class SolutionSet(ABC):
             ],
             list[EvalResult],
         ],
-        tests_sampler: Callable[[list[FunctionWithCondition], int, int], None],
         logger: logging.Logger,
         is_perfect: bool = False,
     ):
         rename_functions(initial_solutions, "partial_solution_")
         self.solutions = initial_solutions
         self.solutions_size = len(initial_solutions)
-        self.lower_to_cpp = lower_to_cpp
         self.eliminate_dead_code = eliminate_dead_code
         self.eval_func = eval_func
-        self.tests_sampler = tests_sampler
         self.logger = logger
         self.precise_set = []
         self.is_perfect = is_perfect
@@ -91,34 +96,18 @@ class SolutionSet(ABC):
     def eval_improve(self, transfers: list[FunctionWithCondition]) -> list[EvalResult]:
         return self.eval_func(transfers, self.solutions)
 
-    def sample_unsolved_tests(self, samples: int, seed: int):
-        self.tests_sampler(self.solutions, samples, seed)
-
-    def sample_unsolved_tests_up_to(self, desired_size: int, seed: int) -> int:
-        res = self.eval_improve([])[0]
-        unsolved_cases = res.get_unsolved_cases()
-        if unsolved_cases == 0:
-            return -1
-        samples = desired_size - unsolved_cases
-        if samples <= 0:
-            return 0
-        else:
-            self.sample_unsolved_tests(samples, seed)
-            return samples
-
     @abstractmethod
     def construct_new_solution_set(
         self,
+        bw: int,
         new_candidates_sp: list[FunctionWithCondition],
         new_candidates_p: list[FuncOp],
         new_candidates_c: list[FunctionWithCondition],
         # Parameters used by SMT verifier
-        concrete_op: FuncOp,
-        helper_funcs: list[FuncOp],
+        helper_funcs: HelperFuncs,
         num_unsound_candidates: int,
         ctx: Context,
-    ) -> SolutionSet:
-        ...
+    ) -> SolutionSet: ...
 
     def has_solution(self) -> bool:
         return self.solutions_size != 0
@@ -158,32 +147,21 @@ class SolutionSet(ABC):
             )
         return result, part_solution_funcs
 
-    def generate_solution_and_cpp(self) -> tuple[ModuleOp, str]:
+    def generate_solution_mlir(self) -> ModuleOp:
         final_solution, part_solutions = self.generate_solution()
         function_lst: list[FuncOp] = []
-        solution_str = ""
         for sol in self.solutions:
             func_body = self.eliminate_dead_code(sol.func)
             function_lst.append(func_body)
-            solution_str += self.lower_to_cpp(func_body)
-            solution_str += "\n"
             if sol.cond is not None:
                 func_cond = self.eliminate_dead_code(sol.cond)
                 function_lst.append(func_cond)
-                solution_str += self.lower_to_cpp(func_cond)
-                solution_str += "\n"
-
-        for sol in part_solutions:
-            solution_str += self.lower_to_cpp(sol)
-            solution_str += "\n"
-        solution_str += self.lower_to_cpp(final_solution)
-        solution_str += "\n"
 
         function_lst += part_solutions
         function_lst.append(final_solution)
         final_module = ModuleOp([])
         final_module.body.block.add_ops(function_lst)
-        return final_module, solution_str
+        return final_module
 
 
 class UnsizedSolutionSet(SolutionSet):
@@ -192,7 +170,6 @@ class UnsizedSolutionSet(SolutionSet):
     def __init__(
         self,
         initial_solutions: list[FunctionWithCondition],
-        lower_to_cpp: Callable[[FuncOp], str],
         eval_func_with_cond: Callable[
             [
                 list[FunctionWithCondition],
@@ -200,43 +177,37 @@ class UnsizedSolutionSet(SolutionSet):
             ],
             list[EvalResult],
         ],
-        tests_sampler: Callable[[list[FunctionWithCondition], int, int], None],
         logger: logging.Logger,
         eliminate_dead_code: Callable[[FuncOp], FuncOp],
         is_perfect: bool = False,
     ):
         super().__init__(
             initial_solutions,
-            lower_to_cpp,
             eliminate_dead_code,
             eval_func_with_cond,
-            tests_sampler,
             logger,
             is_perfect,
         )
 
     def handle_inconsistent_result(self, f: FunctionWithCondition):
-        func_str, helper_str = f.get_function_str(self.lower_to_cpp)
-        func_op = f.get_function()
-        for s in helper_str:
-            self.logger.critical(s + "\n")
-        self.logger.critical(func_str)
         str_output = io.StringIO()
+
         print(self.eliminate_dead_code(f.func), file=str_output)
         if f.cond is not None:
             print(self.eliminate_dead_code(f.cond), file=str_output)
-        print(func_op, file=str_output)
+        print(f.get_function(), file=str_output)
+
         func_op_str = str_output.getvalue()
         self.logger.error(func_op_str)
         raise Exception("Inconsistent between eval engine and verifier")
 
     def construct_new_solution_set(
         self,
+        bw: int,
         new_candidates_sp: list[FunctionWithCondition],
         new_candidates_p: list[FuncOp],
         new_candidates_c: list[FunctionWithCondition],
-        concrete_op: FuncOp,
-        helper_funcs: list[FuncOp],
+        helper_funcs: HelperFuncs,
         num_unsound_candidates: int,
         ctx: Context,
     ) -> SolutionSet:
@@ -251,9 +222,7 @@ class UnsizedSolutionSet(SolutionSet):
 
         while len(candidates) > 0:
             result = self.eval_improve(candidates)
-            if (
-                result[0].get_base_dist() == 0
-            ):  # current solution set is already perfect
+            if result[0].get_base_dist() == 0:  # current solution set is already perfect
                 break
             cand, max_improve_res = max(
                 zip(candidates, result), key=lambda x: x[1].get_potential_improve()
@@ -262,14 +231,10 @@ class UnsizedSolutionSet(SolutionSet):
                 break
 
             body_number = cand.func.attributes["number"]
-            cond_number = (
-                "None" if cand.cond is None else cand.cond.attributes["number"]
-            )
+            cond_number = "None" if cand.cond is None else cand.cond.attributes["number"]
 
             if (cand in new_candidates_sp) or (cand in new_candidates_c):
-                unsound_bit = verify_function(
-                    cand, concrete_op, helper_funcs, ctx, timeout=200
-                )
+                unsound_bit = verify_function(bw, cand, helper_funcs, ctx, timeout=200)
                 if unsound_bit is None:
                     self.logger.info(
                         f"Skip a function of which verification timed out, body: {body_number}, cond: {cond_number}"
@@ -304,9 +269,7 @@ class UnsizedSolutionSet(SolutionSet):
             candidates.remove(cand)
             self.solutions.append(cand)
 
-        self.logger.info(
-            f"The number of solutions after reseting: {len(self.solutions)}"
-        )
+        self.logger.info(f"The number of solutions after reseting: {len(self.solutions)}")
         self.logger.info(f"The number of conditional solutions: {num_cond_solutions}")
         self.solutions_size = len(self.solutions)
 
