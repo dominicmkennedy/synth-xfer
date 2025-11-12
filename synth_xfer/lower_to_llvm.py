@@ -487,7 +487,6 @@ class _LowerFuncToLLVM:
         llvm_op = _llvm_intrinsics[type(op)]
 
         constraints = _OpConstraints(self.bw)
-
         if type(op) in constraints.ops:
             self.ssa_map[op.results[0]] = constraints.safe_lower(
                 self.b, op, self.operands(op)[0], self.operands(op)[1]
@@ -599,6 +598,7 @@ class _LowerFuncToLLVM:
         | Constant
         | ConstantOp,
     ) -> None:
+        ty = ir.IntType(self.bw)
         if isinstance(op, GetSignedMaxValueOp):
             val = (2 ** (self.bw - 1)) - 1
         elif isinstance(op, GetSignedMinValueOp):
@@ -607,10 +607,14 @@ class _LowerFuncToLLVM:
             val = (2**self.bw) - 1
         elif isinstance(op, GetBitWidthOp):
             val = self.bw
-        elif isinstance(op, Constant) or isinstance(op, ConstantOp):
+        elif isinstance(op, Constant):
+            val: int = op.value.value.data  # type: ignore
+        elif isinstance(op, ConstantOp):
+            assert isinstance(op.value.type, IntegerType)
+            ty = ir.IntType(op.value.type.width.data)
             val: int = op.value.value.data  # type: ignore
 
-        self.ssa_map[op.results[0]] = ir.Constant(ir.IntType(self.bw), val)
+        self.ssa_map[op.results[0]] = ir.Constant(ty, val)
 
     @add_op.register
     def _(self, op: UMaxOp | UMinOp | SMaxOp | SMinOp) -> None:
