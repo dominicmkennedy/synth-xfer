@@ -5,6 +5,7 @@
 #include <pybind11/stl.h>
 #include <utility>
 
+#include "const_range.hpp"
 #include "domain.hpp"
 #include "eval.hpp"
 #include "knownbits.hpp"
@@ -142,11 +143,17 @@ void register_domain(py::module_ &m) {
   register_eval_domain<D, BW>(m);
 }
 
+// Register domains and widths here
 PYBIND11_MAKE_OPAQUE(ToEval<KnownBits, 4>);
 PYBIND11_MAKE_OPAQUE(ToEval<KnownBits, 8>);
 PYBIND11_MAKE_OPAQUE(ToEval<KnownBits, 16>);
 PYBIND11_MAKE_OPAQUE(ToEval<KnownBits, 32>);
 PYBIND11_MAKE_OPAQUE(ToEval<KnownBits, 64>);
+PYBIND11_MAKE_OPAQUE(ToEval<ConstRange, 4>);
+PYBIND11_MAKE_OPAQUE(ToEval<ConstRange, 8>);
+PYBIND11_MAKE_OPAQUE(ToEval<ConstRange, 16>);
+PYBIND11_MAKE_OPAQUE(ToEval<ConstRange, 32>);
+PYBIND11_MAKE_OPAQUE(ToEval<ConstRange, 64>);
 
 PYBIND11_MODULE(_eval_engine, m) {
   m.doc() = "Evaluation engine for synth_xfer";
@@ -157,4 +164,9 @@ PYBIND11_MODULE(_eval_engine, m) {
   register_domain<KnownBits, 16>(m);
   register_domain<KnownBits, 32>(m);
   register_domain<KnownBits, 64>(m);
+  register_domain<ConstRange, 4>(m);
+  register_domain<ConstRange, 8>(m);
+  register_domain<ConstRange, 16>(m);
+  register_domain<ConstRange, 32>(m);
+  register_domain<ConstRange, 64>(m);
 }

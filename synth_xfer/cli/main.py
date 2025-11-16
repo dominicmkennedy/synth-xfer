@@ -25,7 +25,7 @@ from synth_xfer.jit import Jit
 from synth_xfer.lower_to_llvm import LowerToLLVM
 
 if TYPE_CHECKING:
-    from synth_xfer._eval_engine import BW, KnownBitsToEval
+    from synth_xfer._eval_engine import BW, ToEval
 
 
 # TODO weird func
@@ -43,7 +43,7 @@ def _construct_top_func(transfer: FuncOp) -> FuncOp:
 
 
 def _eval_helper(
-    to_eval: "KnownBitsToEval",
+    to_eval: "ToEval",
     bw: "BW",
     helper_funcs: HelperFuncs,
     jit: Jit,
@@ -167,7 +167,7 @@ def run(
     helper_funcs = _get_helper_funcs(transformer_file, domain)
 
     start_time = perf_counter()
-    to_eval = setup_eval(bw, samples, random_seed, helper_funcs, jit)
+    to_eval = setup_eval(bw, samples, random_seed, helper_funcs, domain, jit)
     run_time = perf_counter() - start_time
     logger.perf(f"Enum engine took {run_time:.4f}s")
 

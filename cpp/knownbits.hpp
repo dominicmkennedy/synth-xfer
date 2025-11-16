@@ -178,7 +178,7 @@ private:
   [[nodiscard]] constexpr const APInt<BW> zero() const noexcept { return v[0]; }
   [[nodiscard]] constexpr const APInt<BW> one() const noexcept { return v[1]; }
 
-  // Make public/require in the concept
+  // TODO make public/require in the concept
   [[nodiscard]] constexpr bool isConstant() const noexcept {
     return zero().popcount() + one().popcount() == BW;
   }

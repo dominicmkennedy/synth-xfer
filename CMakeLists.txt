@@ -14,6 +14,7 @@ set(SYNTH_XFER_SOURCES
   cpp/eval.hpp
   cpp/domain.hpp
   cpp/knownbits.hpp
+  cpp/const_range.hpp
 )
 
 pybind11_add_module(_eval_engine ${SYNTH_XFER_SOURCES})

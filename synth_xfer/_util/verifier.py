@@ -44,16 +44,16 @@ from xdsl_smt.utils.transfer_function_util import (
 from z3 import Solver, parse_smt2_string, unknown, unsat
 
 # TODO do we still need this
-TMP_MODULE: list[ModuleOp] = []
+_TMP_MODULE: list[ModuleOp] = []
 
 
 def _verify_pattern(ctx: Context, op: ModuleOp, timeout: int) -> bool | None:
     cloned_op = op.clone()
-    stream = StringIO()
     LowerPairs().apply(ctx, cloned_op)
     CanonicalizePass().apply(ctx, cloned_op)
     DeadCodeElimination().apply(ctx, cloned_op)
 
+    stream = StringIO()
     print_to_smtlib(cloned_op, stream)
 
     s = Solver()
@@ -120,10 +120,10 @@ def _create_smt_function(func: FuncOp, width: int, ctx: Context) -> DefineFunOp:
     Class FunctionCollection is the only caller of this function and maintains all generated SMT functions
     """
 
-    global TMP_MODULE
-    TMP_MODULE.append(ModuleOp([func.clone()]))
-    _lower_to_smt_module(TMP_MODULE[-1], width, ctx)
-    resultFunc = TMP_MODULE[-1].ops.first
+    global _TMP_MODULE
+    _TMP_MODULE.append(ModuleOp([func.clone()]))
+    _lower_to_smt_module(_TMP_MODULE[-1], width, ctx)
+    resultFunc = _TMP_MODULE[-1].ops.first
     assert isinstance(resultFunc, DefineFunOp)
     return resultFunc
 
