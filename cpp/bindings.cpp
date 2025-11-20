@@ -6,11 +6,12 @@
 #include <utility>
 
 #include "anti_range.hpp"
-#include "const_range.hpp"
 #include "domain.hpp"
 #include "eval.hpp"
 #include "knownbits.hpp"
 #include "results.hpp"
+#include "sconst_range.hpp"
+#include "uconst_range.hpp"
 
 namespace py = pybind11;
 
@@ -150,11 +151,16 @@ PYBIND11_MAKE_OPAQUE(ToEval<KnownBits, 8>);
 PYBIND11_MAKE_OPAQUE(ToEval<KnownBits, 16>);
 PYBIND11_MAKE_OPAQUE(ToEval<KnownBits, 32>);
 PYBIND11_MAKE_OPAQUE(ToEval<KnownBits, 64>);
-PYBIND11_MAKE_OPAQUE(ToEval<ConstRange, 4>);
-PYBIND11_MAKE_OPAQUE(ToEval<ConstRange, 8>);
-PYBIND11_MAKE_OPAQUE(ToEval<ConstRange, 16>);
-PYBIND11_MAKE_OPAQUE(ToEval<ConstRange, 32>);
-PYBIND11_MAKE_OPAQUE(ToEval<ConstRange, 64>);
+PYBIND11_MAKE_OPAQUE(ToEval<UConstRange, 4>);
+PYBIND11_MAKE_OPAQUE(ToEval<UConstRange, 8>);
+PYBIND11_MAKE_OPAQUE(ToEval<UConstRange, 16>);
+PYBIND11_MAKE_OPAQUE(ToEval<UConstRange, 32>);
+PYBIND11_MAKE_OPAQUE(ToEval<UConstRange, 64>);
+PYBIND11_MAKE_OPAQUE(ToEval<SConstRange, 4>);
+PYBIND11_MAKE_OPAQUE(ToEval<SConstRange, 8>);
+PYBIND11_MAKE_OPAQUE(ToEval<SConstRange, 16>);
+PYBIND11_MAKE_OPAQUE(ToEval<SConstRange, 32>);
+PYBIND11_MAKE_OPAQUE(ToEval<SConstRange, 64>);
 PYBIND11_MAKE_OPAQUE(ToEval<AntiRange, 4>);
 PYBIND11_MAKE_OPAQUE(ToEval<AntiRange, 8>);
 PYBIND11_MAKE_OPAQUE(ToEval<AntiRange, 16>);
@@ -170,11 +176,16 @@ PYBIND11_MODULE(_eval_engine, m) {
   register_domain<KnownBits, 16>(m);
   register_domain<KnownBits, 32>(m);
   register_domain<KnownBits, 64>(m);
-  register_domain<ConstRange, 4>(m);
-  register_domain<ConstRange, 8>(m);
-  register_domain<ConstRange, 16>(m);
-  register_domain<ConstRange, 32>(m);
-  register_domain<ConstRange, 64>(m);
+  register_domain<UConstRange, 4>(m);
+  register_domain<UConstRange, 8>(m);
+  register_domain<UConstRange, 16>(m);
+  register_domain<UConstRange, 32>(m);
+  register_domain<UConstRange, 64>(m);
+  register_domain<SConstRange, 4>(m);
+  register_domain<SConstRange, 8>(m);
+  register_domain<SConstRange, 16>(m);
+  register_domain<SConstRange, 32>(m);
+  register_domain<SConstRange, 64>(m);
   register_domain<AntiRange, 4>(m);
   register_domain<AntiRange, 8>(m);
   register_domain<AntiRange, 16>(m);

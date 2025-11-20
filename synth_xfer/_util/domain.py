@@ -3,7 +3,7 @@ from enum import Enum
 
 class AbstractDomain(Enum):
     KnownBits = "KnownBits", 2
-    ConstRange = "ConstRange", 2
+    UConstRange = "UConstRange", 2
     AntiRange = "AntiRange", 2
     # TODO impl
     # IntegerModulo = "IntegerModulo", 6

@@ -346,14 +346,14 @@ class _LowerFuncToLLVM:
         res_name = self.result_name(op)
         callee = op.callee.string_value()
 
-        if callee in self.fns:
-            fn = self.fns[callee]
-        else:
+        if callee not in self.fns:
             ret_ty = lower_type(op.results[0].type, self.bw)
             in_tys = [lower_type(x.type, self.bw) for x in op.arguments]
             func_ty = ir.FunctionType(ret_ty, in_tys)
-            fn = ir.Function(self.llvm_mod, func_ty, name=callee)
-
+            new_fn = ir.Function(self.llvm_mod, func_ty, name=callee)
+            self.fns[callee] = new_fn
+        
+        fn = self.fns[callee]
         self.ssa_map[op.results[0]] = self.b.call(fn, self.operands(op), name=res_name)
 
     @add_op.register
