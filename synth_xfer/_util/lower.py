@@ -32,21 +32,21 @@ from xdsl_smt.dialects.transfer import (
     MulOp,
     NegOp,
     OrOp,
+    PopCountOp,
     SAddOverflowOp,
     SDivOp,
     SelectOp,
     SetHighBitsOp,
     SetLowBitsOp,
     SetSignBitOp,
-    # USubOverflowOp,
     ShlOp,
     SMaxOp,
     SMinOp,
     SMulOverflowOp,
     SRemOp,
     SShlOverflowOp,
+    SSubOverflowOp,
     SubOp,
-    # SSubOverflowOp,
     TransIntegerType,
     TupleType,
     UAddOverflowOp,
@@ -56,6 +56,7 @@ from xdsl_smt.dialects.transfer import (
     UMulOverflowOp,
     URemOp,
     UShlOverflowOp,
+    USubOverflowOp,
     XorOp,
 )
 
@@ -278,6 +279,7 @@ class _LowerFuncToLLVM:
     _llvm_intrinsics: dict[type[Operation], _IRBuilderOp] = {  # type: ignore
         # unary
         NegOp: ir.IRBuilder.not_,
+        PopCountOp: ir.IRBuilder.ctpop,
         # binary
         AndOp: ir.IRBuilder.and_,
         AndIOp: ir.IRBuilder.and_,
@@ -381,9 +383,12 @@ class _LowerFuncToLLVM:
     @add_op.register
     def _(
         self,
-        op: UAddOverflowOp | SAddOverflowOp | UMulOverflowOp | SMulOverflowOp,
-        # | USubOverflowOp
-        # | SSubOverflowOp,
+        op: UAddOverflowOp
+        | SAddOverflowOp
+        | UMulOverflowOp
+        | SMulOverflowOp
+        | SSubOverflowOp
+        | USubOverflowOp,
     ) -> None:
         res_name = self.result_name(op)
         lhs, rhs = self.operands(op)
@@ -393,8 +398,8 @@ class _LowerFuncToLLVM:
             SAddOverflowOp: self.b.sadd_with_overflow,
             UMulOverflowOp: self.b.umul_with_overflow,
             SMulOverflowOp: self.b.smul_with_overflow,
-            # USubOverflowOp: self.b.usub_with_overflow,
-            # SSubOverflowOp: self.b.ssub_with_overflow,
+            USubOverflowOp: self.b.usub_with_overflow,
+            SSubOverflowOp: self.b.ssub_with_overflow,
         }
 
         ov = d[type(op)](lhs, rhs, name=f"{res_name}_ov")
@@ -558,7 +563,7 @@ class _LowerFuncToLLVM:
         int_ty = ir.IntType(self.bw)
         zero = ir.Constant(int_ty, 0)
         one = ir.Constant(int_ty, 1)
-        int_min = ir.Constant(int_ty, (2 ** (self.bw - 1)))
+        all_ones = ir.Constant(int_ty, (2**self.bw) - 1)
 
         rhs_is_z = self.b.icmp_signed("==", rhs, zero, name=f"{res_name}_rhs_is_zero")
         safe_rhs = self.b.select(rhs_is_z, one, rhs, name=f"{res_name}_safe_rhs")
@@ -570,7 +575,7 @@ class _LowerFuncToLLVM:
             val = lhs
         elif isinstance(op, UDivOp):
             raw_op = self.b.udiv(lhs, safe_rhs, name=f"{res_name}_raw")
-            val = int_min
+            val = all_ones
 
         self.ssa_map[op.results[0]] = self.b.select(rhs_is_z, val, raw_op, name=res_name)
 

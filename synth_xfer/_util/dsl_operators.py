@@ -16,6 +16,7 @@ from xdsl_smt.dialects.transfer import (
     MulOp,
     NegOp,
     OrOp,
+    PopCountOp,
     SDivOp,
     SelectOp,
     SetHighBitsOp,
@@ -49,6 +50,7 @@ full_bint_ops: list[OpWithSignature] = [
     (CountLZeroOp, (INT_T,)),
     (CountROneOp, (INT_T,)),
     (CountRZeroOp, (INT_T,)),
+    (PopCountOp, (INT_T,)),
 ]
 
 
