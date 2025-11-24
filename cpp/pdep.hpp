@@ -30,13 +30,20 @@ template <int BW> inline uint64_t pdep_fallback(uint64_t src, uint64_t mask) {
   pdep_detail::step<0, BW>(src, mask, out);
   return out;
 }
+
+#if defined(__x86_64__)
+__attribute__((target("bmi2"))) inline uint64_t pdep_bmi2_only(uint64_t src,
+                                                               uint64_t mask) {
+  return _pdep_u64(src, mask);
+}
+#endif
 } // namespace pdep_detail
 
 template <int BW> inline uint64_t pdep(uint64_t src, uint64_t mask) {
 #if defined(__x86_64__)
   if (__builtin_cpu_supports("bmi2"))
     return pdep_bmi2_only(src, mask);
-  return pdep_detail::pdep_fallback(src, mask);
+  return pdep_detail::pdep_fallback<BW>(src, mask);
 #elif defined(__aarch64__)
   return pdep_detail::pdep_fallback<BW>(src, mask);
 #endif
