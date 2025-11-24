@@ -33,6 +33,10 @@ build-dir = "build/"
 wheel.expand-macos-universal-tags = true
 wheel.packages = ["synth_xfer"]
 cmake.define = { CMAKE_EXPORT_COMPILE_COMMANDS = true }
+cmake.args = [
+  "-DCMAKE_C_COMPILER=clang",
+  "-DCMAKE_CXX_COMPILER=clang++",
+]
 
 [tool.ruff]
 line-length = 90

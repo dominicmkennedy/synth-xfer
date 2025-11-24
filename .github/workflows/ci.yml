@@ -22,6 +22,7 @@ jobs:
           cache: "pip"
           cache-dependency-path: |
             pyproject.toml
+            CMakeLists.txt
             cpp/**
 
       - name: Upgrade pip
@@ -52,6 +53,7 @@ jobs:
           cache: "pip"
           cache-dependency-path: |
             pyproject.toml
+            CMakeLists.txt
             cpp/**
 
       - name: Upgrade pip
@@ -79,6 +81,7 @@ jobs:
           cache: "pip"
           cache-dependency-path: |
             pyproject.toml
+            CMakeLists.txt
             cpp/**
 
       - name: Upgrade pip
