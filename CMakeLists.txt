@@ -52,6 +52,15 @@ target_compile_options(_eval_engine PRIVATE
   -fstrict-enums
 )
 
+# Add BMI2 when available on x86_64
+include(CheckCXXCompilerFlag)
+if(CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+  check_cxx_compiler_flag(-mbmi2 HAS_MBMI2)
+  if(HAS_MBMI2)
+    target_compile_options(_eval_engine PRIVATE -mbmi2)
+  endif()
+endif()
+
 if(APPLE AND CMAKE_OSX_ARCHITECTURES MATCHES ".+;.+")
   message(STATUS "Skipping -march=native for universal (multi-arch) build.")
 else()
