@@ -3,9 +3,9 @@ import llvmlite.binding as llvm
 
 class Jit:
     @staticmethod
-    def _create_exec_engine() -> (
-        tuple[llvm.ExecutionEngine, llvm.TargetMachine, llvm.Target]
-    ):
+    def _create_exec_engine() -> tuple[
+        llvm.ExecutionEngine, llvm.TargetMachine, llvm.Target
+    ]:
         "This engine is reusable for an arbitrary number of modules."
 
         llvm.initialize_native_target()
