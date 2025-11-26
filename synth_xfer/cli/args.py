@@ -133,6 +133,15 @@ ALL_OPS = [
 def build_parser(prog: str) -> Namespace:
     p = ArgumentParser(prog=prog, formatter_class=ArgumentDefaultsHelpFormatter)
 
+    if prog == "egraph_rewriter":
+        p.add_argument("transfer_functions", type=Path, help="path to transfer function")
+        p.add_argument(
+            "-rewrite_meet",
+            action="store_true",
+            help="rewrite the entire meet instead of individual functions",
+        )
+        return p.parse_args()
+
     if prog == "synth_xfer":
         p.add_argument("transfer_functions", type=Path, help="path to transfer function")
         p.add_argument("-random_file", type=FileType("r"), help="file for preset rng")
