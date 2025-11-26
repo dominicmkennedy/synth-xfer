@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Callable
 
 from xdsl.dialects.builtin import StringAttr, i1
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
@@ -105,7 +105,8 @@ class FunctionWithCondition:
         )
         return whole_function
 
-    def lower(self, lowerer: Callable[[FuncOp], Any]) -> str:
+    def lower(self, lowerer: Callable[[FuncOp], dict]) -> dict[int, str]:
         lowerer(self.func)
         lowerer(self.cond) if self.cond else None
-        return lowerer(self.get_function(), shim=True).name  # type: ignore
+        lowered_fns = lowerer(self.get_function(), shim=True)  # type: ignore
+        return {bw: x.name for bw, x in lowered_fns.items()}

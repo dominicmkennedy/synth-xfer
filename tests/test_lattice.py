@@ -11,7 +11,7 @@ from synth_xfer._eval_engine import (
     eval_uconstrange_4_4,
 )
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval_result import get_per_bit
+from synth_xfer._util.eval import get_per_bit
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import get_helper_funcs, parse_mlir_func
@@ -23,16 +23,16 @@ DATA_DIR = PROJ_DIR / "tests" / "data"
 def test_kb_lattice():
     conc_nop_f = PROJ_DIR / "mlir" / "Operations" / "Nop.mlir"
 
-    lowerer_4 = LowerToLLVM(4)
+    lowerer = LowerToLLVM([4])
     helpers = get_helper_funcs(conc_nop_f, AbstractDomain.KnownBits)
     xfer_mlir = parse_mlir_func(DATA_DIR / "xfer_nop.mlir")
-    lowerer_4.add_fn(xfer_mlir, shim=True)
-    lowerer_4.add_fn(helpers.crt_func, shim=True)
+    lowerer.add_fn(xfer_mlir, shim=True)
+    lowerer.add_fn(helpers.crt_func, shim=True)
 
     jit = Jit()
-    jit.add_mod(str(lowerer_4))
-    conc_op_addr = jit.get_fn_ptr("concrete_op")
-    xfer_fn_addr = jit.get_fn_ptr("xfer_nop")
+    jit.add_mod(str(lowerer))
+    conc_op_addr = jit.get_fn_ptr("concrete_op_4_shim")
+    xfer_fn_addr = jit.get_fn_ptr("xfer_nop_4_shim")
 
     to_eval = enum_low_knownbits_4_4(conc_op_addr, None)
     lattice_str = "\n".join(str(x[0]) for x in to_eval).strip()
@@ -41,7 +41,7 @@ def test_kb_lattice():
     raw_res = eval_knownbits_4_4(to_eval, [xfer_fn_addr], [])
     for x in to_eval:
         assert str(x[0]) == str(x[1])
-    res = get_per_bit(str(raw_res))[0]
+    res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
         == "bw: 4  all: 81    s: 81    e: 81    uall: 80    ue: 80    dis: 0       bdis: 54.0    sdis: 0"
@@ -51,16 +51,16 @@ def test_kb_lattice():
 def test_ucr_lattice():
     conc_nop_f = PROJ_DIR / "mlir" / "Operations" / "Nop.mlir"
 
-    lowerer_4 = LowerToLLVM(4)
+    lowerer = LowerToLLVM([4])
     helpers = get_helper_funcs(conc_nop_f, AbstractDomain.UConstRange)
     xfer_mlir = parse_mlir_func(DATA_DIR / "xfer_nop.mlir")
-    lowerer_4.add_fn(xfer_mlir, shim=True)
-    lowerer_4.add_fn(helpers.crt_func, shim=True)
+    lowerer.add_fn(xfer_mlir, shim=True)
+    lowerer.add_fn(helpers.crt_func, shim=True)
 
     jit = Jit()
-    jit.add_mod(str(lowerer_4))
-    conc_op_addr = jit.get_fn_ptr("concrete_op")
-    xfer_fn_addr = jit.get_fn_ptr("xfer_nop")
+    jit.add_mod(str(lowerer))
+    conc_op_addr = jit.get_fn_ptr("concrete_op_4_shim")
+    xfer_fn_addr = jit.get_fn_ptr("xfer_nop_4_shim")
 
     to_eval = enum_low_uconstrange_4_4(conc_op_addr, None)
     lattice_str = "\n".join(str(x[0]) for x in to_eval).strip()
@@ -69,7 +69,7 @@ def test_ucr_lattice():
     raw_res = eval_uconstrange_4_4(to_eval, [xfer_fn_addr], [])
     for x in to_eval:
         assert str(x[0]) == str(x[1])
-    res = get_per_bit(str(raw_res))[0]
+    res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
         == "bw: 4  all: 136   s: 136   e: 136   uall: 135   ue: 135   dis: 0       bdis: 123.5   sdis: 0"
@@ -79,16 +79,16 @@ def test_ucr_lattice():
 def test_scr_lattice():
     conc_nop_f = PROJ_DIR / "mlir" / "Operations" / "Nop.mlir"
 
-    lowerer_4 = LowerToLLVM(4)
+    lowerer = LowerToLLVM([4])
     helpers = get_helper_funcs(conc_nop_f, AbstractDomain.UConstRange)
     xfer_mlir = parse_mlir_func(DATA_DIR / "xfer_nop.mlir")
-    lowerer_4.add_fn(xfer_mlir, shim=True)
-    lowerer_4.add_fn(helpers.crt_func, shim=True)
+    lowerer.add_fn(xfer_mlir, shim=True)
+    lowerer.add_fn(helpers.crt_func, shim=True)
 
     jit = Jit()
-    jit.add_mod(str(lowerer_4))
-    conc_op_addr = jit.get_fn_ptr("concrete_op")
-    xfer_fn_addr = jit.get_fn_ptr("xfer_nop")
+    jit.add_mod(str(lowerer))
+    conc_op_addr = jit.get_fn_ptr("concrete_op_4_shim")
+    xfer_fn_addr = jit.get_fn_ptr("xfer_nop_4_shim")
 
     to_eval = enum_low_sconstrange_4_4(conc_op_addr, None)
     lattice_str = "\n".join(str(x[0]) for x in to_eval).strip()
@@ -97,7 +97,7 @@ def test_scr_lattice():
     raw_res = eval_sconstrange_4_4(to_eval, [xfer_fn_addr], [])
     for x in to_eval:
         assert str(x[0]) == str(x[1])
-    res = get_per_bit(str(raw_res))[0]
+    res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
         == "bw: 4  all: 136   s: 136   e: 136   uall: 135   ue: 135   dis: 0       bdis: 123.5   sdis: 0"
@@ -108,20 +108,14 @@ def test_kb_n_ary_kb_lattice():
     conc_nop_f = PROJ_DIR / "mlir" / "Operations" / "Nop.mlir"
     helpers = get_helper_funcs(conc_nop_f, AbstractDomain.KnownBits)
 
-    lowerer_4 = LowerToLLVM(4)
-    lowerer_4.add_fn(helpers.crt_func, shim=True)
+    lowerer = LowerToLLVM([4, 8])
+    lowerer.add_fn(helpers.crt_func, shim=True)
 
-    jit_4 = Jit()
-    jit_4.add_mod(str(lowerer_4))
-    conc_op_addr = jit_4.get_fn_ptr("concrete_op")
+    jit = Jit()
+    jit.add_mod(str(lowerer))
+    conc_op_4_addr = jit.get_fn_ptr("concrete_op_4_shim")
+    conc_op_8_addr = jit.get_fn_ptr("concrete_op_8_shim")
 
-    lowerer_8 = LowerToLLVM(8)
-    lowerer_8.add_fn(helpers.crt_func, shim=True)
-
-    jit_8 = Jit()
-    jit_8.add_mod(str(lowerer_8))
-    conc_op_addr = jit_8.get_fn_ptr("concrete_op")
-
-    to_eval_4 = enum_low_knownbits_4_4_4(conc_op_addr, None)
-    to_eval_8 = enum_low_knownbits_8_8(conc_op_addr, None)
+    to_eval_4 = enum_low_knownbits_4_4_4(conc_op_4_addr, None)
+    to_eval_8 = enum_low_knownbits_8_8(conc_op_8_addr, None)
     assert len(to_eval_4) == len(to_eval_8)

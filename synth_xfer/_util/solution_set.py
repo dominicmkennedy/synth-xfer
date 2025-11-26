@@ -63,7 +63,8 @@ class SolutionSet(ABC):
     @abstractmethod
     def construct_new_solution_set(
         self,
-        bw: int,
+        lbw: list[int],
+        vbw: list[int],
         new_candidates_sp: list[FunctionWithCondition],
         new_candidates_p: list[FuncOp],
         new_candidates_c: list[FunctionWithCondition],
@@ -160,7 +161,8 @@ class UnsizedSolutionSet(SolutionSet):
 
     def construct_new_solution_set(
         self,
-        bw: int,
+        lbw: list[int],
+        vbw: list[int],
         new_candidates_sp: list[FunctionWithCondition],
         new_candidates_p: list[FuncOp],
         new_candidates_c: list[FunctionWithCondition],
@@ -193,24 +195,24 @@ class UnsizedSolutionSet(SolutionSet):
             cond_number = "None" if cand.cond is None else cand.cond.attributes["number"]
 
             if (cand in new_candidates_sp) or (cand in new_candidates_c):
-                is_sound, _ = verify_function(
-                    bw, cand.get_function(), [cand.func, cand.cond], helper_funcs, 200
-                )
-                if is_sound is None:
-                    logger.info(
-                        f"Skip a function of which verification timed out, body: {body_number}, cond: {cond_number}"
+                for bw in vbw:
+                    is_sound, _ = verify_function(
+                        bw, cand.get_function(), [cand.func, cand.cond], helper_funcs, 200
                     )
-                    candidates.remove(cand)
-                    continue
-                elif not is_sound:
-                    logger.info(
-                        f"Skip a unsound function at bit width {is_sound}, body: {body_number}, cond: {cond_number}"
-                    )
-                    # Todo: Remove hard encoded bitwidth
-                    if bw == 4:
-                        self.handle_inconsistent_result(cand)
-                    candidates.remove(cand)
-                    continue
+                    if is_sound is None:
+                        logger.info(
+                            f"Skip a function of which verification timed out at bw {bw}, body: {body_number}, cond: {cond_number}"
+                        )
+                        candidates.remove(cand)
+                        continue
+                    elif not is_sound:
+                        logger.info(
+                            f"Skip a unsound function at bw {bw}, body: {body_number}, cond: {cond_number}"
+                        )
+                        if bw in lbw:
+                            self.handle_inconsistent_result(cand)
+                        candidates.remove(cand)
+                        continue
 
             if cand in new_candidates_sp:
                 log_str = "Add a new transformer"

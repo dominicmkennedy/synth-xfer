@@ -11,7 +11,7 @@ from synth_xfer._eval_engine import (
     eval_uconstrange_8_8_8,
 )
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval_result import get_per_bit
+from synth_xfer._util.eval import get_per_bit
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import get_helper_funcs, parse_mlir_func
@@ -23,37 +23,32 @@ DATA_DIR = PROJ_DIR / "tests" / "data"
 def test_jit_with_kb_and():
     conc_and_f = PROJ_DIR / "mlir" / "Operations" / "And.mlir"
 
-    lowerer_4 = LowerToLLVM(4)
-    lowerer_8 = LowerToLLVM(8)
+    lowerer = LowerToLLVM([4, 8])
     helpers = get_helper_funcs(conc_and_f, AbstractDomain.KnownBits)
     xfer_mlir = parse_mlir_func(DATA_DIR / "kb_and.mlir")
-    lowerer_4.add_fn(xfer_mlir, shim=True)
-    lowerer_4.add_fn(helpers.crt_func, shim=True)
-    lowerer_8.add_fn(xfer_mlir, shim=True)
-    lowerer_8.add_fn(helpers.crt_func, shim=True)
+    lowerer.add_fn(xfer_mlir, shim=True)
+    lowerer.add_fn(helpers.crt_func, shim=True)
 
     jit = Jit()
-    jit.add_mod(str(lowerer_4))
-    conc_op_addr = jit.get_fn_ptr("concrete_op")
-    xfer_fn_addr = jit.get_fn_ptr("kb_and")
+    jit.add_mod(str(lowerer))
+    conc_op_addr = jit.get_fn_ptr("concrete_op_4_shim")
+    xfer_fn_addr = jit.get_fn_ptr("kb_and_4_shim")
 
     to_eval_low = enum_low_knownbits_4_4_4(conc_op_addr, None)
     raw_res = eval_knownbits_4_4_4(to_eval_low, [xfer_fn_addr], [])
-    res = get_per_bit(str(raw_res))[0]
+    res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
         == "bw: 4  all: 6561  s: 6561  e: 6561  uall: 6480  ue: 6480  dis: 0       bdis: 4374.0  sdis: 0"
     )
 
-    jit = Jit()
-    jit.add_mod(str(lowerer_8))
-    conc_op_addr = jit.get_fn_ptr("concrete_op")
-    xfer_fn_addr = jit.get_fn_ptr("kb_and")
+    conc_op_addr = jit.get_fn_ptr("concrete_op_8_shim")
+    xfer_fn_addr = jit.get_fn_ptr("kb_and_8_shim")
 
     NUM_CASES = 5000
     to_eval_mid = enum_mid_knownbits_8_8_8(conc_op_addr, None, NUM_CASES, 100)
     raw_res = eval_knownbits_8_8_8(to_eval_mid, [xfer_fn_addr], [])
-    res = get_per_bit(str(raw_res))[0]
+    res = get_per_bit(raw_res)[0]
     assert res.get_exact_prop() == 1.0
     assert res.all_cases == NUM_CASES
     assert res.bitwidth == 8
@@ -62,37 +57,32 @@ def test_jit_with_kb_and():
 def test_jit_with_ucr_add():
     conc_add_f = PROJ_DIR / "mlir" / "Operations" / "Add.mlir"
 
-    lowerer_4 = LowerToLLVM(4)
-    lowerer_8 = LowerToLLVM(8)
+    lowerer = LowerToLLVM([4, 8])
     helpers = get_helper_funcs(conc_add_f, AbstractDomain.UConstRange)
     xfer_mlir = parse_mlir_func(DATA_DIR / "cr_add.mlir")
-    lowerer_4.add_fn(xfer_mlir, shim=True)
-    lowerer_4.add_fn(helpers.crt_func, shim=True)
-    lowerer_8.add_fn(xfer_mlir, shim=True)
-    lowerer_8.add_fn(helpers.crt_func, shim=True)
+    lowerer.add_fn(xfer_mlir, shim=True)
+    lowerer.add_fn(helpers.crt_func, shim=True)
 
     jit = Jit()
-    jit.add_mod(str(lowerer_4))
-    conc_op_addr = jit.get_fn_ptr("concrete_op")
-    xfer_fn_addr = jit.get_fn_ptr("cr_add")
+    jit.add_mod(str(lowerer))
+    conc_op_addr = jit.get_fn_ptr("concrete_op_4_shim")
+    xfer_fn_addr = jit.get_fn_ptr("cr_add_4_shim")
 
     to_eval_low = enum_low_uconstrange_4_4_4(conc_op_addr, None)
     raw_res = eval_uconstrange_4_4_4(to_eval_low, [xfer_fn_addr], [])
-    res = get_per_bit(str(raw_res))[0]
+    res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
         == "bw: 4  all: 18496 s: 18496 e: 18496 uall: 6920  ue: 6920  dis: 0       bdis: 6267.5  sdis: 0"
     )
 
-    jit = Jit()
-    jit.add_mod(str(lowerer_8))
-    conc_op_addr = jit.get_fn_ptr("concrete_op")
-    xfer_fn_addr = jit.get_fn_ptr("cr_add")
+    conc_op_addr = jit.get_fn_ptr("concrete_op_8_shim")
+    xfer_fn_addr = jit.get_fn_ptr("cr_add_8_shim")
 
     NUM_CASES = 5000
     to_eval_mid = enum_mid_uconstrange_8_8_8(conc_op_addr, None, NUM_CASES, 100)
     raw_res = eval_uconstrange_8_8_8(to_eval_mid, [xfer_fn_addr], [])
-    res = get_per_bit(str(raw_res))[0]
+    res = get_per_bit(raw_res)[0]
     assert res.get_exact_prop() == 1.0
     assert res.all_cases == NUM_CASES
     assert res.bitwidth == 8

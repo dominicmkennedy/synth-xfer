@@ -1,119 +1,79 @@
-from typing import TYPE_CHECKING, Callable, cast
+from typing import TYPE_CHECKING, Callable
 
-from synth_xfer._eval_engine import (
-    ToEvalAntiRange4_4_4,
-    ToEvalAntiRange8_8_8,
-    ToEvalAntiRange16_16_16,
-    ToEvalAntiRange32_32_32,
-    ToEvalAntiRange64_64_64,
-    ToEvalKnownBits4_4_4,
-    ToEvalKnownBits8_8_8,
-    ToEvalKnownBits16_16_16,
-    ToEvalKnownBits32_32_32,
-    ToEvalKnownBits64_64_64,
-    ToEvalSConstRange4_4_4,
-    ToEvalSConstRange8_8_8,
-    ToEvalSConstRange16_16_16,
-    ToEvalSConstRange32_32_32,
-    ToEvalSConstRange64_64_64,
-    ToEvalUConstRange4_4_4,
-    ToEvalUConstRange8_8_8,
-    ToEvalUConstRange16_16_16,
-    ToEvalUConstRange32_32_32,
-    ToEvalUConstRange64_64_64,
-    enum_low_antirange_4_4_4,
-    enum_low_antirange_8_8_8,
-    enum_low_antirange_16_16_16,
-    enum_low_antirange_32_32_32,
-    enum_low_antirange_64_64_64,
-    enum_low_knownbits_4_4_4,
-    enum_low_knownbits_8_8_8,
-    enum_low_knownbits_16_16_16,
-    enum_low_knownbits_32_32_32,
-    enum_low_knownbits_64_64_64,
-    enum_low_sconstrange_4_4_4,
-    enum_low_sconstrange_8_8_8,
-    enum_low_sconstrange_16_16_16,
-    enum_low_sconstrange_32_32_32,
-    enum_low_sconstrange_64_64_64,
-    enum_low_uconstrange_4_4_4,
-    enum_low_uconstrange_8_8_8,
-    enum_low_uconstrange_16_16_16,
-    enum_low_uconstrange_32_32_32,
-    enum_low_uconstrange_64_64_64,
-    enum_mid_antirange_4_4_4,
-    enum_mid_antirange_8_8_8,
-    enum_mid_antirange_16_16_16,
-    enum_mid_antirange_32_32_32,
-    enum_mid_antirange_64_64_64,
-    enum_mid_knownbits_4_4_4,
-    enum_mid_knownbits_8_8_8,
-    enum_mid_knownbits_16_16_16,
-    enum_mid_knownbits_32_32_32,
-    enum_mid_knownbits_64_64_64,
-    enum_mid_sconstrange_4_4_4,
-    enum_mid_sconstrange_8_8_8,
-    enum_mid_sconstrange_16_16_16,
-    enum_mid_sconstrange_32_32_32,
-    enum_mid_sconstrange_64_64_64,
-    enum_mid_uconstrange_4_4_4,
-    enum_mid_uconstrange_8_8_8,
-    enum_mid_uconstrange_16_16_16,
-    enum_mid_uconstrange_32_32_32,
-    enum_mid_uconstrange_64_64_64,
-    eval_antirange_4_4_4,
-    eval_antirange_8_8_8,
-    eval_antirange_16_16_16,
-    eval_antirange_32_32_32,
-    eval_antirange_64_64_64,
-    eval_knownbits_4_4_4,
-    eval_knownbits_8_8_8,
-    eval_knownbits_16_16_16,
-    eval_knownbits_32_32_32,
-    eval_knownbits_64_64_64,
-    eval_sconstrange_4_4_4,
-    eval_sconstrange_8_8_8,
-    eval_sconstrange_16_16_16,
-    eval_sconstrange_32_32_32,
-    eval_sconstrange_64_64_64,
-    eval_uconstrange_4_4_4,
-    eval_uconstrange_8_8_8,
-    eval_uconstrange_16_16_16,
-    eval_uconstrange_32_32_32,
-    eval_uconstrange_64_64_64,
-)
-from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval_result import EvalResult, PerBitRes, get_per_bit
+from xdsl.parser import IntegerType
+from xdsl_smt.dialects.transfer import TransIntegerType
+
+from synth_xfer import _eval_engine
+from synth_xfer._util.eval_result import EvalResult, PerBitRes
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import HelperFuncs
 
 if TYPE_CHECKING:
-    from synth_xfer._eval_engine import BW, Results, ToEval
+    from synth_xfer._eval_engine import Results, ToEval
 
 
-def parse_engine_output(output: str) -> list[EvalResult]:
-    bw_evals = output.split("---\n")
-    bw_evals.reverse()
-    per_bits = [get_per_bit(x) for x in bw_evals if x != ""]
+def get_per_bit(a: "Results") -> list[PerBitRes]:
+    x = str(a).split("\n")
 
-    ds: list[list[PerBitRes]] = [[] for _ in range(len(per_bits[0]))]
-    for es in per_bits:
-        for i, e in enumerate(es):
-            ds[i].append(e)
+    def get[T](in_str: str, to_match: str, parser: Callable[[str], T]) -> T:
+        og_str, to_parse = in_str.split(":")
 
-    return [EvalResult(x) for x in ds]
+        assert og_str.strip() == to_match
+
+        return parser(to_parse)
+
+    def get_ints(s: str) -> list[int]:
+        return eval(s)
+
+    def get_floats(s: str) -> list[float]:
+        return eval(s)
+
+    bw = get(x[0], "bw", int)
+    num_cases = get(x[1], "num cases", int)
+    num_unsolved_cases = get(x[2], "num unsolved", int)
+    base_distance = get(x[3], "base distance", float)
+    sound = get(x[4], "num sound", get_ints)
+    distance = get(x[5], "distance", get_floats)
+    exact = get(x[6], "num exact", get_ints)
+    num_unsolved_exact_cases = get(x[7], "num unsolved exact", get_ints)
+    sound_distance = get(x[8], "sound distance", get_floats)
+
+    assert len(sound) > 0, "No output from EvalEngine"
+    assert (
+        len(sound)
+        == len(distance)
+        == len(exact)
+        == len(num_unsolved_exact_cases)
+        == len(sound_distance)
+    ), "EvalEngine output mismatch"
+
+    return [
+        PerBitRes(
+            all_cases=num_cases,
+            sounds=sound[i],
+            exacts=exact[i],
+            dist=distance[i],
+            unsolved_cases=num_unsolved_cases,
+            unsolved_exacts=num_unsolved_exact_cases[i],
+            base_dist=base_distance,
+            sound_dist=sound_distance[i],
+            bitwidth=bw,
+        )
+        for i in range(len(sound))
+    ]
 
 
 def setup_eval(
-    bw: "BW",
-    samples: int | None,
+    lbw: list[int],
+    mbw: list[tuple[int, int]],
+    hbw: list[tuple[int, int, int]],
     seed: int,
     helper_funcs: HelperFuncs,
-    domain: AbstractDomain,
     jit: Jit,
-) -> "ToEval":
-    lowerer = LowerToLLVM(bw)
+) -> dict[int, "ToEval"]:
+    all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
+    lowerer = LowerToLLVM(all_bws)
     crt = lowerer.add_fn(helper_funcs.crt_func, shim=True)
     op_constraint = (
         lowerer.add_fn(helper_funcs.op_constraint_func, shim=True)
@@ -122,95 +82,91 @@ def setup_eval(
     )
 
     jit.add_mod(str(lowerer))
-    concrete_fn_ptr = jit.get_fn_ptr(crt.name)
-    constraint_fn_ptr = jit.get_fn_ptr(op_constraint.name) if op_constraint else None
 
-    # TODO need to fix unary enum and eval
-    low_fns: dict[tuple[AbstractDomain, "BW"], Callable[[int, int | None], "ToEval"]] = {
-        (AbstractDomain.AntiRange, 4): enum_low_antirange_4_4_4,
-        (AbstractDomain.AntiRange, 8): enum_low_antirange_8_8_8,
-        (AbstractDomain.AntiRange, 16): enum_low_antirange_16_16_16,
-        (AbstractDomain.AntiRange, 32): enum_low_antirange_32_32_32,
-        (AbstractDomain.AntiRange, 64): enum_low_antirange_64_64_64,
-        (AbstractDomain.UConstRange, 4): enum_low_uconstrange_4_4_4,
-        (AbstractDomain.UConstRange, 8): enum_low_uconstrange_8_8_8,
-        (AbstractDomain.UConstRange, 16): enum_low_uconstrange_16_16_16,
-        (AbstractDomain.UConstRange, 32): enum_low_uconstrange_32_32_32,
-        (AbstractDomain.UConstRange, 64): enum_low_uconstrange_64_64_64,
-        (AbstractDomain.KnownBits, 4): enum_low_knownbits_4_4_4,
-        (AbstractDomain.KnownBits, 8): enum_low_knownbits_8_8_8,
-        (AbstractDomain.KnownBits, 16): enum_low_knownbits_16_16_16,
-        (AbstractDomain.KnownBits, 32): enum_low_knownbits_32_32_32,
-        (AbstractDomain.KnownBits, 64): enum_low_knownbits_64_64_64,
-        (AbstractDomain.SConstRange, 4): enum_low_sconstrange_4_4_4,
-        (AbstractDomain.SConstRange, 8): enum_low_sconstrange_8_8_8,
-        (AbstractDomain.SConstRange, 16): enum_low_sconstrange_16_16_16,
-        (AbstractDomain.SConstRange, 32): enum_low_sconstrange_32_32_32,
-        (AbstractDomain.SConstRange, 64): enum_low_sconstrange_64_64_64,
+    def get_bw(x: TransIntegerType | IntegerType, bw: int):
+        return bw if isinstance(x, TransIntegerType) else x.width.data
+
+    def get_enum_f(level: str, bw: int) -> Callable:
+        domain_str = str(helper_funcs.domain).lower()
+        ret_bw = get_bw(helper_funcs.conc_ret_ty, bw)
+        arg_bws = [str(get_bw(x, bw)) for x in helper_funcs.conc_arg_ty]
+        arg_str = "_".join(arg_bws)
+        func_name = f"enum_{level}_{domain_str}_{ret_bw}_{arg_str}"
+
+        try:
+            enum_fn = getattr(_eval_engine, func_name)
+        except AttributeError as e:
+            raise ImportError(f"Function {func_name!r} not found in enum engine") from e
+        if not callable(enum_fn):
+            raise TypeError(
+                f"{func_name} exists but is not callable (got {type(enum_fn).__name__})"
+            )
+
+        return enum_fn
+
+    low_to_evals: dict[int, "ToEval"] = {
+        bw: get_enum_f("low", bw)(
+            jit.get_fn_ptr(crt[bw].name),
+            jit.get_fn_ptr(op_constraint[bw].name) if op_constraint else None,
+        )
+        for bw in lbw
     }
 
-    mid_fns: dict[
-        tuple[AbstractDomain, "BW"], Callable[[int, int | None, int, int], "ToEval"]
-    ] = {
-        (AbstractDomain.AntiRange, 4): enum_mid_antirange_4_4_4,
-        (AbstractDomain.AntiRange, 8): enum_mid_antirange_8_8_8,
-        (AbstractDomain.AntiRange, 16): enum_mid_antirange_16_16_16,
-        (AbstractDomain.AntiRange, 32): enum_mid_antirange_32_32_32,
-        (AbstractDomain.AntiRange, 64): enum_mid_antirange_64_64_64,
-        (AbstractDomain.UConstRange, 4): enum_mid_uconstrange_4_4_4,
-        (AbstractDomain.UConstRange, 8): enum_mid_uconstrange_8_8_8,
-        (AbstractDomain.UConstRange, 16): enum_mid_uconstrange_16_16_16,
-        (AbstractDomain.UConstRange, 32): enum_mid_uconstrange_32_32_32,
-        (AbstractDomain.UConstRange, 64): enum_mid_uconstrange_64_64_64,
-        (AbstractDomain.KnownBits, 4): enum_mid_knownbits_4_4_4,
-        (AbstractDomain.KnownBits, 8): enum_mid_knownbits_8_8_8,
-        (AbstractDomain.KnownBits, 16): enum_mid_knownbits_16_16_16,
-        (AbstractDomain.KnownBits, 32): enum_mid_knownbits_32_32_32,
-        (AbstractDomain.KnownBits, 64): enum_mid_knownbits_64_64_64,
-        (AbstractDomain.SConstRange, 4): enum_mid_sconstrange_4_4_4,
-        (AbstractDomain.SConstRange, 8): enum_mid_sconstrange_8_8_8,
-        (AbstractDomain.SConstRange, 16): enum_mid_sconstrange_16_16_16,
-        (AbstractDomain.SConstRange, 32): enum_mid_sconstrange_32_32_32,
-        (AbstractDomain.SConstRange, 64): enum_mid_sconstrange_64_64_64,
+    mid_to_evals: dict[int, "ToEval"] = {
+        bw: get_enum_f("mid", bw)(
+            jit.get_fn_ptr(crt[bw].name),
+            jit.get_fn_ptr(op_constraint[bw].name) if op_constraint else None,
+            samples,
+            seed,
+        )
+        for bw, samples in mbw
     }
 
-    if samples:
-        return mid_fns[domain, bw](concrete_fn_ptr, constraint_fn_ptr, samples, seed)
-    else:
-        return low_fns[domain, bw](concrete_fn_ptr, constraint_fn_ptr)
+    high_to_evals: dict[int, "ToEval"] = {
+        bw: get_enum_f("high", bw)(
+            jit.get_fn_ptr(crt[bw].name),
+            jit.get_fn_ptr(op_constraint[bw].name) if op_constraint else None,
+            lat_samples,
+            crt_samples,
+            seed,
+        )
+        for bw, lat_samples, crt_samples in hbw
+    }
+
+    return low_to_evals | mid_to_evals | high_to_evals
 
 
-EvalFn = Callable[["ToEval", list[int], list[int]], "Results"]
+def get_eval_res(per_bits: list[list[PerBitRes]]) -> list[EvalResult]:
+    ds: list[list[PerBitRes]] = [[] for _ in range(len(per_bits[0]))]
+    for es in per_bits:
+        for i, e in enumerate(es):
+            ds[i].append(e)
+
+    return [EvalResult(x) for x in ds]
 
 
-# TODO may want to just pass whole jit in here
 def eval_transfer_func(
-    to_eval: "ToEval",
-    xfers: list[int],
-    bases: list[int],
+    x: dict[int, tuple["ToEval", list[int], list[int]]],
 ) -> list[EvalResult]:
-    d: dict[type["ToEval"], EvalFn] = {
-        ToEvalKnownBits4_4_4: cast(EvalFn, eval_knownbits_4_4_4),
-        ToEvalKnownBits8_8_8: cast(EvalFn, eval_knownbits_8_8_8),
-        ToEvalKnownBits16_16_16: cast(EvalFn, eval_knownbits_16_16_16),
-        ToEvalKnownBits32_32_32: cast(EvalFn, eval_knownbits_32_32_32),
-        ToEvalKnownBits64_64_64: cast(EvalFn, eval_knownbits_64_64_64),
-        ToEvalAntiRange4_4_4: cast(EvalFn, eval_antirange_4_4_4),
-        ToEvalAntiRange8_8_8: cast(EvalFn, eval_antirange_8_8_8),
-        ToEvalAntiRange16_16_16: cast(EvalFn, eval_antirange_16_16_16),
-        ToEvalAntiRange32_32_32: cast(EvalFn, eval_antirange_32_32_32),
-        ToEvalAntiRange64_64_64: cast(EvalFn, eval_antirange_64_64_64),
-        ToEvalUConstRange4_4_4: cast(EvalFn, eval_uconstrange_4_4_4),
-        ToEvalUConstRange8_8_8: cast(EvalFn, eval_uconstrange_8_8_8),
-        ToEvalUConstRange16_16_16: cast(EvalFn, eval_uconstrange_16_16_16),
-        ToEvalUConstRange32_32_32: cast(EvalFn, eval_uconstrange_32_32_32),
-        ToEvalUConstRange64_64_64: cast(EvalFn, eval_uconstrange_64_64_64),
-        ToEvalSConstRange4_4_4: cast(EvalFn, eval_sconstrange_4_4_4),
-        ToEvalSConstRange8_8_8: cast(EvalFn, eval_sconstrange_8_8_8),
-        ToEvalSConstRange16_16_16: cast(EvalFn, eval_sconstrange_16_16_16),
-        ToEvalSConstRange32_32_32: cast(EvalFn, eval_sconstrange_32_32_32),
-        ToEvalSConstRange64_64_64: cast(EvalFn, eval_sconstrange_64_64_64),
-    }
-    res = d[type(to_eval)](to_eval, xfers, bases)
+    def get_eval_f(x: "ToEval") -> Callable[["ToEval", list[int], list[int]], "Results"]:
+        suffix = x.__class__.__name__.lower()[6:]
+        i = next(k for k, c in enumerate(suffix) if c.isdigit())
+        suffix = suffix[:i] + "_" + suffix[i:]
+        func_name = f"eval_{suffix}"
 
-    return parse_engine_output(str(res))
+        try:
+            eval_fn = getattr(_eval_engine, func_name)
+        except AttributeError as e:
+            raise ImportError(f"Function {func_name!r} not found in eval engine") from e
+        if not callable(eval_fn):
+            raise TypeError(
+                f"{func_name} exists but is not callable (got {type(eval_fn).__name__})"
+            )
+        return eval_fn  # type: ignore
+
+    per_bits = [
+        get_per_bit(get_eval_f(to_eval)(to_eval, xs, bs))
+        for to_eval, xs, bs in x.values()
+    ]
+
+    return get_eval_res(per_bits)

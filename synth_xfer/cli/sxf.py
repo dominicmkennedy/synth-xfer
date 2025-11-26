@@ -18,12 +18,12 @@ from synth_xfer._util.synth_context import SynthesizerContext
 from synth_xfer.cli.args import build_parser
 
 if TYPE_CHECKING:
-    from synth_xfer._eval_engine import BW, ToEval
+    from synth_xfer._eval_engine import ToEval
 
 
 def _eval_helper(
-    to_eval: "ToEval",
-    bw: "BW",
+    to_eval: dict[int, "ToEval"],
+    bws: list[int],
     helper_funcs: HelperFuncs,
     jit: Jit,
 ) -> Callable[
@@ -31,25 +31,33 @@ def _eval_helper(
     list[EvalResult],
 ]:
     def helper(
-        transfer: list[FunctionWithCondition],
+        xfer: list[FunctionWithCondition],
         base: list[FunctionWithCondition],
     ) -> list[EvalResult]:
-        lowerer = LowerToLLVM(bw)
+        lowerer = LowerToLLVM(bws)
         lowerer.add_fn(helper_funcs.get_top_func)
 
-        if not transfer:
+        if not xfer:
             ret_top_func = FunctionWithCondition(top_as_xfer(helper_funcs.transfer_func))
             ret_top_func.set_func_name("ret_top")
-            transfer = [ret_top_func]
+            xfer = [ret_top_func]
 
-        transfer_names = [fc.lower(lowerer.add_fn) for fc in transfer]
+        xfer_names = [fc.lower(lowerer.add_fn) for fc in xfer]
         base_names = [fc.lower(lowerer.add_fn) for fc in base]
 
-        jit.add_mod(str(lowerer))
-        transfer_fn_ptrs = [jit.get_fn_ptr(x) for x in transfer_names]
-        base_fn_ptrs = [jit.get_fn_ptr(x) for x in base_names]
+        xfer_names = {bw: [d[bw] for d in xfer_names] for bw in bws}
+        base_names = {bw: [d[bw] for d in base_names] for bw in bws}
 
-        return eval_transfer_func(to_eval, transfer_fn_ptrs, base_fn_ptrs)
+        jit.add_mod(str(lowerer))
+        xfer_fns = {bw: [jit.get_fn_ptr(x) for x in xfer_names[bw]] for bw in xfer_names}
+        base_fns = {bw: [jit.get_fn_ptr(x) for x in base_names[bw]] for bw in base_names}
+
+        input = {
+            bw: (to_eval[bw], xfer_fns.get(bw, []), base_fns.get(bw, []))
+            for bw in to_eval
+        }
+
+        return eval_transfer_func(input)
 
     return helper
 
@@ -68,8 +76,10 @@ def run(
     total_rounds: int,
     program_length: int,
     inv_temp: int,
-    bw: "BW",
-    samples: int | None,
+    vbw: list[int],
+    lbw: list[int],
+    mbw: list[tuple[int, int]],
+    hbw: list[tuple[int, int, int]],
     num_iters: int,
     condition_length: int,
     num_abd_procs: int,
@@ -82,9 +92,9 @@ def run(
     logger = get_logger()
     jit = Jit()
 
-    # TODO fix evalresult
-    lbw, mbw = (set(), set({bw})) if samples else (set({bw}), set())
-    EvalResult.init_bw_settings(lbw, mbw, set())
+    EvalResult.init_bw_settings(
+        set(lbw), set([t[0] for t in mbw]), set([t[0] for t in hbw])
+    )
 
     logger.debug("Round_ID\tSound%\tUExact%\tDisReduce\tCost")
 
@@ -96,11 +106,12 @@ def run(
     helper_funcs = get_helper_funcs(transformer_file, domain)
 
     start_time = perf_counter()
-    to_eval = setup_eval(bw, samples, random_seed, helper_funcs, domain, jit)
+    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helper_funcs, jit)
     run_time = perf_counter() - start_time
     logger.perf(f"Enum engine took {run_time:.4f}s")
 
-    solution_eval_func = _eval_helper(to_eval, bw, helper_funcs, jit)
+    all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
+    solution_eval_func = _eval_helper(to_eval, all_bws, helper_funcs, jit)
     solution_set = UnsizedSolutionSet([], solution_eval_func)
 
     context = _setup_context(random, False)
@@ -159,7 +170,8 @@ def run(
             ranges,
             mcmc_samplers,
             prec_set,
-            bw,
+            lbw,
+            vbw,
         )
 
         write_log_file(
@@ -196,13 +208,14 @@ def run(
     solution_module = solution_set.generate_solution_mlir()
     write_log_file("solution.mlir", solution_module)
 
-    lowerer = LowerToLLVM(bw)
+    lowerer = LowerToLLVM(all_bws)
     lowerer.add_fn(helper_funcs.meet_func)
     lowerer.add_fn(helper_funcs.get_top_func)
     lowerer.add_mod(solution_module, ["solution"])
     jit.add_mod(str(lowerer))
-    solution_ptr = jit.get_fn_ptr("solution_shim")
-    solution_result = eval_transfer_func(to_eval, [solution_ptr], [])[0]
+    sol_ptrs = {bw: jit.get_fn_ptr(f"solution_{bw}_shim") for bw in all_bws}
+    sol_to_eval = {bw: (to_eval[bw], [sol_ptrs[bw]], []) for bw in all_bws}
+    solution_result = eval_transfer_func(sol_to_eval)[0]
 
     solution_exact = solution_result.get_exact_prop() * 100
     print(
@@ -236,8 +249,10 @@ def main() -> None:
         total_rounds=args.total_rounds,
         program_length=args.program_length,
         inv_temp=args.inv_temp,
-        bw=args.bw,
-        samples=args.samples,
+        vbw=args.vbw,
+        lbw=args.lbw,
+        mbw=args.mbw,
+        hbw=args.hbw,
         num_iters=args.num_iters,
         condition_length=args.condition_length,
         num_abd_procs=args.num_abd_procs,

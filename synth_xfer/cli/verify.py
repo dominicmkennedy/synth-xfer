@@ -1,4 +1,4 @@
-from argparse import ArgumentParser, ArgumentTypeError, Namespace
+from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from time import perf_counter
 
@@ -13,6 +13,7 @@ from synth_xfer._util.parse_mlir import (
     parse_mlir_mod,
 )
 from synth_xfer._util.verifier import verify_transfer_function
+from synth_xfer.cli.args import int_list
 
 
 def verify_function(
@@ -34,38 +35,14 @@ def verify_function(
     return verify_transfer_function(func, helper_funcs.crt_func, helpers, bw, timeout)
 
 
-def _parse_int_range(s: str) -> range:
-    parts = s.split(":")
-    if len(parts) == 1:
-        try:
-            n = int(parts[0])
-        except ValueError:
-            raise ArgumentTypeError(f"Invalid integer '{s}'")
-        return range(n, n + 1)
-
-    if len(parts) == 2:
-        try:
-            start = int(parts[0])
-            end = int(parts[1])
-        except ValueError:
-            raise ArgumentTypeError(f"Invalid range '{s}', expected INT or INT:INT")
-
-        if start > end:
-            raise ArgumentTypeError(f"Range must be non-decreasing: {start}>{end}")
-
-        return range(start, end + 1)
-
-    raise ArgumentTypeError(f"Invalid range '{s}', expected INT or INT:INT")
-
-
 def _register_parser() -> Namespace:
     p = ArgumentParser()
 
     p.add_argument(
         "-bw",
-        type=_parse_int_range,
+        type=int_list,
         required=True,
-        help="Bitwidth range (e.g. `-bw 4` or `-bw 4:64`)",
+        help="Bitwidth range (e.g. `-bw 4`, `-bw 4-64` or `-bw 4,8,16`)",
     )
 
     p.add_argument(

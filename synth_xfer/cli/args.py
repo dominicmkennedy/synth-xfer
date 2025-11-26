@@ -6,26 +6,70 @@ from argparse import (
     Namespace,
 )
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from synth_xfer._util.domain import AbstractDomain
 
-if TYPE_CHECKING:
-    from synth_xfer._eval_engine import BW
 
-
-def bw_type(value: str) -> "BW":
+def int_tuple(s: str) -> tuple[int, int]:
     try:
-        val = int(value)
-    except ValueError:
-        raise ArgumentTypeError(f"{value!r} is not an integer")
+        items = s.split(",")
+        if len(items) != 2:
+            raise ValueError
+        return (int(items[0]), int(items[1]))
+    except Exception:
+        raise ArgumentTypeError(f"Invalid tuple format: '{s}'. Expected format: int,int")
 
-    if val not in (4, 8, 16, 32, 64):
+
+def int_triple(s: str) -> tuple[int, int, int]:
+    try:
+        items = s.split(",")
+        if len(items) != 3:
+            raise ValueError
+        return (int(items[0]), int(items[1]), int(items[2]))
+    except Exception:
         raise ArgumentTypeError(
-            f"Invalid value: {val}. Allowed values are 4, 8, 16, 32, 64."
+            f"Invalid tuple format: '{s}'. Expected format: int,int,int"
         )
 
-    return val
+
+def int_list(s: str) -> list[int]:
+    result: list[int] = []
+
+    for chunk in s.split(","):
+        chunk = chunk.strip()
+        if not chunk:
+            continue
+
+        if "-" in chunk:
+            parts = chunk.split("-")
+            if len(parts) != 2 or not parts[0] or not parts[1]:
+                raise ArgumentTypeError(f"Invalid range: {chunk!r}")
+
+            try:
+                start = int(parts[0].strip())
+                end = int(parts[1].strip())
+            except ValueError:
+                raise ArgumentTypeError(f"Invalid range: {chunk!r}")
+
+            if start < 0 or end < 0:
+                raise ArgumentTypeError(f"Negative values are not allowed: {chunk!r}")
+            if start > end:
+                raise ArgumentTypeError(f"Range start must be <= end (got {chunk!r})")
+
+            result.extend(range(start, end + 1))
+        else:
+            try:
+                value = int(chunk)
+            except ValueError:
+                raise ArgumentTypeError(f"Invalid integer: {chunk!r}")
+            if value < 0:
+                raise ArgumentTypeError(f"Negative values are not allowed: {chunk!r}")
+            result.append(value)
+
+    if not result:
+        raise ArgumentTypeError("Empty list of integers")
+
+    return result
 
 
 ALL_OPS = [
@@ -121,8 +165,6 @@ def build_parser(prog: str) -> Namespace:
             default=[],
             help=f"Zero or more items from: {', '.join(ALL_OPS)}",
         )
-    if prog == "eval":
-        ...
 
     output_dir = Path("outputs") if prog == "benchmark" else None
     p.add_argument("-o", "--output", type=Path, help="Output dir", default=output_dir)
@@ -151,8 +193,33 @@ def build_parser(prog: str) -> Namespace:
         help="Inverse temperature for MCMC. The larger the value is, the lower the probability of accepting a program with a higher cost.",
         default=200,
     )
-    p.add_argument("-bw", type=bw_type, default=4, help="Bitwidth")
-    p.add_argument("-samples", type=int, default=None, help="Number of lattice samples")
+    p.add_argument(
+        "-vbw",
+        type=int_list,
+        default=list(range(4, 65)),
+        help="bws to verify at",
+    )
+    p.add_argument(
+        "-lbw",
+        nargs="*",
+        type=int,
+        default=[4],
+        help="Bitwidths to evaluate exhaustively",
+    )
+    p.add_argument(
+        "-mbw",
+        nargs="*",
+        type=int_tuple,
+        default=[],
+        help="Bitwidths to evaluate sampled lattice elements exhaustively",
+    )
+    p.add_argument(
+        "-hbw",
+        nargs="*",
+        type=int_triple,
+        default=[],
+        help="Bitwidths to sample the lattice and abstract values with",
+    )
     p.add_argument(
         "-num_iters",
         type=int,

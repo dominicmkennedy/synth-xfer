@@ -6,8 +6,8 @@ from xdsl.context import Context
 from xdsl.dialects.arith import Arith
 from xdsl.dialects.builtin import Builtin, ModuleOp
 from xdsl.dialects.func import CallOp, Func, FuncOp, ReturnOp
-from xdsl.ir import Operation
-from xdsl.parser import Parser
+from xdsl.ir import Attribute, Operation
+from xdsl.parser import IntegerType, Parser
 from xdsl_smt.dialects.transfer import AbstractValueType, Transfer, TransIntegerType
 from xdsl_smt.passes.transfer_inline import FunctionCallInline
 
@@ -64,6 +64,9 @@ def get_fns(mod: ModuleOp) -> dict[str, FuncOp]:
 
 @dataclass
 class HelperFuncs:
+    conc_ret_ty: TransIntegerType | IntegerType
+    conc_arg_ty: tuple[TransIntegerType | IntegerType, ...]
+    domain: AbstractDomain
     crt_func: FuncOp
     instance_constraint_func: FuncOp
     domain_constraint_func: FuncOp
@@ -81,16 +84,22 @@ def get_helper_funcs(p: Path, d: AbstractDomain) -> HelperFuncs:
     crt_func = fns["concrete_op"]
     op_con_fn = fns.get("op_constraint", None)
 
-    n_args = len(crt_func.function_type.inputs.data)
     assert len(crt_func.function_type.outputs.data) == 1
-    assert crt_func.function_type.outputs.data[0].name == "transfer.integer"
-    assert n_args <= 3
-    for ty in crt_func.function_type.outputs.data:
-        assert ty.name == "transfer.integer"
+
+    def get_ty(x: Attribute):
+        assert isinstance(x, TransIntegerType) or isinstance(x, IntegerType)
+        return x
+
+    def make_abst_ty(x: Attribute):
+        return AbstractValueType([x for _ in range(d.vec_size)])
+
+    crt_ret_ty = get_ty(crt_func.function_type.outputs.data[0])
+    crt_arg_ty = tuple(get_ty(x.type) for x in crt_func.args)
 
     # TODO xfer fn is only ever used as a type to construct a top fn
-    ty = AbstractValueType([TransIntegerType() for _ in range(d.vec_size)])
-    xfer_fn = FuncOp.from_region("empty_transformer", [ty for _ in range(n_args)], [ty])
+    xfer_ret = [make_abst_ty(crt_ret_ty)]
+    xfer_args = [make_abst_ty(x.type) for x in crt_func.args]
+    xfer_fn = FuncOp.from_region("empty_transformer", xfer_args, xfer_ret)
 
     def get_domain_fns(fp: str) -> FuncOp:
         dp = p.resolve().parent.parent.joinpath(str(d), fp)
@@ -102,6 +111,9 @@ def get_helper_funcs(p: Path, d: AbstractDomain) -> HelperFuncs:
     instance_constraint = get_domain_fns("get_instance_constraint.mlir")
 
     return HelperFuncs(
+        conc_ret_ty=crt_ret_ty,
+        conc_arg_ty=crt_arg_ty,
+        domain=d,
         crt_func=crt_func,
         instance_constraint_func=instance_constraint,
         domain_constraint_func=constraint,

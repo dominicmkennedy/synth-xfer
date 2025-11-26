@@ -56,7 +56,8 @@ def synthesize_one_iteration(
     ranges: tuple[range, range, range],
     mcmc_samplers: list[MCMCSampler],
     prec_set: list[FuncOp],
-    bw: int,
+    lbw: list[int],
+    vbw: list[int],
 ) -> SolutionSet:
     "Given ith_iter, performs total_rounds mcmc sampling"
 
@@ -187,7 +188,8 @@ def synthesize_one_iteration(
 
     verif_start_time = perf_counter()
     new_solution_set = solution_set.construct_new_solution_set(
-        bw,
+        lbw,
+        vbw,
         candidates_sp,
         candidates_p,
         candidates_c,

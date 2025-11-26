@@ -80,8 +80,8 @@ def lower_type(typ: Attribute, bw: int) -> ir.Type:
 
 
 class LowerToLLVM:
-    def __init__(self, bw: int, name: str = "") -> None:
-        self.bw = bw
+    def __init__(self, bws: list[int], name: str = "") -> None:
+        self.bws = bws
         self.llvm_mod = ir.Module(name=name)
         self.fns: dict[str, ir.Function] = {}
 
@@ -99,87 +99,100 @@ class LowerToLLVM:
 
     @staticmethod
     def is_concrete_op(mlir_fn: FuncOp) -> bool:
-        fn_ret_type = lower_type(mlir_fn.function_type.outputs.data[0], 64)
-        fn_arg_types = tuple(lower_type(x.type, 64) for x in mlir_fn.args)
+        def trans_or_int(x: Attribute):
+            return isinstance(x, TransIntegerType) or isinstance(x, IntegerType)
 
-        i64 = ir.IntType(64)
-        ret_match = fn_ret_type == i64
-        arg_match = fn_arg_types == tuple(i64 for _ in fn_arg_types)
+        one_ret_val = len(mlir_fn.function_type.outputs.data) == 1
+        valid_ret = trans_or_int(mlir_fn.function_type.outputs.data[0])
+        valid_args = all(trans_or_int(x.type) for x in mlir_fn.args)
 
-        return ret_match and arg_match
+        return one_ret_val and valid_ret and valid_args
 
     @staticmethod
     def is_constraint(mlir_fn: FuncOp) -> bool:
-        fn_ret_type = lower_type(mlir_fn.function_type.outputs.data[0], 64)
-        fn_arg_types = tuple(lower_type(x.type, 64) for x in mlir_fn.args)
+        def trans_or_int(x: Attribute):
+            return isinstance(x, TransIntegerType) or isinstance(x, IntegerType)
 
-        i64 = ir.IntType(64)
-        ret_match = fn_ret_type == ir.IntType(1)
-        arg_match = fn_arg_types == tuple(i64 for _ in fn_arg_types)
+        one_ret_val = len(mlir_fn.function_type.outputs.data) == 1
+        ret_bool = lower_type(mlir_fn.function_type.outputs.data[0], 64) == ir.IntType(1)
+        valid_args = all(trans_or_int(x.type) for x in mlir_fn.args)
 
-        return ret_match and arg_match
+        return one_ret_val and ret_bool and valid_args
 
     @staticmethod
     def is_transfer_fn(mlir_fn: FuncOp) -> bool:
-        fn_ret_type = lower_type(mlir_fn.function_type.outputs.data[0], 64)
-        fn_arg_types = tuple(lower_type(x.type, 64) for x in mlir_fn.args)
+        def is_abst_val(ty: Attribute):
+            if isinstance(ty, AbstractValueType):
+                all_trans = all(isinstance(x, TransIntegerType) for x in ty.get_fields())
+                all_ints = all(isinstance(x, IntegerType) for x in ty.get_fields())
+                return all_trans or all_ints
+            else:
+                return False
 
-        i64 = ir.IntType(64)
-        abst = ir.ArrayType(i64, 2)
-        ret_match = fn_ret_type == abst
-        arg_match = fn_arg_types == tuple(abst for _ in fn_arg_types)
+        one_ret_val = len(mlir_fn.function_type.outputs.data) == 1
+        ret_is_abst = is_abst_val(mlir_fn.function_type.outputs.data[0])
+        abst_args = all(is_abst_val(x.type) for x in mlir_fn.args)
 
-        return ret_match and arg_match
+        return one_ret_val and ret_is_abst and abst_args
 
-    def add_fn(
-        self, mlir_fn: FuncOp, fn_name: str | None = None, shim: bool = False
-    ) -> ir.Function:
-        fn_name = fn_name if fn_name else mlir_fn.sym_name.data
-        fn_ret_type = lower_type(mlir_fn.function_type.outputs.data[0], self.bw)
-        fn_arg_types = (lower_type(x.type, self.bw) for x in mlir_fn.args)
+    def add_fn(self, mlir_fn: FuncOp, shim: bool = False) -> dict[int, ir.Function]:
+        bw_fns: dict[int, ir.Function] = {}
 
-        fn_type = ir.FunctionType(fn_ret_type, fn_arg_types)
-        llvm_fn = ir.Function(self.llvm_mod, fn_type, name=fn_name)
-        llvm_fn = self.add_attrs(llvm_fn)
+        for bw in self.bws:
+            bw_fn_name = f"{mlir_fn.sym_name.data}_{bw}"
 
-        self.fns[fn_name] = _LowerFuncToLLVM(
-            mlir_fn, llvm_fn, self.llvm_mod, self.fns, self.bw
-        ).llvm_fn
+            fn_ret_type = lower_type(mlir_fn.function_type.outputs.data[0], bw)
+            fn_arg_types = (lower_type(x.type, bw) for x in mlir_fn.args)
+            fn_type = ir.FunctionType(fn_ret_type, fn_arg_types)
 
-        if shim:
-            shimmed_fn = self.shim(mlir_fn, fn_name)
-            self.fns[f"{fn_name}_shim"] = shimmed_fn
-            return shimmed_fn
-        else:
-            return self.fns[fn_name]
+            llvm_fn = ir.Function(self.llvm_mod, fn_type, name=bw_fn_name)
+            llvm_fn = self.add_attrs(llvm_fn)
+
+            self.fns[bw_fn_name] = _LowerFuncToLLVM(
+                mlir_fn, llvm_fn, self.llvm_mod, self.fns, bw
+            ).llvm_fn
+
+            if shim:
+                shimmed_fn = self.shim(mlir_fn, self.fns[bw_fn_name], bw)
+                self.fns[f"{bw_fn_name}_shim"] = shimmed_fn
+                bw_fns[bw] = shimmed_fn
+            else:
+                bw_fns[bw] = self.fns[bw_fn_name]
+
+        return bw_fns
 
     def add_mod(self, mod: ModuleOp, to_shim: list[str] = []) -> dict[str, ir.Function]:
         fns: dict[str, ir.Function] = {}
 
-        for func in mod.ops:
-            assert isinstance(func, FuncOp)
-            fn_name = func.sym_name.data
+        for mlir_func in mod.ops:
+            assert isinstance(mlir_func, FuncOp)
+            fn_name = mlir_func.sym_name.data
             shim = fn_name in to_shim
-            f = self.add_fn(func, shim=shim)
-            fns[f.name] = f
+            fs = self.add_fn(mlir_func, shim=False)
+            for bw, f in fs.items():
+                fns[f.name] = f
+                if shim:
+                    shimmed = self.shim(mlir_func, f, bw)
+                    fns[shimmed.name] = shimmed
 
         return fns
 
-    def shim(self, mlir_fn: FuncOp, fn_name: str) -> ir.Function:
+    def shim(self, mlir_fn: FuncOp, llvm_fn: ir.Function, bw: int) -> ir.Function:
         if self.is_concrete_op(mlir_fn):
-            return self.shim_conc(self.fns[fn_name])
+            return self.shim_conc(mlir_fn, llvm_fn, bw)
         elif self.is_constraint(mlir_fn):
-            return self.shim_constraint(self.fns[fn_name])
+            return self.shim_constraint(mlir_fn, llvm_fn, bw)
         elif self.is_transfer_fn(mlir_fn):
-            return self.shim_xfer(self.fns[fn_name])
+            return self.shim_xfer(mlir_fn, llvm_fn, bw)
         else:
             raise ValueError(
-                f"Cannot shim non concrete and non transfer function {fn_name}"
+                f"Cannot shim non concrete and non transfer function: {llvm_fn}"
             )
 
-    def shim_constraint(self, old_fn: ir.Function) -> ir.Function:
+    def shim_constraint(
+        self, mlir_fn: FuncOp, old_fn: ir.Function, bw: int
+    ) -> ir.Function:
         n_args = len(old_fn.function_type.args)
-        lane_t = ir.IntType(self.bw)
         wide_t = ir.IntType(64)
 
         fn_name = f"{old_fn.name}_shim"
@@ -191,10 +204,9 @@ class LowerToLLVM:
         b = ir.IRBuilder(entry)
 
         new_args: list[ir.Argument] = []
-        for arg in shim_fn.args:
+        for arg, mlir_arg in zip(shim_fn.args, mlir_fn.args):
             arg.name = f"{arg.name}_wide"
-            new_arg = arg if self.bw == 64 else b.trunc(arg, lane_t)
-            new_args.append(new_arg)  # type: ignore
+            new_args.append(b.trunc(arg, lower_type(mlir_arg.type, bw)))  # type: ignore
 
         r_n = b.call(old_fn, new_args)
         r64 = b.zext(r_n, wide_t)
@@ -202,9 +214,8 @@ class LowerToLLVM:
 
         return shim_fn
 
-    def shim_conc(self, old_fn: ir.Function) -> ir.Function:
+    def shim_conc(self, mlir_fn: FuncOp, old_fn: ir.Function, bw: int) -> ir.Function:
         n_args = len(old_fn.function_type.args)
-        lane_t = ir.IntType(self.bw)
         wide_t = ir.IntType(64)
 
         fn_name = f"{old_fn.name}_shim"
@@ -216,22 +227,18 @@ class LowerToLLVM:
         b = ir.IRBuilder(entry)
 
         new_args: list[ir.Argument] = []
-        for arg in shim_fn.args:
+        for arg, mlir_arg in zip(shim_fn.args, mlir_fn.args):
             arg.name = f"{arg.name}_wide"
-            new_arg = arg if self.bw == 64 else b.trunc(arg, lane_t)
-            new_args.append(new_arg)  # type: ignore
+            new_args.append(b.trunc(arg, lower_type(mlir_arg.type, bw)))  # type: ignore
 
         r_n = b.call(old_fn, new_args)
-        r64 = r_n if self.bw == 64 else b.zext(r_n, wide_t)
-        b.ret(r64)
+        b.ret(b.zext(r_n, wide_t))
 
         return shim_fn
 
-    def shim_xfer(self, old_fn: ir.Function) -> ir.Function:
+    def shim_xfer(self, mlir_fn: FuncOp, old_fn: ir.Function, bw: int) -> ir.Function:
         n_args = len(old_fn.function_type.args)
-        lane_t = ir.IntType(self.bw)
         i64 = ir.IntType(64)
-        lane_arr_t = ir.ArrayType(lane_t, 2)
         i64_arr_t = ir.ArrayType(i64, 2)
 
         fn_name = f"{old_fn.name}_shim"
@@ -240,18 +247,29 @@ class LowerToLLVM:
         shim_fn = self.add_attrs(shim_fn)
 
         b = ir.IRBuilder(shim_fn.append_basic_block(name="entry"))
-        empty_arr = ir.Constant(lane_arr_t, None)
 
-        def to_lane(v):
-            return v if self.bw == 64 else b.trunc(v, lane_t)
+        def to_lane(v, lane_t):
+            return b.trunc(v, lane_t)
 
         def to_i64(v):
-            return v if self.bw == 64 else b.zext(v, i64)
+            return b.zext(v, i64)
 
         new_lanes = []
-        for arg in shim_fn.args:
-            new_arg_0 = to_lane(b.extract_value(arg, 0))
-            new_arg_1 = to_lane(b.extract_value(arg, 1))
+        for arg, mlir_arg in zip(shim_fn.args, mlir_fn.args):
+            assert isinstance(mlir_arg.type, AbstractValueType)
+            arg_field = mlir_arg.type.get_fields()[0]
+            if isinstance(arg_field, TransIntegerType):
+                lane_t = ir.IntType(bw)
+            elif isinstance(arg_field, IntegerType):
+                lane_t = ir.IntType(arg_field.width.data)
+            else:
+                raise ValueError(f"bad type: {arg_field}")
+
+            lane_arr_t = ir.ArrayType(lane_t, 2)
+            empty_arr = ir.Constant(lane_arr_t, None)
+
+            new_arg_0 = to_lane(b.extract_value(arg, 0), lane_t)
+            new_arg_1 = to_lane(b.extract_value(arg, 1), lane_t)
             new_lane = b.insert_value(empty_arr, new_arg_0, 0)
             new_lane = b.insert_value(new_lane, new_arg_1, 1)
             new_lanes.append(new_lane)
@@ -347,6 +365,7 @@ class _LowerFuncToLLVM:
     def _(self, op: CallOp) -> None:
         res_name = self.result_name(op)
         callee = op.callee.string_value()
+        callee = f"{callee}_{self.bw}"
 
         if callee not in self.fns:
             ret_ty = lower_type(op.results[0].type, self.bw)

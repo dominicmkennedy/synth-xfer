@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from typing import Callable, TypeVar
 
 
 @dataclass
@@ -52,59 +51,6 @@ class PerBitRes:
 
     def get_exact_prop(self) -> float:
         return self.exacts / self.all_cases
-
-
-def get_per_bit(a: str) -> list[PerBitRes]:
-    T = TypeVar("T")
-
-    x = a.split("\n")
-
-    def get(in_str: str, to_match: str, parser: Callable[[str], T]) -> T:
-        og_str, to_parse = in_str.split(":")
-
-        assert og_str.strip() == to_match
-
-        return parser(to_parse)
-
-    def get_ints(s: str) -> list[int]:
-        return eval(s)
-
-    def get_floats(s: str) -> list[float]:
-        return eval(s)
-
-    bw = get(x[0], "bw", int)
-    num_cases = get(x[1], "num cases", int)
-    num_unsolved_cases = get(x[2], "num unsolved", int)
-    base_distance = get(x[3], "base distance", float)
-    sound = get(x[4], "num sound", get_ints)
-    distance = get(x[5], "distance", get_floats)
-    exact = get(x[6], "num exact", get_ints)
-    num_unsolved_exact_cases = get(x[7], "num unsolved exact", get_ints)
-    sound_distance = get(x[8], "sound distance", get_floats)
-
-    assert len(sound) > 0, "No output from EvalEngine"
-    assert (
-        len(sound)
-        == len(distance)
-        == len(exact)
-        == len(num_unsolved_exact_cases)
-        == len(sound_distance)
-    ), "EvalEngine output mismatch"
-
-    return [
-        PerBitRes(
-            all_cases=num_cases,
-            sounds=sound[i],
-            exacts=exact[i],
-            dist=distance[i],
-            unsolved_cases=num_unsolved_cases,
-            unsolved_exacts=num_unsolved_exact_cases[i],
-            base_dist=base_distance,
-            sound_dist=sound_distance[i],
-            bitwidth=bw,
-        )
-        for i in range(len(sound))
-    ]
 
 
 class EvalResult:
