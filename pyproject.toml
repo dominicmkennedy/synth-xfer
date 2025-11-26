@@ -13,6 +13,7 @@ dependencies = [
   "xdsl-smt @ https://github.com/dominicmkennedy/xdsl-smt/archive/739aa03.tar.gz",
   "z3-solver==4.15.1.0",
   "llvmlite>=0.45.0",
+  "pandas==2.3.3",
 ]
 
 [project.optional-dependencies]
