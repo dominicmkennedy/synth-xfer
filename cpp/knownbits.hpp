@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <ostream>
 #include <random>
+#include <string_view>
 #include <vector>
 
 #include "apint.hpp"
@@ -17,7 +18,7 @@ template <std::size_t BW> class KnownBits {
 public:
   using BV = APInt<BW>;
   static constexpr std::size_t arity = 2;
-  static constexpr std::string name = "KnownBits";
+  static constexpr std::string_view name = "KnownBits";
 
   // ctor
   constexpr KnownBits() : v{} {}

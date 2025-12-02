@@ -34,7 +34,7 @@ void register_results_class(py::module_ &m) {
 template <template <std::size_t> class D, std::size_t BW>
   requires Domain<D, BW>
 void register_domain_class(py::module_ &m) {
-  const std::string cls_name = D<BW>::name + std::to_string(BW);
+  const std::string cls_name = std::string(D<BW>::name) + std::to_string(BW);
 
   auto cls = py::class_<D<BW>>(m, cls_name.c_str());
   cls.def_static("arity", []() { return D<BW>::arity; });
@@ -56,7 +56,7 @@ void register_enum_domain(py::module_ &m) {
   using Row = std::tuple<Dom<BWs>..., Dom<ResBw>>;
   using EnumT = EnumDomain<Dom, ResBw, BWs...>;
 
-  std::string dname = Dom<ResBw>::name;
+  std::string dname = std::string(Dom<ResBw>::name);
   std::string cls_name = std::string("ToEval") + dname + std::to_string(ResBw);
   ((cls_name += "_" + std::to_string(BWs)), ...);
 
@@ -126,7 +126,7 @@ void register_eval_domain(py::module_ &m) {
   using EvalVec = ToEval<Dom, ResBw, BWs...>;
   using EvalT = Eval<Dom, ResBw, BWs...>;
 
-  std::string dname = Dom<ResBw>::name;
+  std::string dname = std::string(Dom<ResBw>::name);
   std::string dname_lower = dname;
   std::transform(dname_lower.begin(), dname_lower.end(), dname_lower.begin(),
                  ::tolower);

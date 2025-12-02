@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <ostream>
 #include <random>
+#include <string_view>
 #include <vector>
 
 #include "apint.hpp"
@@ -16,7 +17,7 @@ template <std::size_t BW> class AntiRange {
 public:
   using BV = APInt<BW>;
   static constexpr std::size_t arity = 2;
-  static constexpr std::string name = "AntiRange";
+  static constexpr std::string_view name = "AntiRange";
 
   // ctor
   constexpr AntiRange() : v{} {}
@@ -83,6 +84,7 @@ public:
 
     return res;
   }
+
 
   constexpr std::uint64_t distance(const AntiRange &rhs) const noexcept {
     if (isBottom() && rhs.isBottom())

@@ -3,8 +3,10 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <optional>
 #include <ostream>
 #include <random>
+#include <string_view>
 #include <vector>
 
 #include "apint.hpp"
@@ -16,7 +18,7 @@ template <std::size_t BW> class UConstRange {
 public:
   using BV = APInt<BW>;
   static constexpr std::size_t arity = 2;
-  static constexpr std::string name = "UConstRange";
+  static constexpr std::string_view name = "UConstRange";
 
   // ctor
   constexpr UConstRange() : v{} {}

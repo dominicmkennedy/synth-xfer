@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <random>
+#include <string_view>
 #include <vector>
 
 #include "apint.hpp"
@@ -20,7 +21,7 @@ concept Domain =
       requires std::same_as<typename D<BW>::BV, APInt<BW>>;
 
       { D<BW>::arity } -> std::convertible_to<std::size_t>;
-      { D<BW>::name } -> std::convertible_to<const std::string>;
+      { D<BW>::name } -> std::convertible_to<const std::string_view>;
       requires(D<BW>::arity >= 2 && D<BW>::arity <= 6);
       { d[i] } noexcept -> std::same_as<const APInt<BW> &>;
 
