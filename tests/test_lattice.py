@@ -72,7 +72,7 @@ def test_ucr_lattice():
     res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
-        == "bw: 4  all: 136   s: 136   e: 136   uall: 135   ue: 135   dis: 0       bdis: 123.5   sdis: 0"
+        == "bw: 4  all: 136   s: 136   e: 136   uall: 135   ue: 135   dis: 0       bdis: 90.6667 sdis: 0"
     )
 
 
@@ -100,7 +100,7 @@ def test_scr_lattice():
     res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
-        == "bw: 4  all: 136   s: 136   e: 136   uall: 135   ue: 135   dis: 0       bdis: 123.5   sdis: 0"
+        == "bw: 4  all: 136   s: 136   e: 136   uall: 135   ue: 135   dis: 0       bdis: 90.6667 sdis: 0"
     )
 
 

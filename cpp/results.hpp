@@ -42,7 +42,7 @@ private:
   unsigned int cases = {};
   unsigned int unsolvedCases = {};
   unsigned int baseDistance = {};
-  double (*maxDist)() = {};
+  std::uint64_t (*maxDist)() = {};
 
   void printMember(std::ostream &os, std::string_view name,
                    const std::function<unsigned int(const Result &x)> &getter,
@@ -52,7 +52,7 @@ private:
     for (auto it = r.begin(); it != r.end(); ++it) {
       os << std::right << std::setw(8);
       if (md)
-        os << getter(*it) / maxDist();
+        os << static_cast<double>(getter(*it)) / static_cast<double>(maxDist());
       else
         os << getter(*it);
       if (std::next(it) != r.end())
@@ -63,7 +63,7 @@ private:
   }
 
 public:
-  Results(unsigned int numFns, unsigned int bw_, double (*_maxDist)())
+  Results(unsigned int numFns, unsigned int bw_, std::uint64_t (*_maxDist)())
       : bw(bw_), r(std::vector<Result>(numFns)), maxDist(_maxDist) {}
 
   friend std::ostream &operator<<(std::ostream &os, const Results &x) {
@@ -71,8 +71,8 @@ public:
     os << std::left << std::setw(20) << "num cases:" << x.cases << "\n";
     os << std::left << std::setw(20) << "num unsolved:" << x.unsolvedCases
        << "\n";
-    os << std::left << std::setw(20)
-       << "base distance:" << static_cast<double>(x.baseDistance) / x.maxDist()
+    os << std::left << std::setw(20) << "base distance:"
+       << static_cast<double>(x.baseDistance) / static_cast<double>(x.maxDist())
        << "\n";
     x.printMember(
         os, "num sound:", [](const Result &x) { return x.sound; }, false);

@@ -26,14 +26,14 @@ concept Domain =
       { d[i] } noexcept -> std::same_as<const APInt<BW> &>;
 
       // Static methods
-      { D<BW>::rand(rng) } -> std::same_as<const D<BW>>;
+      { D<BW>::rand(rng, i) } -> std::same_as<const D<BW>>;
       { D<BW>::bottom() } noexcept -> std::same_as<const D<BW>>;
       { D<BW>::top() } noexcept -> std::same_as<const D<BW>>;
       {
         D<BW>::enumLattice()
       } noexcept -> std::same_as<const std::vector<D<BW>>>;
       { D<BW>::fromConcrete(a) } noexcept -> std::same_as<const D<BW>>;
-      { D<BW>::maxDist() } noexcept -> std::same_as<double>;
+      { D<BW>::num_levels() } noexcept -> std::same_as<std::uint64_t>;
 
       // Instance methods
       { d.isTop() } noexcept -> std::same_as<bool>;
@@ -42,6 +42,7 @@ concept Domain =
       { d.join(d) } noexcept -> std::same_as<const D<BW>>;
       { d.toConcrete() } noexcept -> std::same_as<const std::vector<APInt<BW>>>;
       { d.distance(d) } noexcept -> std::same_as<std::uint64_t>;
+      { d.size() } noexcept -> std::same_as<std::uint64_t>;
       { d.sample_concrete(rng) } -> std::same_as<const APInt<BW>>;
       { os << d } -> std::same_as<std::ostream &>;
     } &&

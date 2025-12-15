@@ -25,9 +25,9 @@ set(SYNTH_XFER_SOURCES
   cpp/enum.hpp
   cpp/domain.hpp
   cpp/knownbits.hpp
-  cpp/anti_range.hpp
   cpp/uconst_range.hpp
   cpp/sconst_range.hpp
+  cpp/rand.hpp
 )
 
 pybind11_add_module(_eval_engine ${SYNTH_XFER_SOURCES})

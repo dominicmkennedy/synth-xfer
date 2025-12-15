@@ -107,6 +107,15 @@ public:
     return (zero() ^ rhs.zero()).popcount() + (one() ^ rhs.one()).popcount();
   }
 
+  constexpr std::uint64_t size() const noexcept {
+    if (isBottom())
+      return 0;
+    if (isTop())
+      return APInt<BW>::getMaxValue().getZExtValue();
+
+    return (1ULL << distance(KnownBits::bottom())) - 1;
+  }
+
   static constexpr const KnownBits fromConcrete(const APInt<BW> &x) noexcept {
     return KnownBits({~x, x});
   }
@@ -122,21 +131,49 @@ public:
     return val;
   }
 
-  static const KnownBits rand(std::mt19937 &rng) noexcept {
-    std::uniform_int_distribution<unsigned long> dist(
-        0, APInt<BW>::getAllOnes().getZExtValue());
+  static const KnownBits rand(std::mt19937 &rng, std::uint64_t level) noexcept {
+    assert(level <= BW);
 
-    APInt zeros = APInt<BW>(dist(rng));
-    APInt ones = APInt<BW>(dist(rng));
-    const APInt makeUnknown = APInt<BW>(dist(rng));
-    const APInt resolveTo = APInt<BW>(dist(rng));
+    auto rand_bounded = [&rng](std::uint32_t bound) -> std::uint32_t {
+      const std::uint32_t threshold =
+          static_cast<std::uint32_t>(-bound) % bound;
+      for (;;) {
+        std::uint32_t x = rng();
+        if (x >= threshold) {
+          return x % bound;
+        }
+      }
+    };
 
-    APInt conflicts = zeros & ones;
-    zeros &= ~(conflicts & makeUnknown);
-    ones &= ~(conflicts & makeUnknown);
+    std::uint64_t unknownMask = 0;
+    std::uint64_t remaining = level;
 
-    zeros &= ~(resolveTo & (conflicts & ~makeUnknown));
-    ones &= ~(~resolveTo & (conflicts & ~makeUnknown));
+    for (std::uint32_t i = 0; i < BW && remaining > 0; ++i) {
+      std::uint32_t positions_left = BW - i;
+      std::uint32_t r = rand_bounded(positions_left);
+      if (r < remaining) {
+        unknownMask |= (std::uint64_t(1) << i);
+        --remaining;
+      }
+    }
+
+    auto random_u64 = [&rng]() -> std::uint64_t {
+      std::uint64_t hi = static_cast<std::uint64_t>(rng());
+      std::uint64_t lo = static_cast<std::uint64_t>(rng());
+      return (hi << 32) ^ lo;
+    };
+
+    const std::uint64_t choice = random_u64();
+
+    const std::uint64_t onesMask = choice & ~unknownMask;
+    const std::uint64_t zerosMask = (~choice) & ~unknownMask;
+
+    const APInt<BW> zeros(zerosMask);
+    const APInt<BW> ones(onesMask);
+
+    assert((zeros & ones) == APInt<BW>(0));
+    assert((zeros | ones) == ~APInt<BW>(unknownMask));
+    assert((~(zeros | ones)).popcount() == level);
 
     return KnownBits({zeros, ones});
   }
@@ -174,7 +211,7 @@ public:
     return ret;
   }
 
-  static constexpr double maxDist() noexcept { return BW; }
+  static constexpr std::uint64_t num_levels() noexcept { return BW; }
 
   // TODO make private?
   std::array<BV, arity> v{};

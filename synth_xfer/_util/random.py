@@ -1,7 +1,9 @@
+from dataclasses import dataclass
+from enum import Enum
 import random
-from typing import Sequence, TypeVar
+from typing import Any, Sequence
 
-T = TypeVar("T")
+import synth_xfer._eval_engine as ee
 
 
 class Random:
@@ -30,18 +32,18 @@ class Random:
             return result / 100
         return random.random()
 
-    def choice(self, lst: Sequence[T]) -> T:
+    def choice[T](self, lst: Sequence[T]) -> T:
         if self.from_file:
             cur_index = self.__get_rand__() % len(lst)
             return lst[cur_index]
         return random.choice(lst)
 
-    def choice_weighted(self, lst: Sequence[T], weights: dict[T, int]) -> T:
+    def choice_weighted[T](self, lst: Sequence[T], weights: dict[T, int]) -> T:
         # todo: if self.from_file: ...
         w = [weights[key] for key in lst]
         return random.choices(lst, weights=w, k=1)[0]
 
-    def choice2(self, lst: Sequence[T]) -> list[T]:
+    def choice2[T](self, lst: Sequence[T]) -> list[T]:
         if self.from_file:
             # assume the file provides 2 different numbers
             cur_index1 = self.__get_rand__() % len(lst)
@@ -65,3 +67,91 @@ class Random:
         self.rands_len = len(lst)
         self.from_file = True
         assert self.rands_len != 0
+
+
+@dataclass(frozen=True, slots=True)
+class Sampler:
+    class DistKind(str, Enum):
+        UNIFORM = "uniform"
+        NORMAL = "normal"
+        SKEW_LEFT = "skew_left"
+        SKEW_RIGHT = "skew_right"
+        BIMODAL = "bimodal"
+
+    kind: DistKind
+    sampler: Any
+    sigma: float | None = None
+    alpha: float | None = None
+    separation: float | None = None
+
+    @staticmethod
+    def uniform() -> "Sampler":
+        return Sampler(kind=Sampler.DistKind.UNIFORM, sampler=ee.uniform_sampler())
+
+    @staticmethod
+    def normal(sigma: float) -> "Sampler":
+        Sampler.validate_sigma(sigma)
+        return Sampler(
+            kind=Sampler.DistKind.NORMAL,
+            sigma=sigma,
+            sampler=ee.normal_sampler(sigma),
+        )
+
+    @staticmethod
+    def skew_left(sigma: float, alpha: float) -> "Sampler":
+        Sampler.validate_sigma(sigma)
+        Sampler.validate_alpha(alpha)
+        return Sampler(
+            kind=Sampler.DistKind.SKEW_LEFT,
+            sigma=sigma,
+            alpha=alpha,
+            sampler=ee.skew_left_sampler(sigma, alpha),
+        )
+
+    @staticmethod
+    def skew_right(sigma: float, alpha: float) -> "Sampler":
+        Sampler.validate_sigma(sigma)
+        Sampler.validate_alpha(alpha)
+        return Sampler(
+            kind=Sampler.DistKind.SKEW_RIGHT,
+            sigma=sigma,
+            alpha=alpha,
+            sampler=ee.skew_right_sampler(sigma, alpha),
+        )
+
+    @staticmethod
+    def bimodal(sigma: float, separation: float) -> "Sampler":
+        Sampler.validate_sigma(sigma)
+        Sampler.validate_separation(separation)
+        return Sampler(
+            kind=Sampler.DistKind.BIMODAL,
+            sigma=sigma,
+            separation=separation,
+            sampler=ee.bimodal_sampler(sigma, separation),
+        )
+
+    def __repr__(self) -> str:
+        parts = [str(self.kind.value)]
+        if self.sigma is not None:
+            parts.append(f"sigma={self.sigma}")
+        if self.alpha is not None:
+            parts.append(f"alpha={self.alpha}")
+        if self.separation is not None:
+            parts.append(f"separation={self.separation}")
+        return f"SamplerSpec({', '.join(parts)})"
+
+    @staticmethod
+    def validate_sigma(sigma: float) -> None:
+        if not (float(sigma) > 0.0):
+            raise ValueError("sigma must be > 0")
+
+    @staticmethod
+    def validate_alpha(alpha: float) -> None:
+        if not (float(alpha) > 0.0):
+            raise ValueError("alpha must be > 0 (magnitude)")
+
+    @staticmethod
+    def validate_separation(separation: float) -> None:
+        sep = float(separation)
+        if sep < 0.0 or sep > 0.49:
+            raise ValueError("separation must be in [0.0, 0.49]")

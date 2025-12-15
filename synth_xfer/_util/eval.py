@@ -8,6 +8,7 @@ from synth_xfer._util.eval_result import EvalResult, PerBitRes
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import HelperFuncs
+from synth_xfer._util.random import Sampler
 
 if TYPE_CHECKING:
     from synth_xfer._eval_engine import Results, ToEval
@@ -71,6 +72,7 @@ def setup_eval(
     seed: int,
     helper_funcs: HelperFuncs,
     jit: Jit,
+    sampler: Sampler,
 ) -> dict[int, "ToEval"]:
     all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
     lowerer = LowerToLLVM(all_bws)
@@ -118,6 +120,7 @@ def setup_eval(
             jit.get_fn_ptr(op_constraint[bw].name) if op_constraint else None,
             samples,
             seed,
+            sampler.sampler,
         )
         for bw, samples in mbw
     }
@@ -129,6 +132,7 @@ def setup_eval(
             lat_samples,
             crt_samples,
             seed,
+            sampler.sampler,
         )
         for bw, lat_samples, crt_samples in hbw
     }

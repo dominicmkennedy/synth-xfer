@@ -81,14 +81,18 @@ public:
       return 0;
 
     if (isBottom())
-      return APIntOps::abds(rhs.lower(), rhs.upper()).getActiveBits();
+      return APIntOps::abds(rhs.lower(), rhs.upper()).getZExtValue();
 
     if (rhs.isBottom())
-      return APIntOps::abds(lower(), upper()).getActiveBits();
+      return APIntOps::abds(lower(), upper()).getZExtValue();
 
-    const APInt ld = APIntOps::abds(lower(), rhs.lower());
-    const APInt ud = APIntOps::abds(upper(), rhs.upper());
-    return static_cast<unsigned long>((ld + ud).getActiveBits());
+    const uint64_t ld = APIntOps::abds(lower(), rhs.lower()).getZExtValue();
+    const uint64_t ud = APIntOps::abds(upper(), rhs.upper()).getZExtValue();
+    return ld + ud;
+  }
+
+  constexpr std::uint64_t size() const noexcept {
+    return distance(SConstRange::bottom());
   }
 
   static constexpr const SConstRange fromConcrete(const APInt<BW> &x) noexcept {
@@ -101,18 +105,23 @@ public:
     return APInt<BW>(static_cast<unsigned long>(dist(rng)));
   }
 
-  static const SConstRange rand(std::mt19937 &rng) noexcept {
-    std::uniform_int_distribution<unsigned long> dist(
-        0, APInt<BW>::getAllOnes().getZExtValue());
+  static const SConstRange rand(std::mt19937 &rng,
+                                std::uint64_t level) noexcept {
+    const __int128_t level128 = static_cast<__int128_t>(level);
+    const std::int64_t lb = APInt<BW>::getSignedMinValue().getSExtValue();
+    const std::int64_t max = APInt<BW>::getSignedMaxValue().getSExtValue();
 
-    SConstRange cr({APInt<BW>(dist(rng)), APInt<BW>(dist(rng))});
-    if (cr.isBottom()) {
-      const APInt tmp = cr.v[0];
-      cr.v[0] = cr.v[1];
-      cr.v[1] = tmp;
-    }
+    const __int128 ub = static_cast<__int128_t>(max) - level128;
 
-    return cr;
+    std::uniform_int_distribution<std::int64_t> dist(
+        lb, static_cast<std::int64_t>(ub));
+
+    std::int64_t low = dist(rng);
+
+    const __int128 high128 = static_cast<__int128_t>(low) + level128;
+    const std::int64_t high = static_cast<std::int64_t>(high128);
+    return SConstRange({APInt<BW>(static_cast<std::uint64_t>(low)),
+                        APInt<BW>(static_cast<std::uint64_t>(high))});
   }
 
   static constexpr const SConstRange bottom() noexcept {
@@ -148,7 +157,9 @@ public:
     return ret;
   }
 
-  static constexpr double maxDist() noexcept { return BW; }
+  static constexpr std::uint64_t num_levels() noexcept {
+    return APInt<BW>::getMaxValue().getZExtValue();
+  }
 
   // TODO make private?
   std::array<BV, arity> v{};

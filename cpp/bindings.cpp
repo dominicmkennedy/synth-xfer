@@ -4,11 +4,11 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include "anti_range.hpp"
 #include "domain.hpp"
 #include "enum.hpp"
 #include "eval.hpp"
 #include "knownbits.hpp"
+#include "rand.hpp"
 #include "results.hpp"
 #include "sconst_range.hpp"
 #include "uconst_range.hpp"
@@ -17,6 +17,46 @@ namespace py = pybind11;
 
 // TODO join all should take a vec of uint64_t and do everything in bulk for
 // better perf
+
+void register_rng(py::module_ &m) {
+  using SamplerPtr = std::shared_ptr<rngdist::Sampler>;
+
+  py::class_<rngdist::Sampler, SamplerPtr>(m, "Sampler", py::module_local())
+      .def("__str__", [](const rngdist::Sampler &) { return "<Sampler>"; });
+
+  m.def("uniform_sampler", []() -> SamplerPtr {
+    return std::make_shared<rngdist::UniformSampler>();
+  });
+
+  m.def(
+      "normal_sampler",
+      [](double sigma) -> SamplerPtr {
+        return std::make_shared<rngdist::NormalSampler>(sigma);
+      },
+      py::arg("sigma"));
+
+  m.def(
+      "skew_left_sampler",
+      [](double sigma, double alpha) -> SamplerPtr {
+        return std::make_shared<rngdist::SkewNormalLeftSampler>(sigma, alpha);
+      },
+      py::arg("sigma"), py::arg("alpha"));
+
+  m.def(
+      "skew_right_sampler",
+      [](double sigma, double alpha) -> SamplerPtr {
+        return std::make_shared<rngdist::SkewNormalRightSampler>(sigma, alpha);
+      },
+      py::arg("sigma"), py::arg("alpha"));
+
+  m.def(
+      "bimodal_sampler",
+      [](double sigma, double separation) -> SamplerPtr {
+        return std::make_shared<rngdist::BimodalSymmetricSampler>(sigma,
+                                                                  separation);
+      },
+      py::arg("sigma"), py::arg("separation"));
+}
 
 // TODO integrate this class more tightly with PerBitRes
 void register_results_class(py::module_ &m) {
@@ -89,34 +129,41 @@ void register_enum_domain(py::module_ &m) {
         EnumT ed{crtOpAddr, opConFnAddr};
         return std::make_unique<EvalVec>(ed.genLows());
       },
-      py::arg("crtOpAddr"), py::arg("opConFnAddr") = py::none(),
+      py::arg("crtOpAddr"), py::arg("opConFnAddr"),
       py::return_value_policy::take_ownership);
+
+  using SamplerPtr = std::shared_ptr<rngdist::Sampler>;
 
   m.def(("enum_mid_" + fn_name).c_str(),
         [](std::uintptr_t crtOpAddr, std::optional<std::uintptr_t> opConFnAddr,
-           unsigned int num_lat_samples, unsigned int seed) {
+           unsigned int num_lat_samples, unsigned int seed,
+           SamplerPtr sampler) {
           py::gil_scoped_release release;
+
           std::mt19937 rng(seed);
           EnumT ed{crtOpAddr, opConFnAddr};
-          return std::make_unique<EvalVec>(ed.genMids(num_lat_samples, rng));
+          return std::make_unique<EvalVec>(
+              ed.genMids(num_lat_samples, rng, *sampler));
         },
-        py::arg("crtOpAddr"), py::arg("opConFnAddr") = py::none(),
-        py::arg("num_lat_samples"), py::arg("seed"),
+        py::arg("crtOpAddr"), py::arg("opConFnAddr"),
+        py::arg("num_lat_samples"), py::arg("seed"), py::arg("sampler"),
         py::return_value_policy::take_ownership);
 
   m.def(("enum_high_" + fn_name).c_str(),
         [](std::uintptr_t crtOpAddr, std::optional<std::uintptr_t> opConFnAddr,
            unsigned int num_lat_samples, unsigned int num_conc_samples,
-           unsigned int seed) {
+           unsigned int seed, SamplerPtr sampler) {
           py::gil_scoped_release release;
+
           std::mt19937 rng(seed);
           EnumT ed{crtOpAddr, opConFnAddr};
           return std::make_unique<EvalVec>(
-              ed.genHighs(num_lat_samples, num_conc_samples, rng));
+              ed.genHighs(num_lat_samples, num_conc_samples, rng, *sampler));
         },
-        py::arg("crtOpAddr"), py::arg("opConFnAddr") = py::none(),
+        py::arg("crtOpAddr"), py::arg("opConFnAddr"),
         py::arg("num_lat_samples"), py::arg("num_conc_samples"),
-        py::arg("seed"), py::return_value_policy::take_ownership);
+        py::arg("seed"), py::arg("sampler"),
+        py::return_value_policy::take_ownership);
 }
 
 template <template <std::size_t> class Dom, std::size_t ResBw,
@@ -204,19 +251,13 @@ MAKE_OPAQUE_UNIFORM(SConstRange, 16);
 MAKE_OPAQUE_UNIFORM(SConstRange, 32);
 MAKE_OPAQUE_UNIFORM(SConstRange, 64);
 
-MAKE_OPAQUE_UNIFORM(AntiRange, 4);
-MAKE_OPAQUE_UNIFORM(AntiRange, 8);
-MAKE_OPAQUE_UNIFORM(AntiRange, 16);
-MAKE_OPAQUE_UNIFORM(AntiRange, 32);
-MAKE_OPAQUE_UNIFORM(AntiRange, 64);
-
 PYBIND11_MODULE(_eval_engine, m) {
   m.doc() = "Evaluation engine for synth_xfer";
 
+  register_rng(m);
   register_results_class(m);
 
   register_domain_widths<KnownBits, 4, 8, 16, 32, 64>(m);
   register_domain_widths<UConstRange, 4, 8, 16, 32, 64>(m);
   register_domain_widths<SConstRange, 4, 8, 16, 32, 64>(m);
-  register_domain_widths<AntiRange, 4, 8, 16, 32, 64>(m);
 }

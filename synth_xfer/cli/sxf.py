@@ -12,10 +12,10 @@ from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.mcmc_sampler import setup_mcmc
 from synth_xfer._util.one_iter import synthesize_one_iteration
 from synth_xfer._util.parse_mlir import HelperFuncs, get_helper_funcs, top_as_xfer
-from synth_xfer._util.random import Random
+from synth_xfer._util.random import Random, Sampler
 from synth_xfer._util.solution_set import UnsizedSolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
-from synth_xfer.cli.args import build_parser
+from synth_xfer.cli.args import build_parser, get_sampler
 
 if TYPE_CHECKING:
     from synth_xfer._eval_engine import ToEval
@@ -88,6 +88,7 @@ def run(
     transformer_file: Path,
     weighted_dsl: bool,
     num_unsound_candidates: int,
+    sampler: Sampler,
 ) -> EvalResult:
     logger = get_logger()
     jit = Jit()
@@ -106,7 +107,7 @@ def run(
     helper_funcs = get_helper_funcs(transformer_file, domain)
 
     start_time = perf_counter()
-    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helper_funcs, jit)
+    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helper_funcs, jit, sampler)
     run_time = perf_counter() - start_time
     logger.perf(f"Enum engine took {run_time:.4f}s")
 
@@ -239,6 +240,8 @@ def main() -> None:
     if not outputs_folder.is_dir():
         outputs_folder.mkdir()
 
+    sampler = get_sampler(args)
+
     logger = init_logging(outputs_folder, not args.quiet)
     max_len = max(len(k) for k in vars(args))
     [logger.config(f"{k:<{max_len}} | {v}") for k, v in vars(args).items()]
@@ -261,4 +264,5 @@ def main() -> None:
         transformer_file=op_path,
         weighted_dsl=args.weighted_dsl,
         num_unsound_candidates=args.num_unsound_candidates,
+        sampler=sampler,
     )

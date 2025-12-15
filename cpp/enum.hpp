@@ -9,6 +9,7 @@
 
 #include "apint.hpp"
 #include "domain.hpp"
+#include "rand.hpp"
 
 using namespace DomainHelpers;
 
@@ -58,13 +59,14 @@ public:
     return r;
   }
 
-  EvalVec genMids(unsigned int num_lat_samples, std::mt19937 &rng) {
+  EvalVec genMids(unsigned int num_lat_samples, std::mt19937 &rng,
+                  const rngdist::Sampler &sampler) {
     EvalVec r;
     r.reserve(num_lat_samples);
 
     for (unsigned int i = 0; i < num_lat_samples; ++i) {
       while (true) {
-        ArgsTuple args = make_random_args(rng);
+        ArgsTuple args = make_random_args(rng, sampler);
         ResD res = toBestAbst(args);
 
         if (!res.isBottom()) {
@@ -78,25 +80,30 @@ public:
   }
 
   EvalVec genHighs(unsigned int num_lat_samples, unsigned int num_conc_samples,
-                   std::mt19937 &rng) {
+                   std::mt19937 &rng, const rngdist::Sampler &sampler) {
     EvalVec r;
     r.reserve(num_lat_samples);
 
     for (unsigned int i = 0; i < num_lat_samples; ++i) {
-      ArgsTuple args = make_random_args(rng);
+      ArgsTuple args = make_random_args(rng, sampler);
       ResD res = ResD::bottom();
 
-      for (unsigned int j = 0; j < num_conc_samples; ++j) {
-        std::array<std::uint64_t, N> concretes{};
-        fill_sampled_concretes(args, rng, concretes);
+      const std::uint64_t cap = static_cast<std::uint64_t>(num_conc_samples);
+      const std::uint64_t total_space = capped_concrete_space(args, cap);
+      if (total_space <= cap) {
+        res = toBestAbst(args);
+      } else {
+        for (unsigned int j = 0; j < num_conc_samples; ++j) {
+          std::array<std::uint64_t, N> concretes{};
+          fill_sampled_concretes(args, rng, concretes);
 
-        if (opCon && apply_n_ary(*opCon, concretes) == 0)
-          continue;
+          if (opCon && apply_n_ary(*opCon, concretes) == 0)
+            continue;
 
-        auto out = apply_n_ary(concOp, concretes);
-        res = res.join(ResD::fromConcrete(APInt<ResBw>(out)));
+          auto out = apply_n_ary(concOp, concretes);
+          res = res.join(ResD::fromConcrete(APInt<ResBw>(out)));
+        }
       }
-
       r.emplace_back(std::tuple_cat(args, std::tuple<ResD>{res}));
     }
 
@@ -124,11 +131,19 @@ private:
     return res;
   }
 
-  ArgsTuple make_random_args(std::mt19937 &rng) const {
+  ArgsTuple make_random_args(std::mt19937 &rng,
+                             const rngdist::Sampler &sampler) const {
     ArgsTuple res{};
     std::apply(
         [&](auto &...elems) {
-          ((elems = std::decay_t<decltype(elems)>::rand(rng)), ...);
+          (
+              [&] {
+                using D = std::decay_t<decltype(elems)>;
+                const std::uint64_t hi = D::num_levels();
+                const std::uint64_t level = sampler(rng, 0ULL, hi);
+                elems = D::rand(rng, level);
+              }(),
+              ...);
         },
         res);
     return res;
@@ -191,5 +206,37 @@ private:
       return std::tuple<std::vector<APInt<BWs>>...>{
           std::get<Is>(args).toConcrete()...};
     }(std::make_index_sequence<N>{});
+  }
+
+  static std::uint64_t capped_concrete_space(const ArgsTuple &args,
+                                             std::uint64_t cap) {
+    std::uint64_t product = 1;
+    bool exceeded = false;
+
+    std::apply(
+        [&](auto const &...elems) {
+          auto handle = [&](auto const &elem) {
+            if (exceeded)
+              return;
+
+            std::uint64_t s = elem.size();
+
+            if (s == 0) {
+              s = 1;
+            }
+
+            if (product > cap / s) {
+              exceeded = true;
+              return;
+            }
+
+            product *= s;
+          };
+
+          (handle(elems), ...);
+        },
+        args);
+
+    return exceeded ? (cap + 1) : product;
   }
 };

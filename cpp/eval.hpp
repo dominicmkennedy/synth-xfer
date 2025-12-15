@@ -54,7 +54,7 @@ public:
 
   Results eval(const EvalVec &toEval) const {
     Results r{static_cast<unsigned int>(xfrFns.size()), ResBw,
-              ResultD::maxDist};
+              ResultD::num_levels};
 
     for (const Row &row : toEval) {
       const ArgsTuple args = take_args(row);

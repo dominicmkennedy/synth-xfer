@@ -15,6 +15,7 @@ from synth_xfer._util.eval import get_per_bit
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import get_helper_funcs, parse_mlir_func
+from synth_xfer._util.random import Sampler
 
 PROJ_DIR = Path(__file__).parent.parent
 DATA_DIR = PROJ_DIR / "tests" / "data"
@@ -46,7 +47,8 @@ def test_jit_with_kb_and():
     xfer_fn_addr = jit.get_fn_ptr("kb_and_8_shim")
 
     NUM_CASES = 5000
-    to_eval_mid = enum_mid_knownbits_8_8_8(conc_op_addr, None, NUM_CASES, 100)
+    sampler = Sampler.uniform()
+    to_eval_mid = enum_mid_knownbits_8_8_8(conc_op_addr, None, NUM_CASES, 100, sampler.sampler)
     raw_res = eval_knownbits_8_8_8(to_eval_mid, [xfer_fn_addr], [])
     res = get_per_bit(raw_res)[0]
     assert res.get_exact_prop() == 1.0
@@ -73,14 +75,15 @@ def test_jit_with_ucr_add():
     res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
-        == "bw: 4  all: 18496 s: 18496 e: 18496 uall: 6920  ue: 6920  dis: 0       bdis: 6267.5  sdis: 0"
+        == "bw: 4  all: 18496 s: 18496 e: 18496 uall: 6920  ue: 6920  dis: 0       bdis: 4243.2  sdis: 0"
     )
 
     conc_op_addr = jit.get_fn_ptr("concrete_op_8_shim")
     xfer_fn_addr = jit.get_fn_ptr("cr_add_8_shim")
 
     NUM_CASES = 5000
-    to_eval_mid = enum_mid_uconstrange_8_8_8(conc_op_addr, None, NUM_CASES, 100)
+    sampler = Sampler.uniform()
+    to_eval_mid = enum_mid_uconstrange_8_8_8(conc_op_addr, None, NUM_CASES, 100, sampler.sampler)
     raw_res = eval_uconstrange_8_8_8(to_eval_mid, [xfer_fn_addr], [])
     res = get_per_bit(raw_res)[0]
     assert res.get_exact_prop() == 1.0

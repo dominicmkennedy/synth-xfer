@@ -81,14 +81,18 @@ public:
       return 0;
 
     if (isBottom())
-      return APIntOps::abdu(rhs.lower(), rhs.upper()).getActiveBits();
+      return APIntOps::abdu(rhs.lower(), rhs.upper()).getZExtValue();
 
     if (rhs.isBottom())
-      return APIntOps::abdu(lower(), upper()).getActiveBits();
+      return APIntOps::abdu(lower(), upper()).getZExtValue();
 
-    const APInt ld = APIntOps::abdu(lower(), rhs.lower());
-    const APInt ud = APIntOps::abdu(upper(), rhs.upper());
-    return static_cast<unsigned long>((ld + ud).getActiveBits());
+    const uint64_t ld = APIntOps::abdu(lower(), rhs.lower()).getZExtValue();
+    const uint64_t ud = APIntOps::abdu(upper(), rhs.upper()).getZExtValue();
+    return ld + ud;
+  }
+
+  constexpr std::uint64_t size() const noexcept {
+    return distance(UConstRange::bottom());
   }
 
   static constexpr const UConstRange fromConcrete(const APInt<BW> &x) noexcept {
@@ -101,18 +105,13 @@ public:
     return APInt<BW>(dist(rng));
   }
 
-  static const UConstRange rand(std::mt19937 &rng) noexcept {
-    std::uniform_int_distribution<unsigned long> dist(
-        0, APInt<BW>::getAllOnes().getZExtValue());
+  static const UConstRange rand(std::mt19937 &rng,
+                                std::uint64_t level) noexcept {
+    std::uint64_t ub = APInt<BW>::getAllOnes().getZExtValue() - level;
+    std::uniform_int_distribution<unsigned long> dist(0, ub);
+    std::uint64_t low = dist(rng);
 
-    UConstRange cr({APInt<BW>(dist(rng)), APInt<BW>(dist(rng))});
-    if (cr.isBottom()) {
-      const APInt tmp = cr.v[0];
-      cr.v[0] = cr.v[1];
-      cr.v[1] = tmp;
-    }
-
-    return cr;
+    return UConstRange({APInt<BW>(low), APInt<BW>(low + level)});
   }
 
   static constexpr const UConstRange bottom() noexcept {
@@ -148,7 +147,9 @@ public:
     return ret;
   }
 
-  static constexpr double maxDist() noexcept { return BW; }
+  static constexpr std::uint64_t num_levels() noexcept {
+    return APInt<BW>::getMaxValue().getZExtValue();
+  }
 
   // TODO make private?
   std::array<BV, arity> v{};

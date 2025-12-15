@@ -5,9 +5,6 @@ class AbstractDomain(Enum):
     KnownBits = "KnownBits", 2
     UConstRange = "UConstRange", 2
     SConstRange = "SConstRange", 2
-    AntiRange = "AntiRange", 2
-    # TODO impl
-    # IntegerModulo = "IntegerModulo", 6
 
     vec_size: int
 
