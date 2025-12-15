@@ -73,7 +73,7 @@ def int_list(s: str) -> list[int]:
     return result
 
 
-def _make_sampler_parser(p: ArgumentParser):
+def make_sampler_parser(p: ArgumentParser):
     mx = p.add_mutually_exclusive_group(required=False)
     mx.add_argument(
         "-uniform", action="store_true", help="Use uniform sampling (default)"
@@ -225,7 +225,7 @@ def build_parser(prog: str) -> Namespace:
 
     output_dir = Path("outputs") if prog == "benchmark" else None
     p.add_argument("-o", "--output", type=Path, help="Output dir", default=output_dir)
-    _make_sampler_parser(p)
+    make_sampler_parser(p)
     p.add_argument("-random_seed", type=int, help="seed for synthesis")
     p.add_argument(
         "-program_length",

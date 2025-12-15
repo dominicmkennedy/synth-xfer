@@ -1,4 +1,9 @@
-from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser, ArgumentTypeError
+from argparse import (
+    ArgumentDefaultsHelpFormatter,
+    ArgumentParser,
+    ArgumentTypeError,
+    Namespace,
+)
 from multiprocessing import Pool
 from pathlib import Path
 
@@ -10,7 +15,8 @@ from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import get_helper_funcs, parse_mlir_mod, top_as_xfer
-from synth_xfer._util.random import Random
+from synth_xfer._util.random import Random, Sampler
+from synth_xfer.cli.args import get_sampler, make_sampler_parser
 
 
 def _int_tuple(s: str) -> tuple[int, ...]:
@@ -34,6 +40,7 @@ def _reg_args():
     p.add_argument("-random_seed", type=int, help="seed for synthesis")
     p.add_argument("-exact-bw", type=_int_tuple, default=(8, 10000))
     p.add_argument("-norm-bw", type=_int_tuple, default=(64, 2500, 50000))
+    make_sampler_parser(p)
     p.add_argument("-o", "--output", type=Path, default=None)
 
     return p.parse_args()
@@ -88,6 +95,7 @@ def run(
     input_path: Path,
     solution_path: Path,
     random_seed: int | None,
+    sampler: Sampler,
 ) -> tuple[EvalResult, EvalResult]:
     all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
     helpers = get_helper_funcs(input_path, domain)
@@ -105,7 +113,7 @@ def run(
 
     jit = Jit()
     jit.add_mod(str(lowerer))
-    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helpers, jit)
+    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helpers, jit, sampler)
 
     input = {
         bw: (
@@ -122,7 +130,9 @@ def run(
     return (res[0], res[1])
 
 
-def _run_wrapper(x: tuple[AbstractDomain, Path, Path, int | None, tuple]):
+def _run_wrapper(x: tuple[AbstractDomain, Path, Path, int | None, tuple, Namespace]):
+    sampler = get_sampler(x[5])
+
     return run(
         domain=x[0],
         lbw=x[4][0],
@@ -131,6 +141,7 @@ def _run_wrapper(x: tuple[AbstractDomain, Path, Path, int | None, tuple]):
         input_path=x[1],
         solution_path=x[2],
         random_seed=x[3],
+        sampler=sampler,
     )
 
 
@@ -138,7 +149,7 @@ def main() -> None:
     args = _reg_args()
     solutions = _get_solutions(args.solution_path)
 
-    inputs: list[tuple[AbstractDomain, Path, Path, int | None, tuple]] = []
+    inputs: list[tuple[AbstractDomain, Path, Path, int | None, tuple, Namespace]] = []
     for solution_path, op_path, domain in solutions:
         lbw, mbw, hbw = [], [], []
         if len(args.exact_bw) == 1:
@@ -155,7 +166,9 @@ def main() -> None:
         elif len(args.norm_bw) == 3:
             hbw.append(args.norm_bw)
 
-        inputs.append((domain, op_path, solution_path, args.random_seed, (lbw, mbw, hbw)))
+        inputs.append(
+            (domain, op_path, solution_path, args.random_seed, (lbw, mbw, hbw), args)
+        )
 
     inputs = sorted(inputs, key=lambda x: (x[0].value))
 
@@ -163,7 +176,7 @@ def main() -> None:
         data = p.map(_run_wrapper, inputs)
 
     rows = []
-    for (domain, op_path, _, _, _), (top_r, synth_r) in zip(inputs, data):
+    for (domain, op_path, _, _, _, _), (top_r, synth_r) in zip(inputs, data):
         top_8 = next(x for x in top_r.per_bit_res if x.bitwidth == 8)
         synth_8 = next(x for x in synth_r.per_bit_res if x.bitwidth == 8)
         top_64 = next(x for x in top_r.per_bit_res if x.bitwidth == 64)

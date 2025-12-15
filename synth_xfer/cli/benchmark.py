@@ -6,7 +6,7 @@ from typing import Any
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.log import init_logging
-from synth_xfer.cli.args import build_parser
+from synth_xfer.cli.args import build_parser, get_sampler
 from synth_xfer.cli.sxf import run
 
 
@@ -17,6 +17,8 @@ def synth_run(
     domain = x[1]
     tf_path = x[2]
     args = x[3]
+
+    sampler = get_sampler(args)
 
     print(f"Running {domain} {func_name}")
 
@@ -46,6 +48,7 @@ def synth_run(
             transformer_file=tf_path,
             weighted_dsl=args.weighted_dsl,
             num_unsound_candidates=args.num_unsound_candidates,
+            sampler=sampler,
         )
 
         return {
