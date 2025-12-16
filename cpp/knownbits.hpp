@@ -138,7 +138,7 @@ public:
       const std::uint32_t threshold =
           static_cast<std::uint32_t>(-bound) % bound;
       for (;;) {
-        std::uint32_t x = rng();
+        std::uint32_t x = static_cast<std::uint32_t>(rng());
         if (x >= threshold) {
           return x % bound;
         }
