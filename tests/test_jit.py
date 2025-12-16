@@ -48,7 +48,9 @@ def test_jit_with_kb_and():
 
     NUM_CASES = 5000
     sampler = Sampler.uniform()
-    to_eval_mid = enum_mid_knownbits_8_8_8(conc_op_addr, None, NUM_CASES, 100, sampler.sampler)
+    to_eval_mid = enum_mid_knownbits_8_8_8(
+        conc_op_addr, None, NUM_CASES, 100, sampler.sampler
+    )
     raw_res = eval_knownbits_8_8_8(to_eval_mid, [xfer_fn_addr], [])
     res = get_per_bit(raw_res)[0]
     assert res.get_exact_prop() == 1.0
@@ -83,7 +85,9 @@ def test_jit_with_ucr_add():
 
     NUM_CASES = 5000
     sampler = Sampler.uniform()
-    to_eval_mid = enum_mid_uconstrange_8_8_8(conc_op_addr, None, NUM_CASES, 100, sampler.sampler)
+    to_eval_mid = enum_mid_uconstrange_8_8_8(
+        conc_op_addr, None, NUM_CASES, 100, sampler.sampler
+    )
     raw_res = eval_uconstrange_8_8_8(to_eval_mid, [xfer_fn_addr], [])
     res = get_per_bit(raw_res)[0]
     assert res.get_exact_prop() == 1.0
