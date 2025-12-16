@@ -182,21 +182,6 @@ ALL_OPS = [
 def build_parser(prog: str) -> Namespace:
     p = ArgumentParser(prog=prog, formatter_class=ArgumentDefaultsHelpFormatter)
 
-    if prog == "egraph_rewriter":
-        p.add_argument("transfer_functions", type=Path, help="path to transfer function")
-        p.add_argument(
-            "-rewrite_meet",
-            action="store_true",
-            help="rewrite the entire meet instead of individual functions",
-        )
-        p.add_argument(
-            "--quiet",
-            action=BooleanOptionalAction,
-            default=True,
-            help="Suppress console output from the optimizer",
-        )
-        return p.parse_args()
-
     if prog == "synth_xfer":
         p.add_argument("transfer_functions", type=Path, help="path to transfer function")
         p.add_argument("-random_file", type=FileType("r"), help="file for preset rng")
@@ -207,35 +192,24 @@ def build_parser(prog: str) -> Namespace:
             required=True,
             help="Abstract Domain to evaluate",
         )
-        p.add_argument(
-            "--optimize",
-            action=BooleanOptionalAction,
-            default=False,
-            help="Run e-graph-based rewrite optimizer on synthesized candidates",
-        )
+
     if prog == "benchmark":
         p.add_argument(
-            "--kb-eval",
+            "-kb-eval",
             nargs="*",
             choices=ALL_OPS,
             default=[],
             help=f"Zero or more items from: {', '.join(ALL_OPS)}",
         )
         p.add_argument(
-            "--ucr-eval",
+            "-ucr-eval",
             nargs="*",
             choices=ALL_OPS,
             default=[],
             help=f"Zero or more items from: {', '.join(ALL_OPS)}",
         )
         p.add_argument(
-            "--optimize",
-            action=BooleanOptionalAction,
-            default=False,
-            help="Run e-graph-based rewrite optimizer on synthesized candidates",
-        )
-        p.add_argument(
-            "--scr-eval",
+            "-scr-eval",
             nargs="*",
             choices=ALL_OPS,
             default=[],
@@ -245,6 +219,12 @@ def build_parser(prog: str) -> Namespace:
     output_dir = Path("outputs") if prog == "benchmark" else None
     p.add_argument("-o", "--output", type=Path, help="Output dir", default=output_dir)
     make_sampler_parser(p)
+    p.add_argument(
+        "-optimize",
+        action=BooleanOptionalAction,
+        default=False,
+        help="Run e-graph-based rewrite optimizer on synthesized candidates",
+    )
     p.add_argument("-random_seed", type=int, help="seed for synthesis")
     p.add_argument(
         "-program_length",

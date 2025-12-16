@@ -1,56 +1,46 @@
+from argparse import (
+    ArgumentDefaultsHelpFormatter,
+    ArgumentParser,
+    BooleanOptionalAction,
+    Namespace,
+)
 from pathlib import Path
 
-from xdsl.context import Context
-from xdsl.dialects.arith import Arith
-from xdsl.dialects.builtin import Builtin, ModuleOp
-from xdsl.dialects.func import Func, FuncOp
-from xdsl.parser import Parser
-from xdsl_smt.dialects.transfer import Transfer
-
-from synth_xfer.cli.args import build_parser
+from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
+from synth_xfer.egraph_rewriter.rewriter import (
+    rewrite_meet_of_all_functions,
+    rewrite_transfer_functions,
+)
 
 
-def get_funcs(ctx: Context, p: Path) -> tuple[ModuleOp, list[FuncOp]]:
-    with open(p, "r") as f:
-        module = Parser(ctx, f.read(), p.name).parse_op()
-        assert isinstance(module, ModuleOp)
+def _get_args() -> Namespace:
+    p = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
 
-    fns = {x.sym_name.data: x for x in module.ops if isinstance(x, FuncOp)}
-    return module, list(fns.values())
-
-
-def run(
-    transfer_functions: Path,
-    rewrite_meet: bool,
-    quiet: bool,
-):
-    ctx = Context()
-    ctx.load_dialect(Arith)
-    ctx.load_dialect(Builtin)
-    ctx.load_dialect(Func)
-    ctx.load_dialect(Transfer)
-
-    _, xfer_funcs = get_funcs(ctx, transfer_functions)
-
-    # Import the rewriter module
-    from synth_xfer.egraph_rewriter.rewriter import (
-        rewrite_meet_of_all_functions,
-        rewrite_transfer_functions,
+    p.add_argument("transfer_functions", type=Path, help="path to transfer function")
+    p.add_argument(
+        "-rewrite_meet",
+        action="store_true",
+        help="rewrite the entire meet instead of individual functions",
+    )
+    p.add_argument(
+        "-quiet",
+        action=BooleanOptionalAction,
+        default=True,
+        help="Suppress console output from the optimizer",
     )
 
-    # Rewrite the transfer functions
-    all_ret_exprs = rewrite_transfer_functions(xfer_funcs, quiet=quiet)
-    if rewrite_meet:
-        rewrite_meet_of_all_functions(all_ret_exprs, quiet=quiet)
+    return p.parse_args()
 
 
 def main() -> None:
-    args = build_parser("egraph_rewriter")
-    run(
-        transfer_functions=args.transfer_functions,
-        rewrite_meet=args.rewrite_meet,
-        quiet=args.quiet,
-    )
+    args = _get_args()
+
+    mlir_mod = parse_mlir_mod(args.transfer_functions)
+    xfer_funcs = list(get_fns(mlir_mod).values())
+
+    all_ret_exprs = rewrite_transfer_functions(xfer_funcs, quiet=args.quiet)
+    if args.rewrite_meet:
+        rewrite_meet_of_all_functions(all_ret_exprs, quiet=args.quiet)
 
 
 if __name__ == "__main__":
