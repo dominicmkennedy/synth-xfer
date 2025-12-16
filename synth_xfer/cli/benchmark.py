@@ -28,6 +28,7 @@ def synth_run(
 
         logger = init_logging(output_folder, not args.quiet)
         max_len = max(len(k) for k in vars(args))
+        logger.config(f"{'transfer_functions':<{max_len}} | {tf_path}")
         [logger.config(f"{k:<{max_len}} | {v}") for k, v in vars(args).items()]
 
         res = run(

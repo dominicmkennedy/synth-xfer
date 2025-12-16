@@ -153,14 +153,14 @@ def main() -> None:
     for solution_path, op_path, domain in solutions:
         lbw, mbw, hbw = [], [], []
         if len(args.exact_bw) == 1:
-            lbw.append(args.exact_bw)
+            lbw.append(args.exact_bw[0])
         elif len(args.exact_bw) == 2:
             mbw.append(args.exact_bw)
         elif len(args.exact_bw) == 3:
-            hbw.append(args.exact_bw)
+            raise ValueError("Can't use hbw approx. for exact calculation")
 
         if len(args.norm_bw) == 1:
-            lbw.append(args.norm_bw)
+            lbw.append(args.norm_bw[0])
         elif len(args.norm_bw) == 2:
             mbw.append(args.norm_bw)
         elif len(args.norm_bw) == 3:
@@ -175,12 +175,15 @@ def main() -> None:
     with Pool() as p:
         data = p.map(_run_wrapper, inputs)
 
+    exact_bw = args.exact_bw[0]
+    norm_bw = args.norm_bw[0]
+
     rows = []
     for (domain, op_path, _, _, _, _), (top_r, synth_r) in zip(inputs, data):
-        top_8 = next(x for x in top_r.per_bit_res if x.bitwidth == 8)
-        synth_8 = next(x for x in synth_r.per_bit_res if x.bitwidth == 8)
-        top_64 = next(x for x in top_r.per_bit_res if x.bitwidth == 64)
-        synth_64 = next(x for x in synth_r.per_bit_res if x.bitwidth == 64)
+        top_8 = next(x for x in top_r.per_bit_res if x.bitwidth == exact_bw)
+        synth_8 = next(x for x in synth_r.per_bit_res if x.bitwidth == exact_bw)
+        top_64 = next(x for x in top_r.per_bit_res if x.bitwidth == norm_bw)
+        synth_64 = next(x for x in synth_r.per_bit_res if x.bitwidth == norm_bw)
 
         rows.append(
             {
