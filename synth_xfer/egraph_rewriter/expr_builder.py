@@ -1,12 +1,24 @@
 from __future__ import annotations
 
 from egglog import EGraph, Expr
+from egglog.declarations import CallDecl
 from xdsl.dialects.func import FuncOp
 from xdsl.ir import Operation
 from xdsl.ir.core import SSAValue
-from xdsl_smt.dialects.transfer import Constant, GetAllOnesOp, GetOp, MakeOp
+from xdsl_smt.dialects.transfer import (
+    CmpOp as TransferCmpOp,
+    Constant,
+    GetAllOnesOp,
+    GetOp,
+    MakeOp,
+)
 
-from synth_xfer.egraph_rewriter.datatypes import BV, gen_ruleset, mlir_op_to_egraph_op
+from synth_xfer.egraph_rewriter.datatypes import (
+    BV,
+    cmp_predicate_to_fn,
+    gen_ruleset,
+    mlir_op_to_egraph_op,
+)
 
 
 class ExprBuilder:
@@ -14,11 +26,13 @@ class ExprBuilder:
     op_to_expr: dict[Operation, Expr]
     arg_index: dict[SSAValue, int]
     ret_exprs: tuple[Expr, ...]
+    cmp_predicates: dict[CallDecl, int]
 
     def __init__(self, _func: FuncOp):
         self.func = _func
         self.op_to_expr = {}
         self.arg_index = {}
+        self.cmp_predicates = {}
 
     def create_arg_name(self, op: SSAValue, index: int) -> str:
         return f"arg{self.arg_index[op]}_{index}"
@@ -48,6 +62,20 @@ class ExprBuilder:
 
             if isinstance(op, GetAllOnesOp):
                 self.op_to_expr[op] = BV(-1)
+
+            if isinstance(op, TransferCmpOp):
+                pred = op.predicate.value.data
+                assert pred in cmp_predicate_to_fn
+                expr_operands = []
+                for operand in op.operands:
+                    assert isinstance(operand.owner, Operation)
+                    expr_operands.append(self.op_to_expr[operand.owner])
+                expr = cmp_predicate_to_fn[pred](*expr_operands)
+                call = expr.__egg_typed_expr__.expr
+                assert isinstance(call, CallDecl)
+                self.cmp_predicates[call] = pred
+                self.op_to_expr[op] = expr
+                continue
 
             if type(op) in mlir_op_to_egraph_op:
                 egraph_op = mlir_op_to_egraph_op[type(op)]

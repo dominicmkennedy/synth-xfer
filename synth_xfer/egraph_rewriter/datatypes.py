@@ -11,7 +11,6 @@ from xdsl_smt.dialects.transfer import (
     ClearHighBitsOp,
     ClearLowBitsOp,
     ClearSignBitOp,
-    CmpOp,
     CountLOneOp,
     CountLZeroOp,
     CountROneOp,
@@ -135,13 +134,52 @@ class BV(Expr):
     @classmethod
     def get_bitwidth(cls, op: BV) -> BV: ...
 
-    # Todo: different cmp ops
     @classmethod
-    def cmp(cls, lhs: BV, rhs: BV) -> BV: ...
+    def eq(cls, lhs: BV, rhs: BV) -> BV: ...
+
+    @classmethod
+    def ne(cls, lhs: BV, rhs: BV) -> BV: ...
+
+    @classmethod
+    def slt(cls, lhs: BV, rhs: BV) -> BV: ...
+
+    @classmethod
+    def sle(cls, lhs: BV, rhs: BV) -> BV: ...
+
+    @classmethod
+    def sgt(cls, lhs: BV, rhs: BV) -> BV: ...
+
+    @classmethod
+    def sge(cls, lhs: BV, rhs: BV) -> BV: ...
+
+    @classmethod
+    def ult(cls, lhs: BV, rhs: BV) -> BV: ...
+
+    @classmethod
+    def ule(cls, lhs: BV, rhs: BV) -> BV: ...
+
+    @classmethod
+    def ugt(cls, lhs: BV, rhs: BV) -> BV: ...
+
+    @classmethod
+    def uge(cls, lhs: BV, rhs: BV) -> BV: ...
 
     @classmethod
     def pop_count(cls, op: BV) -> BV: ...
 
+
+cmp_predicate_to_fn: dict[int, Callable[..., BV]] = {
+    0: BV.eq,  # eq
+    1: BV.ne,  # ne
+    2: BV.slt,
+    3: BV.sle,
+    4: BV.sgt,
+    5: BV.sge,
+    6: BV.ult,
+    7: BV.ule,
+    8: BV.ugt,
+    9: BV.uge,
+}
 
 mlir_op_to_egraph_op: dict[type[Operation], Callable[..., BV]] = {
     AddOp: BV.__add__,
@@ -173,7 +211,6 @@ mlir_op_to_egraph_op: dict[type[Operation], Callable[..., BV]] = {
     CountROneOp: BV.countr_one,
     CountRZeroOp: BV.countr_zero,
     SelectOp: BV.ite,
-    CmpOp: BV.cmp,
     GetBitWidthOp: BV.get_bitwidth,
     PopCountOp: BV.pop_count,
 }

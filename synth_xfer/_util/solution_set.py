@@ -164,6 +164,27 @@ class UnsizedSolutionSet(SolutionSet):
 
         raise Exception("Inconsistent between eval engine and verifier")
 
+    def handle_unsound_rewrite(
+        self, original: FunctionWithCondition, rewritten: FunctionWithCondition
+    ):
+        str_output = io.StringIO()
+
+        print("module {", file=str_output)
+        print(original.func, file=str_output)
+        if original.cond is not None:
+            print(original.cond, file=str_output)
+        # print(original.get_function(), file=str_output)
+        print("// After rewrite:", file=str_output)
+        print(rewritten.func, file=str_output)
+        if rewritten.cond is not None:
+            print(rewritten.cond, file=str_output)
+        # print(rewritten.get_function(), file=str_output)
+        print("}", file=str_output)
+
+        write_log_file("error_rewrite.mlir", str_output.getvalue())
+
+        raise Exception("Inconsistent Rewrite")
+
     def construct_new_solution_set(
         self,
         lbw: list[int],
@@ -207,7 +228,7 @@ class UnsizedSolutionSet(SolutionSet):
                 def _rewrite(candidate: FunctionWithCondition) -> FunctionWithCondition:
                     if not self.optimize:
                         return candidate
-                    rwt_func = rewrite_single_function(candidate.func)
+                    rwt_func = rewrite_single_function(dce(candidate.func))
                     # Todo: support rewriting condition functions later
                     # rwt_cond = rewrite_single_function(candidate.cond) if candidate.cond is not None else None
                     rwt_cond = candidate.cond
@@ -239,7 +260,7 @@ class UnsizedSolutionSet(SolutionSet):
                             logger.info(
                                 f"Inconsistent rewrite, body: {body_number}, cond: {cond_number}, original soundness: {is_sound}, rewritten soundness: {is_sound_rwt}"
                             )
-                            return False
+                            self.handle_unsound_rewrite(original, rewritten)
                     if is_sound is None:
                         logger.info(
                             f"Skip a function of which verification timed out at bw {bw}, body: {body_number}, cond: {cond_number}"

@@ -13,7 +13,7 @@ from synth_xfer.egraph_rewriter.expr_to_mlir import ExprToMLIR
 
 def rewrite_single_function_to_exprs(
     func: FuncOp, *, quiet: bool = True
-) -> tuple[egglog.Expr, ...]:
+) -> tuple[tuple[egglog.Expr, ...], dict]:
     """
     Rewrite a single transfer function by iterating over all its statements.
     This function specifically handles functions ending with "_body" or "_cond".
@@ -37,21 +37,21 @@ def rewrite_single_function_to_exprs(
             # print(f"  After:  {simplfied}")
         rewritten_exprs.append(simplfied)
 
-    return tuple(rewritten_exprs)
+    return tuple(rewritten_exprs), expr_builder.cmp_predicates
 
 
 def rewrite_single_function(func: FuncOp, *, quiet: bool = True) -> FuncOp:
-    rewritten_exprs = rewrite_single_function_to_exprs(func, quiet=quiet)
+    rewritten_exprs, cmp_predicates = rewrite_single_function_to_exprs(func, quiet=quiet)
 
     # Emit the original MLIR for reference
-    # print("Original MLIR:")
-    # print(func)
+    print("Original MLIR:")
+    print(func)
 
-    converter = ExprToMLIR(func)
+    converter = ExprToMLIR(func, cmp_predicates=cmp_predicates)
     rewritten_func = converter.convert(rewritten_exprs)
     # Emit the rewritten MLIR for inspection
-    # print("Rewritten MLIR:")
-    # print(f"{rewritten_func}\n")
+    print("Rewritten MLIR:")
+    print(f"{rewritten_func}\n")
     return rewritten_func
 
 
@@ -89,7 +89,8 @@ def rewrite_transfer_functions(
     # Rewrite the functions we want to process
     rewritten_funcs = []
     for func in functions_to_rewrite:
-        rewritten_funcs.append(rewrite_single_function_to_exprs(func, quiet=quiet))
+        exprs, _ = rewrite_single_function_to_exprs(func, quiet=quiet)
+        rewritten_funcs.append(exprs)
     return rewritten_funcs
 
 
