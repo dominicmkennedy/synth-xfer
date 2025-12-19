@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from egglog import EGraph, Expr
-from egglog.declarations import CallDecl
+from egglog.declarations import CallDecl, TypedExprDecl
 from xdsl.dialects.func import FuncOp
 from xdsl.ir import Operation
 from xdsl.ir.core import SSAValue
@@ -71,7 +71,12 @@ class ExprBuilder:
                     assert isinstance(operand.owner, Operation)
                     expr_operands.append(self.op_to_expr[operand.owner])
                 expr = cmp_predicate_to_fn[pred](*expr_operands)
-                call = expr.__egg_typed_expr__.expr
+                typed_expr = getattr(expr, "__egg_typed_expr__", None)
+                if not isinstance(typed_expr, TypedExprDecl):
+                    raise TypeError(
+                        "Expected expression to have a TypedExprDecl at '__egg_typed_expr__'"
+                    )
+                call = typed_expr.expr
                 assert isinstance(call, CallDecl)
                 self.cmp_predicates[call] = pred
                 self.op_to_expr[op] = expr

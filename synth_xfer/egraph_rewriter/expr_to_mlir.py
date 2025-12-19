@@ -57,15 +57,18 @@ def _build_op_maps() -> tuple[Mapping[str, type], Mapping[str, type]]:
 
 
 UNARY_OPS, BINARY_OPS = _build_op_maps()
-CMP_NAME_TO_PRED: Dict[str, int] = {
-    (
-        ref.method_name
-        if hasattr(ref := getattr(fn, "__egg_ref__", None), "method_name")
-        else getattr(ref, "name", None)  # type: ignore[misc]
-    ): pred
-    for pred, fn in cmp_predicate_to_fn.items()
-    if hasattr(fn, "__egg_ref__")
-}
+CMP_NAME_TO_PRED: Dict[str, int] = {}
+for pred, fn in cmp_predicate_to_fn.items():
+    ref = getattr(fn, "__egg_ref__", None)
+    if ref is None:
+        continue
+    if hasattr(ref, "method_name"):
+        name = ref.method_name
+    else:
+        name = getattr(ref, "name", None)
+    if not isinstance(name, str):
+        raise ValueError(f"Cannot resolve function name for predicate {pred}")
+    CMP_NAME_TO_PRED[name] = pred
 
 
 class ExprToMLIR:
