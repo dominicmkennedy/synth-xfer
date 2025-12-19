@@ -25,7 +25,7 @@ from xdsl_smt.dialects.transfer import (
     UnaryOp,
 )
 
-from synth_xfer.egraph_rewriter.datatypes import mlir_op_to_egraph_op
+from synth_xfer.egraph_rewriter.datatypes import cmp_predicate_to_fn, mlir_op_to_egraph_op
 
 
 def _build_op_maps() -> tuple[Mapping[str, type], Mapping[str, type]]:
@@ -35,19 +35,18 @@ def _build_op_maps() -> tuple[Mapping[str, type], Mapping[str, type]]:
     """
     unary: Dict[str, type] = {}
     binary: Dict[str, type] = {}
-    for op_cls, fn in mlir_op_to_egraph_op.items():
-        ref: Any = getattr(fn, "__egg_ref__", None)
+    for op_cls, func in mlir_op_to_egraph_op.items():
+        ref: Any = getattr(func, "__egg_ref__", None)
         if ref is None:
-            raise ValueError(f"Missing __egg_ref__ on {fn}")
+            raise ValueError(f"Missing __egg_ref__ on {func}")
         name = (
             ref.method_name if hasattr(ref, "method_name") else getattr(ref, "name", None)
         )
         if not isinstance(name, str):
-            raise ValueError(f"Cannot resolve function name for {fn}")
-        # Select has arity 3 and is handled specially
+            raise ValueError(f"Cannot resolve function name for {func}")
         if op_cls is SelectOp:
             continue
-        if op_cls is CmpOp or issubclass(op_cls, BinOp):
+        if issubclass(op_cls, BinOp):
             binary[name] = op_cls
             continue
         if issubclass(op_cls, UnaryOp):
@@ -58,6 +57,18 @@ def _build_op_maps() -> tuple[Mapping[str, type], Mapping[str, type]]:
 
 
 UNARY_OPS, BINARY_OPS = _build_op_maps()
+CMP_NAME_TO_PRED: Dict[str, int] = {}
+for pred, fn in cmp_predicate_to_fn.items():
+    ref = getattr(fn, "__egg_ref__", None)
+    if ref is None:
+        continue
+    if hasattr(ref, "method_name"):
+        name = ref.method_name
+    else:
+        name = getattr(ref, "name", None)
+    if not isinstance(name, str):
+        raise ValueError(f"Cannot resolve function name for predicate {pred}")
+    CMP_NAME_TO_PRED[name] = pred
 
 
 class ExprToMLIR:
@@ -69,7 +80,12 @@ class ExprToMLIR:
     unary_ops: Mapping[str, type] = UNARY_OPS
     binary_ops: Mapping[str, type] = BINARY_OPS
 
-    def __init__(self, func: FuncOp, new_name: str | None = None):
+    def __init__(
+        self,
+        func: FuncOp,
+        new_name: str | None = None,
+        cmp_predicates: Mapping[CallDecl, int] | None = None,
+    ):
         self.original_func = func
         self.func = FuncOp.from_region(
             new_name or func.sym_name.data,
@@ -87,6 +103,9 @@ class ExprToMLIR:
         self.expr_cache: Dict[object, SSAValue] = {}
         self.default_scalar_type = self._derive_scalar_type()
         self._const_witness: SSAValue | None = None
+        # cmp_predicates is kept for backward compatibility but is no longer needed
+        # now that each comparison predicate maps to its own BV function.
+        self.cmp_predicates: Mapping[CallDecl, int] = cmp_predicates or {}
 
     def convert(self, ret_exprs: Sequence[Expr]) -> FuncOp:
         self._verify_return_arity(ret_exprs)
@@ -247,9 +266,10 @@ class ExprToMLIR:
         if method_name == "ite":
             assert len(operands) == 3
             op = SelectOp(operands[0], operands[1], operands[2])
-        elif method_name == "cmp":
+        elif method_name in CMP_NAME_TO_PRED:
             assert len(operands) == 2
-            op = CmpOp(operands[0], operands[1], 0)
+            pred = CMP_NAME_TO_PRED[method_name]
+            op = CmpOp(operands[0], operands[1], pred)
         elif method_name in self.unary_ops:
             assert len(operands) == 1
             op_cls = self.unary_ops[method_name]

@@ -9,7 +9,7 @@ from pathlib import Path
 from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
 from synth_xfer.egraph_rewriter.rewriter import (
     rewrite_meet_of_all_functions,
-    rewrite_transfer_functions,
+    rewrite_solutions,
 )
 
 
@@ -38,7 +38,7 @@ def main() -> None:
     mlir_mod = parse_mlir_mod(args.transfer_functions)
     xfer_funcs = list(get_fns(mlir_mod).values())
 
-    all_ret_exprs = rewrite_transfer_functions(xfer_funcs, quiet=args.quiet)
+    all_ret_exprs = rewrite_solutions(xfer_funcs, quiet=args.quiet)
     if args.rewrite_meet:
         rewrite_meet_of_all_functions(all_ret_exprs, quiet=args.quiet)
 
