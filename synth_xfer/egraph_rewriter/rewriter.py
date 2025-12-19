@@ -93,9 +93,7 @@ def rewrite_solutions(
     # Rewrite the functions we want to process
     rewritten_funcs = []
     for func in functions_to_rewrite:
-        exprs, _ = rewrite_single_function_to_exprs(
-            func, quiet=quiet, timeout=timeout
-        )
+        exprs, _ = rewrite_single_function_to_exprs(func, quiet=quiet, timeout=timeout)
         rewritten_funcs.append(exprs)
     return rewritten_funcs
 
