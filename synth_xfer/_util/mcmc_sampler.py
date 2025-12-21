@@ -9,13 +9,42 @@ from xdsl_smt.dialects.transfer import (
     AbstractValueType,
     AddOp,
     AndOp,
+    AShrOp,
+    ClearHighBitsOp,
+    ClearLowBitsOp,
+    ClearSignBitOp,
     CmpOp,
     Constant,
+    CountLOneOp,
+    CountLZeroOp,
+    CountROneOp,
+    CountRZeroOp,
     GetAllOnesOp,
     GetBitWidthOp,
     GetOp,
+    LShrOp,
     MakeOp,
+    MulOp,
+    NegOp,
+    OrOp,
+    PopCountOp,
+    SDivOp,
+    SelectOp,
+    SetHighBitsOp,
+    SetLowBitsOp,
+    SetSignBitOp,
+    ShlOp,
+    SMaxOp,
+    SMinOp,
+    SRemOp,
+    SubOp,
     TransIntegerType,
+    UDivOp,
+    UMaxOp,
+    UMinOp,
+    UnaryOp,
+    URemOp,
+    XorOp,
 )
 
 from synth_xfer._util.cost_model import (
@@ -39,6 +68,23 @@ gamma = 0.99   # exponential decay constant
 eta = 1.0      # initial value for npulled
 beta = 0.25    # exploration tuning
 epsilon = 0.01 # epsilon for epsilon greedy
+
+# Names of all the operator subsets (not including ITE)
+subset_names = ["bitwise", "add", "max", "mul", "shift", "bitset", "bitcount"]
+
+# All operator subsets and their corresponding operations. There is no ITE
+# operator, and there are some operations which aren't categorized (PopCountOp,
+# SelectOp, UnaryOp)
+subsets = {
+    "bitwise" : [AndOp, OrOp, XorOp, NegOp],
+    "add" : [AddOp, SubOp],
+    "max" : [UMaxOp, UMinOp, SMaxOp, SMinOp],
+    "mul" : [MulOp, UDivOp, SDivOp, URemOp, SRemOp],
+    "shift" : [ShlOp, AShrOp, LShrOp],
+    "bitset" : [SetHighBitsOp, SetLowBitsOp, ClearLowBitsOp, ClearHighBitsOp, SetSignBitOp, ClearSignBitOp],
+    "bitcount" : [CountLOneOp, CountLZeroOp, CountROneOp, CountRZeroOp],
+#    "ite" : []
+}
 
 class MCMCSampler:
     current: MutationProgram
