@@ -113,6 +113,7 @@ def synthesize_one_iteration(
         for i, (spl, res) in enumerate(zip(mcmc_samplers, cmp_results)):
             proposed_cost = spl.compute_cost(res)
             current_cost = spl.compute_current_cost()
+            spl.update_mab_dist(current_cost, proposed_cost)
             decision = decide(random.random(), inv_temp, current_cost, proposed_cost)
             if decision:
                 spl.accept_proposed(res)
