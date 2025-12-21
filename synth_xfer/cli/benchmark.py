@@ -20,6 +20,13 @@ def synth_run(
 
     sampler = get_sampler(args)
 
+    mab = args.mab
+    if (mab):
+        print("Multi-armed bandit enabled")
+    else:
+        print("Multi-armed bandit disabled")
+
+
     print(f"Running {domain} {func_name}")
 
     try:
@@ -52,6 +59,7 @@ def synth_run(
             num_unsound_candidates=args.num_unsound_candidates,
             optimize=args.optimize,
             sampler=sampler,
+            mab=mab
         )
 
         return {

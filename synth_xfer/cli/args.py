@@ -312,5 +312,6 @@ def build_parser(prog: str) -> Namespace:
         default=15,
     )
     p.add_argument("-quiet", action="store_true")
+    p.add_argument("-mab", action="store_true", help="Enable multi-armed bandit mutation")
 
     return p.parse_args()
