@@ -97,9 +97,9 @@ class MCMCSampler:
     is_cond: bool
     length: int
     ops: dict[type[Operation], tuple[float, float]] # {operator : (score, npulled)}
-    timestep: int # timestep for decay
-    pulled_operator: type[Operation] | None # operator we decided to mutate with
-    mab: bool # whether to use MAB
+    timestep: int                                   # timestep for decay
+    pulled_operator: type[Operation] | None         # operator used for previous mutation
+    mab: bool                                       # whether to use MAB
 
     def __init__(
         self,
@@ -147,15 +147,19 @@ class MCMCSampler:
         Calculate the cost of whatever operator we mutated with and update the 
         MAB distribution.
         """
+        # self.pulled_operator will be None if previous mutation was operand
         if (self.pulled_operator != None):
+            # decay score and npulled for all operations
             for op in self.ops.keys():
                 score, npulled = self.ops[op]
                 self.ops[op] = (score * gamma, npulled * gamma)
             
+            # score is how much the mutation improves the cost
             score = current_cost - proposed_cost
-            # Initialize the operator if it's not already in self.ops
-            if self.pulled_operator not in self.ops:
-                self.ops[self.pulled_operator] = (0, eta)
+
+            assert self.pulled_operator in self.ops, "Pulled operator should be in ops"
+
+            # update score of pulled operator
             old_score, old_npulled = self.ops[self.pulled_operator]
             self.ops[self.pulled_operator] = (old_score + score, old_npulled + 1)
             self.pulled_operator = None
@@ -194,7 +198,8 @@ class MCMCSampler:
         
     def replace_entire_operation_mab(self, idx: int, history: bool):
         """
-        Random pick an operation and replace it with a new one
+        Random pick an operation and replace it with a new one chosen by
+        multi-armed bandit
         """
         self.timestep += 1
         old_op = self.current.ops[idx]
@@ -206,16 +211,17 @@ class MCMCSampler:
         # Get all operations that return the target type
         ops_with_target_type = set(self.context.dsl_ops[op_type].get_all_elements())
 
-        # set score of each operation
+        # calculate decayed timestep
         pulled = 1
         for _, (score, npulled) in self.ops.items():
             pulled += npulled
 
+        # calculate score for each operator
         for op, (score, npulled) in self.ops.items():
             if op in ops_with_target_type:
                 values[op] = score / npulled + 2*sqrt(beta * log(pulled) / npulled)
 
-        # dict comp, all valid operations based on operator position
+        # dict comp, all valid operands based on operator position
         valid_operands = {
             ty : self.current.get_valid_operands(idx, ty)
             for ty in [INT_T, BOOL_T]
@@ -242,15 +248,14 @@ class MCMCSampler:
             else:
                 # build int
                 new_op = self.context.build_int_op(best_op, operands_vals)
-            
+
             del values[best_op]
         
         assert best_op is not None, "best_op should be set in the loop"
         assert new_op is not None, "new_op should be set in the loop"
 
-        self.current.subst_operation(old_op, new_op, history)
-
         self.pulled_operator = best_op
+        self.current.subst_operation(old_op, new_op, history)
 
     def replace_operand(self, idx: int, history: bool):
         op = self.current.ops[idx]
