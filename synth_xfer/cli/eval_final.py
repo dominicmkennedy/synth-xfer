@@ -26,12 +26,12 @@ def _int_tuple(s: str) -> tuple[int, ...]:
             return (int(items[0]),)
         elif len(items) == 2:
             return (int(items[0]), int(items[1]))
-        elif len(items) == 2:
+        elif len(items) == 3:
             return (int(items[0]), int(items[1]), int(items[2]))
         else:
             raise ValueError
     except Exception:
-        raise ArgumentTypeError(f"Invalid tuple format: '{s}'. Expected format: int,int")
+        raise ArgumentTypeError(f"Invalid tuple format: '{s}'. Expected format: int,int or int,int,int")
 
 
 def _reg_args():
