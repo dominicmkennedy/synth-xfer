@@ -12,7 +12,7 @@ from synth_xfer.egraph_rewriter.expr_to_mlir import ExprToMLIR
 
 
 def rewrite_single_function_to_exprs(
-    func: FuncOp, *, quiet: bool = True, timeout: int = 10
+    func: FuncOp, *, quiet: bool = True, timeout: int = 5
 ) -> tuple[tuple[egglog.Expr, ...], dict]:
     """
     Rewrite a single transfer function by iterating over all its statements.
@@ -43,7 +43,7 @@ def rewrite_single_function_to_exprs(
 
 
 def rewrite_single_function(
-    func: FuncOp, *, quiet: bool = True, timeout: int = 10
+    func: FuncOp, *, quiet: bool = True, timeout: int = 5
 ) -> FuncOp:
     # Emit the original MLIR for reference
     # print("Original MLIR:")
@@ -69,7 +69,7 @@ def should_rewrite_function(func: FuncOp) -> bool:
 
 
 def rewrite_solutions(
-    xfer_funcs: List[FuncOp], *, quiet: bool = True, timeout: int = 10
+    xfer_funcs: List[FuncOp], *, quiet: bool = True, timeout: int = 5
 ) -> list[tuple[egglog.Expr, ...]]:
     """
     Rewrite transfer functions provided by postprocessor.py.

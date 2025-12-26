@@ -228,9 +228,11 @@ class UnsizedSolutionSet(SolutionSet):
                 def _rewrite(candidate: FunctionWithCondition) -> FunctionWithCondition:
                     if not self.optimize:
                         return candidate
+                    print("Rewrite a candidate function...")
                     rwt_func = rewrite_single_function(
-                        dce(candidate.func), quiet=True, timeout=10
+                        dce(candidate.func), quiet=True, timeout=5
                     )
+                    print("Rewriting done.")
                     # Todo: support rewriting condition functions later
                     # rwt_cond = rewrite_single_function(candidate.cond) if candidate.cond is not None else None
                     rwt_cond = candidate.cond
@@ -250,6 +252,18 @@ class UnsizedSolutionSet(SolutionSet):
                         helper_funcs,
                         200,
                     )
+                    if is_sound is None:
+                        logger.info(
+                            f"Skip a function of which verification timed out at bw {bw}, body: {body_number}, cond: {cond_number}"
+                        )
+                        return False
+                    if not is_sound:
+                        logger.info(
+                            f"Skip a unsound function at bw {bw}, body: {body_number}, cond: {cond_number}"
+                        )
+                        if bw in lbw:
+                            self.handle_inconsistent_result(original)
+                        return False
                     if self.optimize:
                         is_sound_rwt, _ = verify_function(
                             bw,
@@ -263,18 +277,7 @@ class UnsizedSolutionSet(SolutionSet):
                                 f"Inconsistent rewrite, body: {body_number}, cond: {cond_number}, original soundness: {is_sound}, rewritten soundness: {is_sound_rwt}"
                             )
                             self.handle_unsound_rewrite(original, rewritten)
-                    if is_sound is None:
-                        logger.info(
-                            f"Skip a function of which verification timed out at bw {bw}, body: {body_number}, cond: {cond_number}"
-                        )
-                        return False
-                    if not is_sound:
-                        logger.info(
-                            f"Skip a unsound function at bw {bw}, body: {body_number}, cond: {cond_number}"
-                        )
-                        if bw in lbw:
-                            self.handle_inconsistent_result(original)
-                        return False
+
                     return True
 
                 if (candidate in new_candidates_sp) or (candidate in new_candidates_c):

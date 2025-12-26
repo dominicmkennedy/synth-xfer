@@ -106,7 +106,7 @@ def build_meet_expr(all_ret_exprs: list[tuple[Expr, ...]]) -> tuple[Expr, ...]:
     return tuple(meet_exprs)
 
 
-def simplify_term(expr: Expr, *, timeout: int = 10) -> tuple[Expr, int, int]:
+def simplify_term(expr: Expr, *, timeout: int = 5) -> tuple[Expr, int, int]:
     egraph = EGraph()
     rules = gen_ruleset()
     expr_to_simplify = egraph.let("expr_to_simplify", expr)
