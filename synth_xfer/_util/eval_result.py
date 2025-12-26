@@ -104,7 +104,32 @@ class EvalResult:
         self.unsolved_exacts = sum(res.unsolved_exacts for res in low_med_res)
 
     def __str__(self):
-        return "\n".join(str(res) for res in self.per_bit_res)
+        def _pct(n: float, d: float) -> float:
+            return 0.0 if d == 0 else n / d * 100
+
+        overall: list[str] = [
+            f"sound {self.sounds}/{self.all_cases} ({_pct(self.sounds, self.all_cases):.2f}%)",
+            f"exact {self.exacts}/{self.all_low_med_cases} ({_pct(self.exacts, self.all_low_med_cases):.2f}%)",
+        ]
+        overall.append(
+            f"unsolved exact {self.unsolved_exacts}/{self.unsolved_cases} ({_pct(self.unsolved_exacts, self.unsolved_cases):.2f}% of unsolved)"
+            if self.unsolved_cases
+            else "unsolved exact 0/0 (0.00% of unsolved)"
+        )
+
+        improve = (
+            0.0
+            if self.base_dist == 0
+            else (self.base_dist - self.sound_dist) / self.base_dist * 100
+        )
+
+        lines = [
+            "Overall: " + ", ".join(overall),
+            f"Distance: {self.base_dist:.4f} -> {self.sound_dist:.4f} (improve {improve:.2f}%)",
+            "Per bit:",
+        ]
+        lines.extend(f"  {res}" for res in self.per_bit_res)
+        return "\n".join(lines)
 
     def get_low_med_res(self) -> list[PerBitRes]:
         return [
