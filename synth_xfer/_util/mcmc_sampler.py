@@ -200,6 +200,9 @@ class MCMCSampler:
         """
         Random pick an operation and replace it with a new one chosen by
         multi-armed bandit
+
+        idx : where the operation to replace lives (i.e., line number in program)
+        history : whether to save the operation being replaced
         """
         self.timestep += 1
         old_op = self.current.ops[idx]
