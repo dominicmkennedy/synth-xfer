@@ -97,8 +97,10 @@ class MCMCSampler:
     is_cond: bool
     length: int
     ops: dict[type[Operation], tuple[float, float]] # {operator : (score, npulled)}
+    subset_scores: dict[str, tuple[float, float]]   # {subset : (score, npulled)}
     timestep: int                                   # timestep for decay
     pulled_operator: type[Operation] | None         # operator used for previous mutation
+    pulled_subset: str | None                       # subset used for previous mutation
     mab: bool                                       # whether to use MAB
 
     def __init__(
@@ -139,8 +141,18 @@ class MCMCSampler:
         for op in context.dsl_ops[INT_T].get_all_elements():
             self.ops[op] = (0, eta)
 
+        self.subset_scores = {
+        "bitwise" : (0, eta), 
+        "add" : (0, eta), 
+        "max" : (0, eta), 
+        "mul" : (0, eta), 
+        "shift" : (0, eta), 
+        "bitset" : (0, eta), 
+        "bitcount" : (0, eta)
+        }
         self.timestep = 1
         self.pulled_operator = None
+        self.pulled_subset = None
     
     def update_mab_dist(self, current_cost: float, proposed_cost: float):
         """
@@ -224,7 +236,7 @@ class MCMCSampler:
             if op in ops_with_target_type:
                 values[op] = score / npulled + 2*sqrt(beta * log(pulled) / npulled)
 
-        # dict comp, all valid operands based on operator position
+        # dict comp, all valid operands based on operation position
         valid_operands = {
             type : self.current.get_valid_operands(idx, type)
             for type in [INT_T, BOOL_T]
@@ -259,6 +271,68 @@ class MCMCSampler:
 
         self.pulled_operator = best_op
         self.current.subst_operation(old_op, new_op, history)
+
+    def replace_entire_operation_subs(self, idx: int, history: bool):
+        self.timestep += 1
+        old_op = self.current.ops[idx]
+        op_type = get_ret_type(old_op)
+
+        # score of each subset
+        values: dict[str, float] = {}
+
+        # only add subsets where at least one op has correct return type
+        subs_with_target_type = set()
+        for subset, operators in subsets.items():
+            for op in operators:
+                if get_ret_type(op) == op_type:
+                    subs_with_target_type.add(subset)
+        
+        # calculate decayed timestep
+        pulled = 0
+        for _, (_, npulled) in self.subset_scores.items():
+            pulled += npulled
+        
+        # calculate score for each subset
+        for subset, (score, npulled) in self.subset_scores.items():
+            if subset in subs_with_target_type:
+                values[subset] = score / npulled + 2*sqrt(beta * log(pulled) / npulled)
+        
+        # dict comp, all valid operands based on operation position
+        valid_operands = {
+            type : self.current.get_valid_operands(idx, type)
+            for type in [INT_T, BOOL_T]
+        }
+
+        new_op: type[Operation] | None = None
+        best_op: type[Operation] | None = None
+        best_subs: str | None = None
+        while new_op is None:
+            # select the subset with the best score
+            best_subs = max(values.keys(), key=lambda k: values[k])
+
+            # track scores of ops in the best subset
+            op_scores: dict[type[Operation], float] = {}
+            
+            # loop through all the operators in the subset to find the highest scoring one
+            for op in subsets[best_subs]:
+                
+                # only care about ops with correct return type
+                if (get_ret_type(op) == op_type):
+                    operands_vals = tuple(valid_operands[t] for t in get_operand_kinds(op))
+
+                    # build operation
+                    if (op_type == BOOL_T):
+                        new_op = self.context.build_i1_op(op, operands_vals)
+                    else:
+                        new_op = self.context.build_int_op(op, operands_vals)
+
+                    if (new_op is None):
+                        continue
+                
+                    # IDEA:
+                    # self.context.subst_operator(old_op, new_op, history=False)
+                    # calculate the score of the new program -- requires some stuff that currently lives in synthesize_one_iteration
+                    # store scores and then mutate with best operator
 
     def replace_operand(self, idx: int, history: bool):
         op = self.current.ops[idx]
