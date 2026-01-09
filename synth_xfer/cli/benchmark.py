@@ -21,8 +21,10 @@ def synth_run(
     sampler = get_sampler(args)
 
     mab = args.mab
-    if (mab):
-        print("Multi-armed bandit enabled")
+    if (mab == "op"):
+        print("Operator-level multi-armed bandit enabled")
+    elif (mab == "subs"):
+        print("Subset-level multi-armed bandit enabled")
     else:
         print("Multi-armed bandit disabled")
 

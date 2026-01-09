@@ -94,7 +94,7 @@ def run(
     num_unsound_candidates: int,
     optimize: bool,
     sampler: Sampler,
-    mab: bool
+    mab: str
 ) -> EvalResult:
     logger = get_logger()
     jit = Jit()
@@ -240,8 +240,10 @@ def main() -> None:
     domain = AbstractDomain[args.domain]
     op_path = Path(args.transfer_functions)
     mab = args.mab
-    if (mab):
-        print("Multi-armed bandit enabled")
+    if (mab == "op"):
+        print("Operation-level multi-armed bandit enabled")
+    elif (mab == "subs"):
+        print("Subset-level multi-armed bandit enabled")
     else:
         print("Multi-armed bandit disabled")
 
