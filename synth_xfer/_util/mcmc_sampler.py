@@ -105,7 +105,7 @@ class MCMCSampler:
     timestep: int                                   # timestep for decay
     pulled_operator: type[Operation] | None         # operator used for previous mutation
     pulled_subset: str | None                       # subset used for previous mutation
-    mab: bool                                       # whether to use MAB
+    mab: str                                       # whether to use MAB
 
     def __init__(
         self,
@@ -117,7 +117,7 @@ class MCMCSampler:
         reset_init_program: bool = True,
         random_init_program: bool = True,
         is_cond: bool = False,
-        mab: bool = False,
+        mab: str = "",
     ):
         self.is_cond = is_cond
         self.mab = mab
@@ -353,7 +353,6 @@ class MCMCSampler:
             # Once we figure out the best op, do a subst_operator(original_op, best_op, history=True)
             # For acceptance criteria
 
-
             # loop through all the operators in the subset to find the highest scoring one
             for op in subsets[best_subs]:
                 
@@ -387,7 +386,7 @@ class MCMCSampler:
             
             # find op with best score in the subset
             if len(op_scores) > 0:
-                best_op = max(op_scores.keys(), key=lambda k: op_scores[k])
+                best_op = min(op_scores.keys(), key=lambda k: op_scores[k])
                 # substitute original op for best op (with history so can revert later if rejected)
                 operands_vals = tuple(valid_operands[t] for t in get_operand_kinds(best_op))
                 if op_type == BOOL_T:
@@ -520,9 +519,10 @@ class MCMCSampler:
         # replace an operation with a new operation
         if sample_mode < 0.3 and live_op_indices:
             idx = self.random.choice(live_op_indices)
-            if (self.mab):
+            if (self.mab == "op"):
+                self.replace_entire_operation_mab(idx, True)
+            elif (self.mab == "subs"):
                 self.replace_entire_operation_subs(idx, True, solution_set)
-                # self.replace_entire_operation_mab(idx, True)
             else:
                 self.replace_entire_operation(idx, True)
         # replace an operand in an operation
@@ -554,7 +554,7 @@ def setup_mcmc(
     program_length: int,
     total_rounds: int,
     cond_length: int,
-    mab: bool
+    mab: str
 ) -> tuple[list[MCMCSampler], list[FuncOp], tuple[range, range, range]]:
     """
     A mcmc sampler use one of 3 modes: sound & precise, precise, condition
