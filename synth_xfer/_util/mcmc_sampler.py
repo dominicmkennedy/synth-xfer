@@ -47,12 +47,14 @@ from xdsl_smt.dialects.transfer import (
     XorOp,
 )
 
+from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.cost_model import (
     abduction_cost,
     precise_cost,
     sound_and_precise_cost,
 )
-from synth_xfer._util.dsl_operators import BOOL_T, INT_T, get_operand_kinds
+from synth_xfer._util.solution_set import SolutionSet
+from synth_xfer._util.dsl_operators import BOOL_T, INT_T, get_operand_kinds, get_result_kind
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.mutation_program import MutationProgram
 from synth_xfer._util.random import Random
@@ -75,8 +77,10 @@ subset_names = ["bitwise", "add", "max", "mul", "shift", "bitset", "bitcount"]
 # All operator subsets and their corresponding operations. There is no ITE
 # operator, and there are some operations which aren't categorized (PopCountOp,
 # SelectOp, UnaryOp)
+
+# ADDED CmpOp to bitwise subset
 subsets = {
-    "bitwise" : [AndOp, OrOp, XorOp, NegOp],
+    "bitwise" : [AndOp, OrOp, XorOp, NegOp, CmpOp],
     "add" : [AddOp, SubOp],
     "max" : [UMaxOp, UMinOp, SMaxOp, SMinOp],
     "mul" : [MulOp, UDivOp, SDivOp, URemOp, SRemOp],
@@ -176,6 +180,27 @@ class MCMCSampler:
             self.ops[self.pulled_operator] = (old_score + score, old_npulled + 1)
             self.pulled_operator = None
 
+    def update_subset_dist(self, current_cost: float, proposed_cost: float):
+        """
+        Calculate the cost of whatever subset we mutated with and update the 
+        subset distribution.
+        """
+        # self.pulled_subset will be None if previous mutation was operand
+        if (self.pulled_subset != None):
+            # decay score and npulled for all subsets
+            for subset, (score, npulled) in self.subset_scores.items():
+                self.subset_scores[subset] = (score * gamma, npulled * gamma)
+            
+            # score is how much the mutation improves the cost
+            score = current_cost - proposed_cost
+
+            assert self.pulled_subset in self.subset_scores, "Pulled subset should be in subset_scores"
+
+            # update score of pulled subset
+            old_score, old_npulled = self.subset_scores[self.pulled_subset]
+            self.subset_scores[self.pulled_subset] = (old_score + score, old_npulled + 1)
+            self.pulled_subset = None
+
     def compute_cost(self, cmp: EvalResult) -> float:
         return self.cost_func(cmp, self.step_cnt / self.total_steps)
 
@@ -244,7 +269,7 @@ class MCMCSampler:
 
         assert values, "No valid operations available for replacement"
 
-        new_op: type[Operation] | None = None
+        new_op: Operation | None = None
         best_op: type[Operation] | None = None
         while new_op is None:
 
@@ -272,10 +297,11 @@ class MCMCSampler:
         self.pulled_operator = best_op
         self.current.subst_operation(old_op, new_op, history)
 
-    def replace_entire_operation_subs(self, idx: int, history: bool):
+    def replace_entire_operation_subs(self, idx: int, history: bool, solution_set: SolutionSet):
         self.timestep += 1
         old_op = self.current.ops[idx]
         op_type = get_ret_type(old_op)
+        # print(f"Replacing operation of type: {old_op}, with type:'{op_type}'")
 
         # score of each subset
         values: dict[str, float] = {}
@@ -284,9 +310,16 @@ class MCMCSampler:
         subs_with_target_type = set()
         for subset, operators in subsets.items():
             for op in operators:
-                if get_ret_type(op) == op_type:
+                # print(f"Checking operator: {op}, with type:'{get_result_kind(op)}'")
+                if get_result_kind(op) == op_type:
+                    # print(f"Adding subset: {subset}")
                     subs_with_target_type.add(subset)
-        
+
+        # if len(subs_with_target_type) > 0:
+        #     print(f"Subsets with target type: {subs_with_target_type}")
+        # else:
+        #     print(f"No subsets with target type {op_type}, operation: {old_op}")
+    
         # calculate decayed timestep
         pulled = 0
         for _, (_, npulled) in self.subset_scores.items():
@@ -303,21 +336,30 @@ class MCMCSampler:
             for type in [INT_T, BOOL_T]
         }
 
-        new_op: type[Operation] | None = None
+        new_op: Operation | None = None
         best_op: type[Operation] | None = None
         best_subs: str | None = None
         while new_op is None:
             # select the subset with the best score
+            assert len(values) > 0, "No valid subsets available for replacement (should at least be able to replace w/ self)"
             best_subs = max(values.keys(), key=lambda k: values[k])
 
             # track scores of ops in the best subset
             op_scores: dict[type[Operation], float] = {}
-            
+
+            # Need to keep the very first old_op in case need to revert later on (call it original_op)
+            # Otherwise we keep subst_operator for each of the ops in the subset
+            # Without needing to revert..., it will just replace the old_op with the new_op
+            # Once we figure out the best op, do a subst_operator(original_op, best_op, history=True)
+            # For acceptance criteria
+
+
             # loop through all the operators in the subset to find the highest scoring one
             for op in subsets[best_subs]:
                 
-                # only care about ops with correct return type
-                if (get_ret_type(op) == op_type):
+                # only care about ops with correct return type, 
+                # but op is not a full "Operation" object, so we use get_result_kind
+                if (get_result_kind(op) == op_type):
                     operands_vals = tuple(valid_operands[t] for t in get_operand_kinds(op))
 
                     # build operation
@@ -328,11 +370,37 @@ class MCMCSampler:
 
                     if (new_op is None):
                         continue
+
+                    self.current.subst_operation(old_op, new_op, history=True)
+
+                    fwc = FunctionWithCondition(self.current.func.clone())
+                    fwc.set_func_name(f"{self.current.func.sym_name.data}_temp")
+                    cmp_results = solution_set.eval_improve([fwc])
+                    score = self.compute_cost(cmp_results[0])
+                    op_scores[op] = score
+                    self.current.revert_operation()
                 
                     # IDEA:
                     # self.context.subst_operator(old_op, new_op, history=False)
                     # calculate the score of the new program -- requires some stuff that currently lives in synthesize_one_iteration
                     # store scores and then mutate with best operator
+            
+            # find op with best score in the subset
+            if len(op_scores) > 0:
+                best_op = max(op_scores.keys(), key=lambda k: op_scores[k])
+                # substitute original op for best op (with history so can revert later if rejected)
+                operands_vals = tuple(valid_operands[t] for t in get_operand_kinds(best_op))
+                if op_type == BOOL_T:
+                    new_op = self.context.build_i1_op(best_op, operands_vals)
+                else:
+                    new_op = self.context.build_int_op(best_op, operands_vals)
+
+        
+        self.current.subst_operation(old_op, new_op, history)
+        
+        # Don't think we need to update
+        # self.pulled_operator = best_op
+        self.pulled_subset = best_subs
 
     def replace_operand(self, idx: int, history: bool):
         op = self.current.ops[idx]
@@ -438,7 +506,7 @@ class MCMCSampler:
 
         return MutationProgram(func)
 
-    def sample_next(self):
+    def sample_next(self, solution_set: SolutionSet):
         """
         Sample the next program.
         Return the new program with the proposal ratio.
@@ -453,7 +521,8 @@ class MCMCSampler:
         if sample_mode < 0.3 and live_op_indices:
             idx = self.random.choice(live_op_indices)
             if (self.mab):
-                self.replace_entire_operation_mab(idx, True)
+                self.replace_entire_operation_subs(idx, True, solution_set)
+                # self.replace_entire_operation_mab(idx, True)
             else:
                 self.replace_entire_operation(idx, True)
         # replace an operand in an operation

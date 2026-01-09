@@ -99,7 +99,11 @@ def synthesize_one_iteration(
 
     for rnd in range(total_rounds):
         s = perf_counter()
-        transfers = [spl.sample_next().get_current() for spl in mcmc_samplers]
+        # transfers = [spl.sample_next().get_current() for spl in mcmc_samplers]
+        transfers = []
+        for spl in mcmc_samplers:
+            spl.sample_next(solution_set)
+            transfers.append(spl.get_current())
         func_with_cond_lst = _build_eval_list(
             transfers, sp_range, p_range, c_range, prec_set
         )
@@ -113,7 +117,8 @@ def synthesize_one_iteration(
         for i, (spl, res) in enumerate(zip(mcmc_samplers, cmp_results)):
             proposed_cost = spl.compute_cost(res)
             current_cost = spl.compute_current_cost()
-            spl.update_mab_dist(current_cost, proposed_cost)
+            # spl.update_mab_dist(current_cost, proposed_cost)
+            spl.update_subset_dist(current_cost, proposed_cost)
             decision = decide(random.random(), inv_temp, current_cost, proposed_cost)
             if decision:
                 spl.accept_proposed(res)
