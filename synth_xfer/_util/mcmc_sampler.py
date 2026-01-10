@@ -163,6 +163,18 @@ class MCMCSampler:
         Calculate the cost of whatever operator we mutated with and update the 
         MAB distribution.
         """
+        if self.mab == "op":
+            self.update_mab_dist_op(current_cost, proposed_cost)
+        elif self.mab == "subs":
+            self.update_mab_dist_subs(current_cost, proposed_cost)
+        else:
+            # do nothing, not using MAB
+            pass
+
+    def update_mab_dist_op(self, current_cost: float, proposed_cost: float):
+        """
+        Update the MAB distribution for the operator.
+        """
         # self.pulled_operator will be None if previous mutation was operand
         if (self.pulled_operator != None):
             # decay score and npulled for all operations
@@ -180,7 +192,7 @@ class MCMCSampler:
             self.ops[self.pulled_operator] = (old_score + score, old_npulled + 1)
             self.pulled_operator = None
 
-    def update_subset_dist(self, current_cost: float, proposed_cost: float):
+    def update_mab_dist_subs(self, current_cost: float, proposed_cost: float):
         """
         Calculate the cost of whatever subset we mutated with and update the 
         subset distribution.

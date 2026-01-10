@@ -3,3 +3,5 @@ venv/
 __pycache__/
 .cache/
 eval/
+results/
+zz_eval/
