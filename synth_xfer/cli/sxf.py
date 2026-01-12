@@ -2,9 +2,10 @@ from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Callable
 
+import xdsl.dialects.arith as arith
 from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.dsl_operators import DslOpSet, load_dsl_ops
+from synth_xfer._util.dsl_operators import DslOpSet, load_dsl_ops, BOOL_T, INT_T
 from synth_xfer._util.eval import eval_transfer_func, setup_eval
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.jit import Jit
@@ -17,6 +18,47 @@ from synth_xfer._util.random import Random, Sampler
 from synth_xfer._util.solution_set import UnsizedSolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
 from synth_xfer.cli.args import build_parser, get_sampler
+from xdsl_smt.dialects.transfer import (
+    AbstractValueType,
+    AddOp,
+    AndOp,
+    AShrOp,
+    ClearHighBitsOp,
+    ClearLowBitsOp,
+    ClearSignBitOp,
+    CmpOp,
+    Constant,
+    CountLOneOp,
+    CountLZeroOp,
+    CountROneOp,
+    CountRZeroOp,
+    GetAllOnesOp,
+    GetBitWidthOp,
+    GetOp,
+    LShrOp,
+    MakeOp,
+    MulOp,
+    NegOp,
+    OrOp,
+    PopCountOp,
+    SDivOp,
+    SelectOp,
+    SetHighBitsOp,
+    SetLowBitsOp,
+    SetSignBitOp,
+    ShlOp,
+    SMaxOp,
+    SMinOp,
+    SRemOp,
+    SubOp,
+    TransIntegerType,
+    UDivOp,
+    UMaxOp,
+    UMinOp,
+    UnaryOp,
+    URemOp,
+    XorOp,
+)
 
 if TYPE_CHECKING:
     from synth_xfer._eval_engine import ToEval
@@ -72,6 +114,14 @@ def _setup_context(
         c.use_basic_i1_ops()
     return c
 
+boolean_ops: DslOpSet = {INT_T: [], BOOL_T: [arith.AndIOp, arith.OrIOp, arith.XOrIOp, CmpOp]}
+bitwise_ops: DslOpSet = {INT_T: [AndOp, OrOp, XorOp, NegOp], BOOL_T: []}
+add_ops: DslOpSet = {INT_T: [AddOp, SubOp], BOOL_T: []}
+max_ops: DslOpSet = {INT_T: [UMaxOp, UMinOp, SMaxOp, SMinOp], BOOL_T: []}
+mul_ops: DslOpSet = {INT_T: [MulOp, UDivOp, SDivOp, URemOp, SRemOp], BOOL_T: []}
+shift_ops: DslOpSet = {INT_T: [ShlOp, AShrOp, LShrOp], BOOL_T: []}
+bitset_ops: DslOpSet = {INT_T: [SetHighBitsOp, SetLowBitsOp, ClearLowBitsOp, ClearHighBitsOp, SetSignBitOp, ClearSignBitOp], BOOL_T: []}
+bitcount_ops: DslOpSet = {INT_T: [CountLOneOp, CountLZeroOp, CountROneOp, CountRZeroOp], BOOL_T: []}
 
 def run(
     domain: AbstractDomain,
@@ -94,7 +144,7 @@ def run(
     num_unsound_candidates: int,
     optimize: bool,
     sampler: Sampler,
-    mab: bool
+    mab: str
 ) -> EvalResult:
     logger = get_logger()
     jit = Jit()
@@ -240,8 +290,10 @@ def main() -> None:
     domain = AbstractDomain[args.domain]
     op_path = Path(args.transfer_functions)
     mab = args.mab
-    if (mab):
-        print("Multi-armed bandit enabled")
+    if (mab == "op"):
+        print("Operation-level multi-armed bandit enabled")
+    elif (mab == "subs"):
+        print("Subset-level multi-armed bandit enabled")
     else:
         print("Multi-armed bandit disabled")
 
