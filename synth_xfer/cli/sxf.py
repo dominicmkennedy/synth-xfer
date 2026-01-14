@@ -114,15 +114,6 @@ def _setup_context(
         c.use_basic_i1_ops()
     return c
 
-boolean_ops: DslOpSet = {INT_T: [], BOOL_T: [arith.AndIOp, arith.OrIOp, arith.XOrIOp, CmpOp]}
-bitwise_ops: DslOpSet = {INT_T: [AndOp, OrOp, XorOp, NegOp], BOOL_T: []}
-add_ops: DslOpSet = {INT_T: [AddOp, SubOp], BOOL_T: []}
-max_ops: DslOpSet = {INT_T: [UMaxOp, UMinOp, SMaxOp, SMinOp], BOOL_T: []}
-mul_ops: DslOpSet = {INT_T: [MulOp, UDivOp, SDivOp, URemOp, SRemOp], BOOL_T: []}
-shift_ops: DslOpSet = {INT_T: [ShlOp, AShrOp, LShrOp], BOOL_T: []}
-bitset_ops: DslOpSet = {INT_T: [SetHighBitsOp, SetLowBitsOp, ClearLowBitsOp, ClearHighBitsOp, SetSignBitOp, ClearSignBitOp], BOOL_T: []}
-bitcount_ops: DslOpSet = {INT_T: [CountLOneOp, CountLZeroOp, CountROneOp, CountRZeroOp], BOOL_T: []}
-
 def run(
     domain: AbstractDomain,
     num_programs: int,
