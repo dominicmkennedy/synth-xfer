@@ -83,7 +83,7 @@ def get_ops_in_subset(subset: tuple[str, ...]) -> DslOpSet | None:
 
 def get_name_powerset() -> list[tuple[str, ...]]:
     """ return the powerset of all the group names """
-    
+
     return list(chain.from_iterable(combinations(op_groups, r) for r in range(1,len(op_groups)+1)))
 
 def get_full_powerset() -> dict[tuple[str, ...], DslOpSet]:
