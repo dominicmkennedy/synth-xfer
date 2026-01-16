@@ -239,11 +239,6 @@ def run_subset(
             subsets: list[tuple[str, ...]] = list(subset_scores.keys())
             chosen_subset = random.choice_weighted(subsets, subset_scores)
 
-            if weighted_dsl:
-                assert isinstance(solution_set, UnsizedSolutionSet)
-                contexts_weighted[chosen_subset].weighted = True
-                solution_set.learn_weights(contexts_weighted[chosen_subset])
-
             mcmc_samplers, prec_set, ranges = setup_mcmc(
                 helper_funcs.transfer_func,
                 solution_set.precise_set,
