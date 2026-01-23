@@ -82,6 +82,35 @@ def get_ops_in_subset(subset: tuple[str, ...]) -> DslOpSet | None:
 
     return ops
 
+def get_feature_vector(subset: tuple[str, ...]) -> tuple[float, ...] | None:
+    """ 
+    return the feature vector for a given subset. features are of the form:
+
+    (bitwise, add, max, mul, shift, bitset, bitcount)
+    """
+    fvec: tuple[float, ...] = (0, 0, 0, 0, 0, 0, 0)
+
+    for group in subset:
+        match group:
+            case 'bitwise':
+                fvec[0] = 1
+            case 'add':
+                fvec[1] = 1
+            case 'max':
+                fvec[2] = 1
+            case 'mul':
+                fvec[3] = 1
+            case 'shift':
+                fvec[4] = 1
+            case 'bitset':
+                fvec[5] = 1
+            case 'bitcount':
+                fvec[6] = 1
+            case _:
+                return None
+    
+    return fvec
+
 
 def get_name_powerset() -> list[tuple[str, ...]]:
     """ return the powerset of all the group names """
