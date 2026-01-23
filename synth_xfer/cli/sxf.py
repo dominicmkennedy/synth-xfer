@@ -205,6 +205,7 @@ def run_subset(
             vbw
         )
 
+        # Update the MAB distribution
         cmp_res = solution_set.eval_improve([])[0]
         sampler.update(np.array(get_feature_vector(chosen_subset)), cmp_res.get_exact_prop() - prev_exact)
         prev_exact = cmp_res.get_exact_prop()
@@ -442,7 +443,7 @@ def main() -> None:
     max_len = max(len(k) for k in vars(args))
     [logger.config(f"{k:<{max_len}} | {v}") for k, v in vars(args).items()]
 
-
+    # Run subset selection if -subs flag is used
     if (args.subs):
         print("Subset selection enabled")
         run_subset(
