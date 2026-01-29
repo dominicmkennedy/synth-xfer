@@ -9,45 +9,42 @@
 
 #include "apint.hpp"
 
-// TODO rand should take latice_level as a param so we can change the dist of
-// the abst vals we sample
-
 template <template <std::size_t> class D, std::size_t BW>
 concept Domain =
-    std::default_initializable<D<BW>> &&
+    std::default_initializable<D<BW>> && requires { typename D<BW>::BV; } &&
     requires(const D<BW> d, const APInt<BW> &a, std::size_t i, std::ostream &os,
-             std::mt19937 &rng) {
-      typename D<BW>::BV;
-      requires std::same_as<typename D<BW>::BV, APInt<BW>>;
+             std::mt19937 &rng, const typename D<BW>::BV &bv) {
+      { bv.getZExtValue() } -> std::convertible_to<std::uint64_t>;
 
+      // Static metadata
       { D<BW>::arity } -> std::convertible_to<std::size_t>;
-      { D<BW>::name } -> std::convertible_to<const std::string_view>;
-      requires(D<BW>::arity >= 2 && D<BW>::arity <= 6);
-      { d[i] } noexcept -> std::same_as<const APInt<BW> &>;
+      { D<BW>::name } -> std::convertible_to<std::string_view>;
+      requires(D<BW>::arity >= 1 && D<BW>::arity <= 6);
 
-      // Static methods
-      { D<BW>::rand(rng, i) } -> std::same_as<const D<BW>>;
-      { D<BW>::bottom() } noexcept -> std::same_as<const D<BW>>;
-      { D<BW>::top() } noexcept -> std::same_as<const D<BW>>;
-      {
-        D<BW>::enumLattice()
-      } noexcept -> std::same_as<const std::vector<D<BW>>>;
-      { D<BW>::fromConcrete(a) } noexcept -> std::same_as<const D<BW>>;
+      // Component access
+      { d[i] } noexcept -> std::same_as<const typename D<BW>::BV &>;
+
+      // Static constructors / enumerations
+      { D<BW>::rand(rng, i) } -> std::same_as<D<BW>>;
+      { D<BW>::bottom() } noexcept -> std::same_as<D<BW>>;
+      { D<BW>::top() } noexcept -> std::same_as<D<BW>>;
+      { D<BW>::enumLattice() } -> std::same_as<std::vector<D<BW>>>;
+      { D<BW>::fromConcrete(a) } noexcept -> std::same_as<D<BW>>;
       { D<BW>::num_levels() } noexcept -> std::same_as<std::uint64_t>;
 
       // Instance methods
       { d.isTop() } noexcept -> std::same_as<bool>;
       { d.isBottom() } noexcept -> std::same_as<bool>;
-      { d.meet(d) } noexcept -> std::same_as<const D<BW>>;
-      { d.join(d) } noexcept -> std::same_as<const D<BW>>;
-      { d.toConcrete() } noexcept -> std::same_as<const std::vector<APInt<BW>>>;
+      { d.meet(d) } noexcept -> std::same_as<D<BW>>;
+      { d.join(d) } noexcept -> std::same_as<D<BW>>;
+      { d.toConcrete() } -> std::same_as<std::vector<APInt<BW>>>;
       { d.distance(d) } noexcept -> std::same_as<std::uint64_t>;
       { d.size() } noexcept -> std::same_as<std::uint64_t>;
-      { d.sample_concrete(rng) } -> std::same_as<const APInt<BW>>;
+      { d.sample_concrete(rng) } -> std::same_as<APInt<BW>>;
+
       { os << d } -> std::same_as<std::ostream &>;
     } &&
     std::constructible_from<D<BW>, const std::array<APInt<BW>, D<BW>::arity> &>;
-;
 
 template <template <std::size_t> class D, std::size_t BW>
   requires Domain<D, BW>
@@ -72,19 +69,27 @@ template <template <std::size_t> class Dom, std::size_t ResBw,
   requires(Domain<Dom, ResBw> && (Domain<Dom, BWs> && ...))
 using ToEval = std::vector<std::tuple<Dom<BWs>..., Dom<ResBw>>>;
 
-// TODO specialized to arity 2 domains
-template <std::size_t BW>
-inline const constexpr std::array<std::uint64_t, 2>
-pack(const std::array<APInt<BW>, 2> &arr) {
-  return std::array<std::uint64_t, 2>{arr[0].getZExtValue(),
-                                      arr[1].getZExtValue()};
+template <template <std::size_t> class D, std::size_t BW>
+  requires Domain<D, BW>
+constexpr std::array<APInt<BW>, D<BW>::arity>
+unpack(const std::array<std::uint64_t, D<BW>::arity> &value) {
+  constexpr std::size_t N = D<BW>::arity;
+
+  return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+    return std::array<APInt<BW>, N>{APInt<BW>{value[Is]}...};
+  }(std::make_index_sequence<N>{});
 }
 
-// TODO specialized to arity 2 domains
-template <std::size_t BW>
-inline const constexpr std::array<APInt<BW>, 2>
-unpack(const std::array<std::uint64_t, 2> &value) {
-  return {APInt<BW>{value[0]}, APInt<BW>{value[1]}};
+template <template <std::size_t> class D, std::size_t BW>
+  requires Domain<D, BW>
+constexpr std::array<std::uint64_t, D<BW>::arity>
+pack(const std::array<typename D<BW>::BV, D<BW>::arity> &arr) {
+  constexpr std::size_t N = D<BW>::arity;
+
+  return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+    return std::array<std::uint64_t, N>{
+        static_cast<std::uint64_t>(arr[Is].getZExtValue())...};
+  }(std::make_index_sequence<N>{});
 }
 
 template <template <std::size_t> class D, std::size_t BW>

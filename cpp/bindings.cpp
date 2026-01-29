@@ -8,15 +8,13 @@
 #include "enum.hpp"
 #include "eval.hpp"
 #include "knownbits.hpp"
+#include "mod.hpp"
 #include "rand.hpp"
 #include "results.hpp"
 #include "sconst_range.hpp"
 #include "uconst_range.hpp"
 
 namespace py = pybind11;
-
-// TODO join all should take a vec of uint64_t and do everything in bulk for
-// better perf
 
 void register_rng(py::module_ &m) {
   using SamplerPtr = std::shared_ptr<rngdist::Sampler>;
@@ -97,7 +95,8 @@ void register_enum_domain(py::module_ &m) {
   using EnumT = EnumDomain<Dom, ResBw, BWs...>;
 
   std::string dname = std::string(Dom<ResBw>::name);
-  std::string cls_name = std::string("ToEval") + dname + std::to_string(ResBw);
+  std::string cls_name =
+      std::string("ToEval") + dname + "_" + std::to_string(ResBw);
   ((cls_name += "_" + std::to_string(BWs)), ...);
 
   py::class_<EvalVec>(m, cls_name.c_str())
@@ -220,6 +219,7 @@ void register_domain(py::module_ &m) {
   register_uniform_arity<Dom, BW, 1>(m);
   register_uniform_arity<Dom, BW, 2>(m);
   register_uniform_arity<Dom, BW, 3>(m);
+  register_uniform_arity<Dom, BW, 4>(m);
 }
 
 template <template <std::size_t> class Dom, std::size_t... BWs>
@@ -230,7 +230,8 @@ void register_domain_widths(py::module_ &m) {
 #define MAKE_OPAQUE_UNIFORM(DOM, BW)                                           \
   PYBIND11_MAKE_OPAQUE(ToEval<DOM, BW, BW>);                                   \
   PYBIND11_MAKE_OPAQUE(ToEval<DOM, BW, BW, BW>);                               \
-  PYBIND11_MAKE_OPAQUE(ToEval<DOM, BW, BW, BW, BW>);
+  PYBIND11_MAKE_OPAQUE(ToEval<DOM, BW, BW, BW, BW>);                           \
+  PYBIND11_MAKE_OPAQUE(ToEval<DOM, BW, BW, BW, BW, BW>);
 
 // Register domain classes here
 MAKE_OPAQUE_UNIFORM(KnownBits, 4);
@@ -251,6 +252,36 @@ MAKE_OPAQUE_UNIFORM(SConstRange, 16);
 MAKE_OPAQUE_UNIFORM(SConstRange, 32);
 MAKE_OPAQUE_UNIFORM(SConstRange, 64);
 
+MAKE_OPAQUE_UNIFORM(Mod3, 4);
+MAKE_OPAQUE_UNIFORM(Mod3, 8);
+MAKE_OPAQUE_UNIFORM(Mod3, 16);
+MAKE_OPAQUE_UNIFORM(Mod3, 32);
+MAKE_OPAQUE_UNIFORM(Mod3, 64);
+
+MAKE_OPAQUE_UNIFORM(Mod5, 4);
+MAKE_OPAQUE_UNIFORM(Mod5, 8);
+MAKE_OPAQUE_UNIFORM(Mod5, 16);
+MAKE_OPAQUE_UNIFORM(Mod5, 32);
+MAKE_OPAQUE_UNIFORM(Mod5, 64);
+
+MAKE_OPAQUE_UNIFORM(Mod7, 4);
+MAKE_OPAQUE_UNIFORM(Mod7, 8);
+MAKE_OPAQUE_UNIFORM(Mod7, 16);
+MAKE_OPAQUE_UNIFORM(Mod7, 32);
+MAKE_OPAQUE_UNIFORM(Mod7, 64);
+
+MAKE_OPAQUE_UNIFORM(Mod11, 4);
+MAKE_OPAQUE_UNIFORM(Mod11, 8);
+MAKE_OPAQUE_UNIFORM(Mod11, 16);
+MAKE_OPAQUE_UNIFORM(Mod11, 32);
+MAKE_OPAQUE_UNIFORM(Mod11, 64);
+
+MAKE_OPAQUE_UNIFORM(Mod13, 4);
+MAKE_OPAQUE_UNIFORM(Mod13, 8);
+MAKE_OPAQUE_UNIFORM(Mod13, 16);
+MAKE_OPAQUE_UNIFORM(Mod13, 32);
+MAKE_OPAQUE_UNIFORM(Mod13, 64);
+
 PYBIND11_MODULE(_eval_engine, m) {
   m.doc() = "Evaluation engine for synth_xfer";
 
@@ -260,4 +291,9 @@ PYBIND11_MODULE(_eval_engine, m) {
   register_domain_widths<KnownBits, 4, 8, 16, 32, 64>(m);
   register_domain_widths<UConstRange, 4, 8, 16, 32, 64>(m);
   register_domain_widths<SConstRange, 4, 8, 16, 32, 64>(m);
+  register_domain_widths<Mod3, 4, 8, 16, 32, 64>(m);
+  register_domain_widths<Mod5, 4, 8, 16, 32, 64>(m);
+  register_domain_widths<Mod7, 4, 8, 16, 32, 64>(m);
+  register_domain_widths<Mod11, 4, 8, 16, 32, 64>(m);
+  register_domain_widths<Mod13, 4, 8, 16, 32, 64>(m);
 }

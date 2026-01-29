@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -14,14 +15,15 @@ using namespace DomainHelpers;
 
 namespace detail {
 
-template <std::size_t N, std::size_t... Is>
+template <std::size_t N, std::size_t Arity, std::size_t... Is>
 auto xfer_fn_ptr(std::index_sequence<Is...>)
-    -> std::array<std::uint64_t, 2> (*)(
-        std::conditional_t<true, std::array<std::uint64_t, 2>,
+    -> std::array<std::uint64_t, Arity> (*)(
+        std::conditional_t<true, std::array<std::uint64_t, Arity>,
                            std::integral_constant<std::size_t, Is>>...);
 
-template <std::size_t N>
-using xfer_fn_t = decltype(xfer_fn_ptr<N>(std::make_index_sequence<N>{}));
+template <std::size_t N, std::size_t Arity>
+using xfer_fn_t =
+    decltype(xfer_fn_ptr<N, Arity>(std::make_index_sequence<N>{}));
 
 } // namespace detail
 
@@ -33,10 +35,12 @@ public:
   static constexpr std::size_t N = sizeof...(BWs);
 
   using ResultD = Dom<ResBw>;
+  static constexpr std::size_t arity = ResultD::arity;
+
   using ArgsTuple = std::tuple<Dom<BWs>...>;
   using Row = std::tuple<Dom<BWs>..., ResultD>;
   using EvalVec = ToEval<Dom, ResBw, BWs...>;
-  using XferFn = detail::xfer_fn_t<N>;
+  using XferFn = detail::xfer_fn_t<N, arity>;
 
 private:
   std::vector<XferFn> xfrFns;
@@ -84,10 +88,11 @@ private:
 
       for (XferFn f : fns) {
         auto packedRes = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-          return f(pack<std::tuple_element_t<Is, BWConstTuple>::value>(
+          return f(pack<Dom, std::tuple_element_t<Is, BWConstTuple>::value>(
               std::get<Is>(args).v)...);
         }(idxs);
-        out.emplace_back(ResultD(unpack<ResBw>(packedRes)));
+
+        out.emplace_back(ResultD(unpack<Dom, ResBw>(packedRes)));
       }
 
       return out;
