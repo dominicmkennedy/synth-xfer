@@ -137,6 +137,7 @@ ALL_OPS = [
     "CountRZero",
     "Fshl",
     "Fshr",
+    "Lerp",
     "Lshr",
     "LshrExact",
     "Mods",
