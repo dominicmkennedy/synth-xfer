@@ -18,12 +18,13 @@ def _get_args() -> Namespace:
 
     p.add_argument("transfer_functions", type=Path, help="path to transfer function")
     p.add_argument(
-        "-rewrite_meet",
+        "--rewrite-meet",
         action="store_true",
         help="rewrite the entire meet instead of individual functions",
     )
     p.add_argument(
-        "-quiet",
+        "-q",
+        "--quiet",
         action=BooleanOptionalAction,
         default=True,
         help="Suppress console output from the optimizer",

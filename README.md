@@ -52,11 +52,11 @@ Here's a simple invocation of the `sxf` program for quick testing:
 ```bash
 sxf mlir/Operations/And.mlir \
     -o outputs/And           \
-    -domain KnownBits        \
-    -num-iters 2             \
-    -num-steps 100           \
-    -num-mcmc 50             \
-    -random-seed 2333
+    --domain KnownBits        \
+    --num-iters 2             \
+    --num-steps 100           \
+    --num-mcmc 50             \
+    --random-seed 2333
 ```
 
 Output:
@@ -78,13 +78,13 @@ This is a more comprehensive invocation closer to the experiment setup used in t
 ```bash
 sxf mlir/Operations/Add.mlir         \
     -o outputs/Add                   \
-    -domain KnownBits                \
-    -num-iters 5                     \
-    -num-steps 1000                  \
-    -num-mcmc 100                    \
-    -mbw 8,5000 16,5000              \
-    -hbw 32,5000,10000 64,5000,10000 \
-    -vbw 4,8,16,32,64
+    --domain KnownBits                \
+    --num-iters 5                     \
+    --num-steps 1000                  \
+    --num-mcmc 100                    \
+    --mbw 8,5000 16,5000              \
+    --hbw 32,5000,10000 64,5000,10000 \
+    --vbw 4,8,16,32,64
 ```
 
 ## Important CLI Options for `sxf`

@@ -37,9 +37,9 @@ def _int_tuple(s: str) -> tuple[int, ...]:
 def _reg_args():
     p = ArgumentParser(prog="eval-final", formatter_class=ArgumentDefaultsHelpFormatter)
     p.add_argument("solution_path", type=Path, help="path to the solution")
-    p.add_argument("-random_seed", type=int, help="seed for synthesis")
-    p.add_argument("-exact-bw", type=_int_tuple, default=(8, 10000))
-    p.add_argument("-norm-bw", type=_int_tuple, default=(64, 2500, 50000))
+    p.add_argument("--random-seed", type=int, help="seed for synthesis")
+    p.add_argument("--exact-bw", type=_int_tuple, default=(8, 10000))
+    p.add_argument("--norm-bw", type=_int_tuple, default=(64, 2500, 50000))
     make_sampler_parser(p)
     p.add_argument("-o", "--output", type=Path, default=None)
 
