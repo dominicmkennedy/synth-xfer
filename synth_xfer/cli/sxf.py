@@ -234,7 +234,7 @@ def main() -> None:
     args = build_parser("synth_xfer")
 
     domain = AbstractDomain[args.domain]
-    op_path = Path(args.transfer_functions)
+    op_path = Path(args.transfer_function)
 
     if args.output is None:
         outputs_folder = Path(f"{domain}_{op_path.stem}")

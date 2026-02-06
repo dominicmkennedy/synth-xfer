@@ -16,7 +16,7 @@ dependencies = [
   # "xdsl-smt @ https://github.com/opencompl/xdsl-smt/archive/4704d93.tar.gz",
   "xdsl-smt @ https://github.com/dominicmkennedy/xdsl-smt/archive/739aa03.tar.gz",
   "z3-solver==4.15.1.0",
-  "llvmlite>=0.45.0",
+  "llvmlite==0.44.0",
   "pandas==2.3.3",
   "egglog>=1.0.0",
   "cloudpickle",

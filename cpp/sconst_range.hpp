@@ -11,8 +11,6 @@
 #include "apint.hpp"
 #include "domain.hpp"
 
-using namespace DomainHelpers;
-
 template <std::size_t BW> class SConstRange {
 public:
   using BV = APInt<BW>;
@@ -45,28 +43,28 @@ public:
   }
   bool constexpr isBottom() const noexcept { return lower().sgt(upper()); }
 
-  const constexpr SConstRange meet(const SConstRange &rhs) const noexcept {
-    const APInt l = rhs.lower().sgt(lower()) ? rhs.lower() : lower();
-    const APInt u = rhs.upper().slt(upper()) ? rhs.upper() : upper();
+  constexpr SConstRange meet(const SConstRange &rhs) const noexcept {
+    const BV l = rhs.lower().sgt(lower()) ? rhs.lower() : lower();
+    const BV u = rhs.upper().slt(upper()) ? rhs.upper() : upper();
     if (l.sgt(u))
       return bottom();
-    return SConstRange({std::move(l), std::move(u)});
+    return SConstRange({l, u});
   }
 
-  const constexpr SConstRange join(const SConstRange &rhs) const noexcept {
-    const APInt l = rhs.lower().slt(lower()) ? rhs.lower() : lower();
-    const APInt u = rhs.upper().sgt(upper()) ? rhs.upper() : upper();
-    return SConstRange({std::move(l), std::move(u)});
+  constexpr SConstRange join(const SConstRange &rhs) const noexcept {
+    const BV l = rhs.lower().slt(lower()) ? rhs.lower() : lower();
+    const BV u = rhs.upper().sgt(upper()) ? rhs.upper() : upper();
+    return SConstRange({l, u});
   }
 
-  const constexpr std::vector<APInt<BW>> toConcrete() const noexcept {
+  std::vector<APInt<BW>> toConcrete() const {
     if (lower().sgt(upper()))
       return {};
 
     std::vector<APInt<BW>> res;
     res.reserve(APIntOps::abds(lower(), upper()).getZExtValue() + 1);
 
-    for (APInt x = lower(); x.sle(upper()); x += 1) {
+    for (BV x = lower(); x.sle(upper()); x += 1) {
       res.push_back(x);
 
       if (x == APInt<BW>::getSignedMaxValue())
@@ -86,8 +84,10 @@ public:
     if (rhs.isBottom())
       return APIntOps::abds(lower(), upper()).getZExtValue();
 
-    const uint64_t ld = APIntOps::abds(lower(), rhs.lower()).getZExtValue();
-    const uint64_t ud = APIntOps::abds(upper(), rhs.upper()).getZExtValue();
+    const std::uint64_t ld =
+        APIntOps::abds(lower(), rhs.lower()).getZExtValue();
+    const std::uint64_t ud =
+        APIntOps::abds(upper(), rhs.upper()).getZExtValue();
     return ld + ud;
   }
 
@@ -95,55 +95,54 @@ public:
     return distance(SConstRange::bottom());
   }
 
-  static constexpr const SConstRange fromConcrete(const APInt<BW> &x) noexcept {
+  static constexpr SConstRange fromConcrete(const APInt<BW> &x) noexcept {
     return SConstRange({x, x});
   }
 
-  const APInt<BW> sample_concrete(std::mt19937 &rng) const {
-    std::uniform_int_distribution<long> dist(lower().getSExtValue(),
-                                             upper().getSExtValue());
-    return APInt<BW>(static_cast<unsigned long>(dist(rng)));
+  APInt<BW> sample_concrete(std::mt19937 &rng) const {
+    std::uniform_int_distribution<std::int64_t> dist(lower().getSExtValue(),
+                                                     upper().getSExtValue());
+    return APInt<BW>(static_cast<std::uint64_t>(dist(rng)));
   }
 
-  static const SConstRange rand(std::mt19937 &rng,
-                                std::uint64_t level) noexcept {
+  static SConstRange rand(std::mt19937 &rng, std::uint64_t level) noexcept {
     const __int128_t level128 = static_cast<__int128_t>(level);
     const std::int64_t lb = APInt<BW>::getSignedMinValue().getSExtValue();
     const std::int64_t max = APInt<BW>::getSignedMaxValue().getSExtValue();
 
-    const __int128 ub = static_cast<__int128_t>(max) - level128;
+    const __int128_t ub128 = static_cast<__int128_t>(max) - level128;
 
     std::uniform_int_distribution<std::int64_t> dist(
-        lb, static_cast<std::int64_t>(ub));
+        lb, static_cast<std::int64_t>(ub128));
 
-    std::int64_t low = dist(rng);
+    const std::int64_t low = dist(rng);
 
-    const __int128 high128 = static_cast<__int128_t>(low) + level128;
+    const __int128_t high128 = static_cast<__int128_t>(low) + level128;
     const std::int64_t high = static_cast<std::int64_t>(high128);
     return SConstRange({APInt<BW>(static_cast<std::uint64_t>(low)),
                         APInt<BW>(static_cast<std::uint64_t>(high))});
   }
 
-  static constexpr const SConstRange bottom() noexcept {
-    constexpr APInt min = APInt<BW>::getSignedMinValue();
-    constexpr APInt max = APInt<BW>::getSignedMaxValue();
+  static constexpr SConstRange bottom() noexcept {
+    constexpr BV min = APInt<BW>::getSignedMinValue();
+    constexpr BV max = APInt<BW>::getSignedMaxValue();
     return SConstRange({max, min});
   }
 
-  static constexpr const SConstRange top() noexcept {
-    constexpr APInt min = APInt<BW>::getSignedMinValue();
-    constexpr APInt max = APInt<BW>::getSignedMaxValue();
+  static constexpr SConstRange top() noexcept {
+    constexpr BV min = APInt<BW>::getSignedMinValue();
+    constexpr BV max = APInt<BW>::getSignedMaxValue();
     return SConstRange({min, max});
   }
 
   // TODO put a reserve call for the vector
-  static constexpr std::vector<SConstRange> const enumLattice() noexcept {
+  static std::vector<SConstRange> enumLattice() {
     const int min =
         static_cast<int>(APInt<BW>::getSignedMinValue().getSExtValue());
     const int max =
         static_cast<int>(APInt<BW>::getSignedMaxValue().getSExtValue());
-    APInt l = APInt<BW>::getSignedMinValue();
-    APInt u = APInt<BW>::getSignedMinValue();
+    BV l = APInt<BW>::getSignedMinValue();
+    BV u = APInt<BW>::getSignedMinValue();
     std::vector<SConstRange> ret = {};
 
     for (int i = min; i <= max; ++i) {
@@ -165,12 +164,8 @@ public:
   std::array<BV, arity> v{};
 
 private:
-  [[nodiscard]] constexpr const APInt<BW> lower() const noexcept {
-    return v[0];
-  }
-  [[nodiscard]] constexpr const APInt<BW> upper() const noexcept {
-    return v[1];
-  }
+  [[nodiscard]] constexpr const BV &lower() const noexcept { return v[0]; }
+  [[nodiscard]] constexpr const BV &upper() const noexcept { return v[1]; }
 };
 
 static_assert(Domain<SConstRange, 4>);

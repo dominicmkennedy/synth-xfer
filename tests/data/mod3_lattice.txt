@@ -1,0 +1,7 @@
+eq to {0} mod 3
+eq to {1} mod 3
+eq to {0, 1} mod 3
+eq to {2} mod 3
+eq to {0, 2} mod 3
+eq to {1, 2} mod 3
+(top)

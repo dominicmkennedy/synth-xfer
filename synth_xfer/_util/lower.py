@@ -62,7 +62,6 @@ from xdsl_smt.dialects.transfer import (
 
 
 def lower_type(typ: Attribute, bw: int) -> ir.Type:
-    # TODO only works for arity 2 domains (no IM)
     if isinstance(typ, TransIntegerType):
         return ir.IntType(bw)
     elif isinstance(typ, IntegerType):
@@ -239,7 +238,12 @@ class LowerToLLVM:
     def shim_xfer(self, mlir_fn: FuncOp, old_fn: ir.Function, bw: int) -> ir.Function:
         n_args = len(old_fn.function_type.args)
         i64 = ir.IntType(64)
-        i64_arr_t = ir.ArrayType(i64, 2)
+
+        first_arg = mlir_fn.args[0].type
+        assert isinstance(first_arg, AbstractValueType)
+        num_abst_fields = len(first_arg.get_fields())
+
+        i64_arr_t = ir.ArrayType(i64, num_abst_fields)
 
         fn_name = f"{old_fn.name}_shim"
         shim_ty = ir.FunctionType(i64_arr_t, [i64_arr_t for _ in range(n_args)])
@@ -265,22 +269,28 @@ class LowerToLLVM:
             else:
                 raise ValueError(f"bad type: {arg_field}")
 
-            lane_arr_t = ir.ArrayType(lane_t, 2)
-            empty_arr = ir.Constant(lane_arr_t, None)
+            lane_arr_t = ir.ArrayType(lane_t, num_abst_fields)
+            new_lane = ir.Constant(lane_arr_t, None)
 
-            new_arg_0 = to_lane(b.extract_value(arg, 0), lane_t)
-            new_arg_1 = to_lane(b.extract_value(arg, 1), lane_t)
-            new_lane = b.insert_value(empty_arr, new_arg_0, 0)
-            new_lane = b.insert_value(new_lane, new_arg_1, 1)
+            new_args = []
+            for i in range(num_abst_fields):
+                new_args.append(to_lane(b.extract_value(arg, i), lane_t))
+
+            for i in range(num_abst_fields):
+                new_lane = b.insert_value(new_lane, new_args[i], i)
+
             new_lanes.append(new_lane)
 
         r_n = b.call(old_fn, new_lanes)
-        r0 = to_i64(b.extract_value(r_n, 0))
-        r1 = to_i64(b.extract_value(r_n, 1))
+        r = ir.Constant(i64_arr_t, None)
 
-        empty_i64_arr = ir.Constant(i64_arr_t, None)
-        r = b.insert_value(empty_i64_arr, r0, 0)
-        r = b.insert_value(r, r1, 1)
+        rs = []
+        for i in range(num_abst_fields):
+            rs.append(to_i64(b.extract_value(r_n, i)))
+
+        for i in range(num_abst_fields):
+            r = b.insert_value(r, rs[i], i)
+
         b.ret(r)
 
         return shim_fn
@@ -429,7 +439,10 @@ class _LowerFuncToLLVM:
         res_name = self.result_name(op)
         lhs, rhs = self.operands(op)
 
-        bw_const = ir.Constant(ir.IntType(self.bw), self.bw)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        bw_const = ir.Constant(ty, ty.width)
         true_const = ir.Constant(ir.IntType(1), 1)
         cmp = self.b.icmp_unsigned(">=", rhs, bw_const, name=f"{res_name}_cmp")
 
@@ -476,15 +489,17 @@ class _LowerFuncToLLVM:
         | Constant
         | ConstantOp,
     ) -> None:
-        ty = ir.IntType(self.bw)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
         if isinstance(op, GetSignedMaxValueOp):
-            val = (2 ** (self.bw - 1)) - 1
+            val = (2 ** (ty.width - 1)) - 1
         elif isinstance(op, GetSignedMinValueOp):
-            val = 2 ** (self.bw - 1)
+            val = 2 ** (ty.width - 1)
         elif isinstance(op, GetAllOnesOp):
-            val = (2**self.bw) - 1
+            val = (2**ty.width) - 1
         elif isinstance(op, GetBitWidthOp):
-            val = self.bw
+            val = ty.width
         elif isinstance(op, Constant):
             val: int = op.value.value.data
         elif isinstance(op, ConstantOp):
@@ -515,7 +530,10 @@ class _LowerFuncToLLVM:
         oprnd = self.operands(op)[0]
         res_name = self.result_name(op)
 
-        const_zero = ir.Constant(ir.IntType(self.bw), 0)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        const_zero = ir.Constant(ty, 0)
         self.ssa_map[op.results[0]] = self.b.icmp_signed(
             "<", oprnd, const_zero, name=res_name
         )
@@ -525,11 +543,14 @@ class _LowerFuncToLLVM:
         oprnd = self.operands(op)[0]
         res_name = self.result_name(op)
 
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
         if isinstance(op, SetSignBitOp):
-            mask = ir.Constant(ir.IntType(self.bw), (2 ** (self.bw - 1)))
+            mask = ir.Constant(ty, (2 ** (ty.width - 1)))
             self.ssa_map[op.results[0]] = self.b.or_(oprnd, mask, name=res_name)  # type: ignore
         else:
-            mask = ir.Constant(ir.IntType(self.bw), ((2 ** (self.bw - 1)) - 1))
+            mask = ir.Constant(ty, ((2 ** (ty.width - 1)) - 1))
             self.ssa_map[op.results[0]] = self.b.and_(oprnd, mask, name=res_name)  # type: ignore
 
     @add_op.register
@@ -540,10 +561,13 @@ class _LowerFuncToLLVM:
         res_name = self.result_name(op)
         high = isinstance(op, SetHighBitsOp) or isinstance(op, ClearHighBitsOp)
 
-        allones = ir.Constant(ir.IntType(self.bw), ((2**self.bw) - 1))
-        c_zero = ir.Constant(ir.IntType(self.bw), 0)
-        c_bw = ir.Constant(ir.IntType(self.bw), self.bw)
-        c_bwm1 = ir.Constant(ir.IntType(self.bw), self.bw - 1)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        allones = ir.Constant(ty, ((2**ty.width) - 1))
+        c_zero = ir.Constant(ty, 0)
+        c_bw = ir.Constant(ty, ty.width)
+        c_bwm1 = ir.Constant(ty, ty.width - 1)
 
         ge = self.b.icmp_unsigned(">=", n, c_bw, name=f"{res_name}_ge")
         safe_val = c_zero if high else c_bwm1
@@ -579,10 +603,12 @@ class _LowerFuncToLLVM:
         lhs, rhs = self.operands(op)
         res_name = self.result_name(op)
 
-        int_ty = ir.IntType(self.bw)
-        zero = ir.Constant(int_ty, 0)
-        one = ir.Constant(int_ty, 1)
-        all_ones = ir.Constant(int_ty, (2**self.bw) - 1)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        zero = ir.Constant(ty, 0)
+        one = ir.Constant(ty, 1)
+        all_ones = ir.Constant(ty, (2**ty.width) - 1)
 
         rhs_is_z = self.b.icmp_signed("==", rhs, zero, name=f"{res_name}_rhs_is_zero")
         safe_rhs = self.b.select(rhs_is_z, one, rhs, name=f"{res_name}_safe_rhs")
@@ -600,11 +626,13 @@ class _LowerFuncToLLVM:
         lhs, rhs = self.operands(op)
         res_name = self.result_name(op)
 
-        int_ty = ir.IntType(self.bw)
-        zero = ir.Constant(int_ty, 0)
-        one = ir.Constant(int_ty, 1)
-        all_ones = ir.Constant(int_ty, (2**self.bw) - 1)
-        int_min = ir.Constant(int_ty, (2 ** (self.bw - 1)))
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        zero = ir.Constant(ty, 0)
+        one = ir.Constant(ty, 1)
+        all_ones = ir.Constant(ty, (2**ty.width) - 1)
+        int_min = ir.Constant(ty, (2 ** (ty.width - 1)))
 
         rhs_0 = self.b.icmp_signed("==", rhs, zero, name=f"{res_name}_rhs_is_zero")
 
@@ -632,9 +660,11 @@ class _LowerFuncToLLVM:
         lhs, rhs = self.operands(op)
         res_name = self.result_name(op)
 
-        int_ty = ir.IntType(self.bw)
-        zero = ir.Constant(int_ty, 0)
-        c_bw = ir.Constant(int_ty, self.bw)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        zero = ir.Constant(ty, 0)
+        c_bw = ir.Constant(ty, ty.width)
 
         rhs_ge_bw = self.b.icmp_unsigned(">=", rhs, c_bw, name=f"{res_name}_rhs_ge_bw")
         safe_rhs = self.b.select(rhs_ge_bw, zero, rhs, name=f"{res_name}_safe_rhs")
@@ -653,10 +683,12 @@ class _LowerFuncToLLVM:
         lhs, rhs = self.operands(op)
         res_name = self.result_name(op)
 
-        int_ty = ir.IntType(self.bw)
-        zero = ir.Constant(int_ty, 0)
-        all_ones = ir.Constant(int_ty, (2**self.bw) - 1)
-        c_bw = ir.Constant(int_ty, self.bw)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        zero = ir.Constant(ty, 0)
+        all_ones = ir.Constant(ty, (2**ty.width) - 1)
+        c_bw = ir.Constant(ty, ty.width)
 
         rhs_ge_bw = self.b.icmp_unsigned(">=", rhs, c_bw, name=f"{res_name}_rhs_ge_bw")
         lhs_is_neg = self.b.icmp_signed("<", lhs, zero, name=f"{res_name}_lhs_is_neg")

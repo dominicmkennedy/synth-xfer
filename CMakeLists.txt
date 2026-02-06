@@ -25,6 +25,7 @@ set(SYNTH_XFER_SOURCES
   cpp/enum.hpp
   cpp/domain.hpp
   cpp/knownbits.hpp
+  cpp/mod.hpp
   cpp/uconst_range.hpp
   cpp/sconst_range.hpp
   cpp/rand.hpp

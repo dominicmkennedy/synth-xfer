@@ -1,36 +1,62 @@
-# Synth Transfer
+# NiceToMeetYou
+
+![DOI](https://img.shields.io/badge/DOI-10.1145%2F3776722-informational)
+![Artifact](https://img.shields.io/badge/artifact-evaluated-success)
+![CI](https://github.com/dominicmkennedy/synth-xfer/actions/workflows/ci.yml/badge.svg)
+![Python](https://img.shields.io/badge/python-%E2%89%A53.13-blue)
+
+**NiceToMeetYou** is a tool for synthesizing transformers for abstract interpretation.
+
+Publication: [Nice to Meet You: Synthesizing Practical MLIR Abstract Transformers](https://dl.acm.org/doi/10.1145/3776722)
+
+## Requirements
+
+- Python >= 3.13  
+- Clang >= 18
 
 ## Setup
 
-1. Create and activate a Python virtual environment:
-
+1. Create and activate a Python virtual environment.
 ```bash
-# create the venv
 python3 -m venv .venv
-# activate it
 source .venv/bin/activate
 ```
-
-2. Install development dependencies and editable package:
-
+2. Install in editable mode with dev dependencies: 
 ```bash
 pip install -e .[dev]
 ```
-
-3. Run tests to verify the C++ bindings built correctly:
-
+3. Run tests to confirm the C++ bindings built correctly:
 ```bash
-pytest
+pytest -vv
 ```
 
-## Example runs
+## Usage
 
-### Quick toy run
+The project provides six executables:
 
-Here's a simple invocation of the `sxf` CLI for quick testing:
+| Executable      | Description                                                                                           |
+|-----------------|-------------------------------------------------------------------------------------------------------|
+| `sxf`           | Given an abstract domain and a concrete function, synthesizes an abstract transformer (the main tool) |
+| `benchmark`     | Runs multiple synthesis experiments in parallel across available CPU cores                            |
+| `eval-final`    | Measures the precision of a previously synthesized transformer                                        |
+| `verify`        | Checks the soundness of a previously synthesized transformer                                          |
+| `lower-to-llvm` | Lowers a synthesized transformer from MLIR to LLVM IR                                                 |
+| `simplifier`    | Applies a peephole optimizer to simplify synthesized transformer code                                 |
+
+## Example Synthesis Runs
+
+### Quick Run
+
+Here's a simple invocation of the `sxf` program for quick testing:
 
 ```bash
-sxf mlir/Operations/And.mlir -o outputs/And -domain KnownBits -num_iters 2 -num_steps 100 -num_mcmc 50 -random_seed 2333
+sxf mlir/Operations/And.mlir  \
+    -o outputs/And            \
+    --domain KnownBits        \
+    --num-iters 2             \
+    --num-steps 100           \
+    --num-mcmc 50             \
+    --random-seed 2333
 ```
 
 Output:
@@ -41,31 +67,43 @@ Iteration 1  | Exact 96.7078% | 3 solutions | 39.6943s |
 Final Soln   | Exact 96.7078% | 3 solutions |
 ```
 
+(The final output may be different depending on your systems RNG differences).
+
 The command reads the MLIR program `mlir/Operations/And.mlir` and writes outputs into `outputs/And`.
 
-### Full experiment setup
+### Full Experiment Setup
 
 This is a more comprehensive invocation closer to the experiment setup used in the paper:
 
 ```bash
-sxf mlir/Operations/Add.mlir -o outputs/Add -domain KnownBits -num_iters 5 -num_steps 1000 -num_mcmc 100 -mbw 8,5000 16,5000 -hbw 32,5000,10000 64,5000,10000 -vbw 4,8,16,32,64
+sxf mlir/Operations/Add.mlir          \
+    -o outputs/Add                    \
+    --domain KnownBits                \
+    --num-iters 5                     \
+    --num-steps 1000                  \
+    --num-mcmc 100                    \
+    --mbw 8,5000 16,5000              \
+    --hbw 32,5000,10000 64,5000,10000 \
+    --vbw 4,8,16,32,64
 ```
 
-## CLI options (example flags explained)
+## Important CLI Options for `sxf`
 
-- `-o <path>`: Output directory where synthesized results and intermediate outputs will be written.
-- `-random-seed <int>`: Seed for the random number generator to make runs reproducible.
-- `-domain <Name>`: Abstract domain to evaluate (e.g., `KnownBits`, `UConstRange`, `SConstRange`).
-- `-num-iters <int>`: Number of iterations for the synthesizer (default: `10`).
-- `-num-steps <int>`: Number of mutation steps in one iteration (default: `1500`).
-- `-num-mcmc <int>`: Number of MCMC processes that run in parallel (default: `100`).
-- `-program_length <int>`: Length of one single synthesized transformer (default: `28`).
-- `-vbw <list[int]>`: Bitwidths to verify at. Accepts ranges (e.g., `4-64`) or comma-separated values (e.g., `8,16,32,64`). (default: `4-64`).
-- `-lbw <list[int]>`: Low-bitwidths to evaluate exhaustively (default: `4`).
-- `-mbw <list[int,int]>`: Mid-bitwidths to sample abstract values with, but enumerate the concretizations of each of them exhaustively. Format: `bitwidth,num_samples` (e.g., `8,5000`).
-- `-hbw <list[int,int,int]>`: High-bitwidths to sample abstract values with, and sample the concretizations of each of them. Format: `bitwidth,num_abstract_samples,num_concrete_samples` (e.g., `64,5000,10000`).
-- `-num-abd-procs <int>`: Number of MCMC processes used for abduction. Must be less than `num_mcmc` (default: `30`).
-- `-condition-length <int>`: Length of synthesized abduction (default: `10`).
-- `-num-unsound-candidates <int>`: Number of unsound candidates considered for abduction (default: `15`).
-- `-optimize`: Run e-graph-based rewrite optimizer on synthesized candidates.
-- `-quiet`: Suppress verbose output.
+| CMD line flag                    | Description                                                                                                                                                                          |
+|----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `-o <path>`                      | Output directory where synthesized results and intermediate outputs will be written.                                                                                                 |
+| `--random-seed <int>`            | Seed for the random number generator to make runs reproducible.                                                                                                                      |
+| `--domain <Name>`                | Abstract domain to evaluate (e.g., `KnownBits`, `UConstRange`, `SConstRange`).                                                                                                       |
+| `--num-iters <int>`              | Number of iterations for the synthesizer (default: `10`).                                                                                                                            |
+| `--num-steps <int>`              | Number of mutation steps in one iteration (default: `1500`).                                                                                                                         |
+| `--num-mcmc <int>`               | Number of MCMC processes that run in parallel (default: `100`).                                                                                                                      |
+| `--program_length <int>`         | Length of one single synthesized transformer (default: `28`).                                                                                                                        |
+| `--vbw <list[int]>`              | Bitwidths to verify at. Accepts ranges (e.g., `4-64`) or comma-separated values (e.g., `8,16,32,64`). (default: `4-64`).                                                             |
+| `--lbw <list[int]>`              | Low-bitwidths to evaluate exhaustively (default: `4`).                                                                                                                               |
+| `--mbw <list[int,int]>`          | Mid-bitwidths to sample abstract values with, but enumerate the concretizations of each of them exhaustively. Format: `bitwidth,num_samples` (e.g., `8,5000`).                       |
+| `--hbw <list[int,int,int]>`      | High-bitwidths to sample abstract values with, and sample the concretizations of each of them. Format: `bitwidth,num_abstract_samples,num_concrete_samples` (e.g., `64,5000,10000`). |
+| `--num-abd-procs <int>`          | Number of MCMC processes used for abduction. Must be less than `num_mcmc` (default: `30`).                                                                                           |
+| `--condition-length <int>`       | Length of synthesized abduction (default: `10`).                                                                                                                                     |
+| `--num-unsound-candidates <int>` | Number of unsound candidates considered for abduction (default: `15`).                                                                                                               |
+| `--optimize`                     | Run e-graph-based rewrite optimizer on synthesized candidates.                                                                                                                       |
+| `--quiet`                        | Suppress verbose output.                                                                                                                                                             |

@@ -37,6 +37,9 @@ def int_triple(s: str) -> tuple[int, int, int]:
 def int_list(s: str) -> list[int]:
     result: list[int] = []
 
+    if s == "[]":
+        return []
+
     for chunk in s.split(","):
         chunk = chunk.strip()
         if not chunk:
@@ -137,6 +140,7 @@ ALL_OPS = [
     "CountRZero",
     "Fshl",
     "Fshr",
+    "Lerp",
     "Lshr",
     "LshrExact",
     "Mods",
@@ -183,10 +187,11 @@ def build_parser(prog: str) -> Namespace:
     p = ArgumentParser(prog=prog, formatter_class=ArgumentDefaultsHelpFormatter)
 
     if prog == "synth_xfer":
-        p.add_argument("transfer-functions", type=Path, help="path to transfer function")
-        p.add_argument("-random-file", type=FileType("r"), help="file for preset rng")
+        p.add_argument("transfer_function", type=Path, help="path to transfer function")
+        p.add_argument("--random-file", type=FileType("r"), help="file for preset rng")
         p.add_argument(
-            "-domain",
+            "-d",
+            "--domain",
             type=str,
             choices=[str(x) for x in AbstractDomain],
             required=True,
@@ -194,28 +199,28 @@ def build_parser(prog: str) -> Namespace:
         )
 
     p.add_argument(
-        "-dsl-ops",
+        "--dsl-ops",
         type=Path,
         help="Path to DSL op-set JSON (e.g., dsl/ops_set_0.json)",
     )
 
     if prog == "benchmark":
         p.add_argument(
-            "-kb-eval",
+            "--kb-eval",
             nargs="*",
             choices=ALL_OPS,
             default=[],
             help=f"Zero or more items from: {', '.join(ALL_OPS)}",
         )
         p.add_argument(
-            "-ucr-eval",
+            "--ucr-eval",
             nargs="*",
             choices=ALL_OPS,
             default=[],
             help=f"Zero or more items from: {', '.join(ALL_OPS)}",
         )
         p.add_argument(
-            "-scr-eval",
+            "--scr-eval",
             nargs="*",
             choices=ALL_OPS,
             default=[],
@@ -226,91 +231,91 @@ def build_parser(prog: str) -> Namespace:
     p.add_argument("-o", "--output", type=Path, help="Output dir", default=output_dir)
     make_sampler_parser(p)
     p.add_argument(
-        "-optimize",
+        "--optimize",
         action=BooleanOptionalAction,
         default=False,
         help="Run e-graph-based rewrite optimizer on synthesized candidates",
     )
-    p.add_argument("-random-seed", type=int, help="seed for synthesis")
+    p.add_argument("--random-seed", type=int, help="seed for synthesis")
     p.add_argument(
-        "-program-length",
+        "--program-length",
         type=int,
         help="length of one single synthed transformer",
         default=28,
     )
     p.add_argument(
-        "-num-steps",
+        "--num-steps",
         type=int,
         help="number of mutation steps in one iteration",
         default=1500,
     )
     p.add_argument(
-        "-num-mcmc",
+        "--num-mcmc",
         type=int,
         help="number of mcmc processes that run in parallel",
         default=100,
     )
     p.add_argument(
-        "-inv-temp",
+        "--inv-temp",
         type=int,
         help="Inverse temperature for MCMC. The larger the value is, the lower the probability of accepting a program with a higher cost.",
         default=200,
     )
     p.add_argument(
-        "-vbw",
+        "--vbw",
         type=int_list,
         default=list(range(4, 65)),
         help="bws to verify at",
     )
     p.add_argument(
-        "-lbw",
+        "--lbw",
         nargs="*",
         type=int,
         default=[4],
         help="Low-bitwidths to evaluate exhaustively",
     )
     p.add_argument(
-        "-mbw",
+        "--mbw",
         nargs="*",
         type=int_tuple,
         default=[],
         help="Mid-bitwidths to sample abstract values with, but enumerate the concretizations of each of them exhaustively",
     )
     p.add_argument(
-        "-hbw",
+        "--hbw",
         nargs="*",
         type=int_triple,
         default=[],
         help="High-bitwidths to sample abstract values with, and sample the concretizations of each of them",
     )
     p.add_argument(
-        "-num-iters",
+        "--num-iters",
         type=int,
         help="number of iterations for the synthesizer",
         default=10,
     )
     p.add_argument(
-        "-no-weighted-dsl",
+        "--no-weighted-dsl",
         dest="weighted_dsl",
         action="store_false",
         help="Disable learning weights for each DSL operation from previous for future iterations",
     )
     p.set_defaults(weighted_dsl=True)
     p.add_argument(
-        "-condition-length", type=int, help="length of synthd abduction", default=10
+        "--condition-length", type=int, help="length of synthd abduction", default=10
     )
     p.add_argument(
-        "-num-abd-procs",
+        "--num-abd-procs",
         type=int,
         help="number of mcmc processes used for abduction. Must be less than num_mcmc",
         default=30,
     )
     p.add_argument(
-        "-num-unsound-candidates",
+        "--num-unsound-candidates",
         type=int,
         help="number of unsound candidates considered for abduction",
         default=15,
     )
-    p.add_argument("-quiet", action="store_true")
+    p.add_argument("-q", "--quiet", action="store_true")
 
     return p.parse_args()

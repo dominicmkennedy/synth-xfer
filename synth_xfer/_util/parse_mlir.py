@@ -91,7 +91,10 @@ def get_helper_funcs(p: Path, d: AbstractDomain) -> HelperFuncs:
         return x
 
     def make_abst_ty(x: Attribute):
-        return AbstractValueType([x for _ in range(d.vec_size)])
+        if d.const_bw is None:
+            return AbstractValueType([x for _ in range(d.vec_size)])
+        else:
+            return AbstractValueType([IntegerType(d.const_bw) for _ in range(d.vec_size)])
 
     crt_ret_ty = get_ty(crt_func.function_type.outputs.data[0])
     crt_arg_ty = tuple(get_ty(x.type) for x in crt_func.args)
