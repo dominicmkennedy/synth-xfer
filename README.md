@@ -2,12 +2,12 @@
 
 ## Setup
 
-1. Create and activate a Python virtual environment (macOS / zsh):
+1. Create and activate a Python virtual environment:
 
 ```bash
 # create the venv
 python3 -m venv .venv
-# activate it (zsh / bash)
+# activate it
 source .venv/bin/activate
 ```
 
@@ -54,18 +54,18 @@ sxf mlir/Operations/Add.mlir -o outputs/Add -domain KnownBits -num_iters 5 -num_
 ## CLI options (example flags explained)
 
 - `-o <path>`: Output directory where synthesized results and intermediate outputs will be written.
-- `-random_seed <int>`: Seed for the random number generator to make runs reproducible.
+- `-random-seed <int>`: Seed for the random number generator to make runs reproducible.
 - `-domain <Name>`: Abstract domain to evaluate (e.g., `KnownBits`, `UConstRange`, `SConstRange`).
-- `-num_iters <int>`: Number of iterations for the synthesizer (default: 10).
-- `-num_steps <int>`: Number of mutation steps in one iteration (default: 1500).
-- `-num_mcmc <int>`: Number of MCMC processes that run in parallel (default: 100).
-- `-program_length <int>`: Length of one single synthesized transformer (default: 28).
-- `-vbw <list[int]>`: Bitwidths to verify at. Accepts ranges (e.g., `4-64`) or comma-separated values (e.g., `8,16,32,64`). Default: 4-64.
-- `-lbw <list[int]>`: Low-bitwidths to evaluate exhaustively (default: 4).
+- `-num-iters <int>`: Number of iterations for the synthesizer (default: `10`).
+- `-num-steps <int>`: Number of mutation steps in one iteration (default: `1500`).
+- `-num-mcmc <int>`: Number of MCMC processes that run in parallel (default: `100`).
+- `-program_length <int>`: Length of one single synthesized transformer (default: `28`).
+- `-vbw <list[int]>`: Bitwidths to verify at. Accepts ranges (e.g., `4-64`) or comma-separated values (e.g., `8,16,32,64`). (default: `4-64`).
+- `-lbw <list[int]>`: Low-bitwidths to evaluate exhaustively (default: `4`).
 - `-mbw <list[int,int]>`: Mid-bitwidths to sample abstract values with, but enumerate the concretizations of each of them exhaustively. Format: `bitwidth,num_samples` (e.g., `8,5000`).
 - `-hbw <list[int,int,int]>`: High-bitwidths to sample abstract values with, and sample the concretizations of each of them. Format: `bitwidth,num_abstract_samples,num_concrete_samples` (e.g., `64,5000,10000`).
-- `-num_abd_procs <int>`: Number of MCMC processes used for abduction. Must be less than `num_mcmc` (default: 30).
-- `-condition_length <int>`: Length of synthesized abduction (default: 10).
-- `-num_unsound_candidates <int>`: Number of unsound candidates considered for abduction (default: 15).
+- `-num-abd-procs <int>`: Number of MCMC processes used for abduction. Must be less than `num_mcmc` (default: `30`).
+- `-condition-length <int>`: Length of synthesized abduction (default: `10`).
+- `-num-unsound-candidates <int>`: Number of unsound candidates considered for abduction (default: `15`).
 - `-optimize`: Run e-graph-based rewrite optimizer on synthesized candidates.
 - `-quiet`: Suppress verbose output.
