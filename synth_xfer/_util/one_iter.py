@@ -59,7 +59,7 @@ def synthesize_one_iteration(
     lbw: list[int],
     vbw: list[int],
 ) -> SolutionSet:
-    "Given ith_iter, performs total_rounds mcmc sampling"
+    "Given ith_iter, performs num_steps mcmc sampling"
 
     iter_start_time = perf_counter()
     logger = get_logger()
@@ -69,9 +69,9 @@ def synthesize_one_iteration(
     decide_total = 0.0
 
     sp_range, p_range, c_range = ranges
-    num_programs = len(sp_range) + len(p_range) + len(c_range)
+    num_mcmc = len(sp_range) + len(p_range) + len(c_range)
     program_length = mcmc_samplers[0].length
-    total_rounds = mcmc_samplers[0].total_steps
+    num_steps = mcmc_samplers[0].total_steps
     transfers = [spl.get_current() for spl in mcmc_samplers]
     func_with_cond_lst = _build_eval_list(transfers, sp_range, p_range, c_range, prec_set)
 
@@ -93,11 +93,11 @@ def synthesize_one_iteration(
 
     # MCMC start
     logger.info(
-        f"Iter {ith_iter}: Start {num_programs - len(c_range)} MCMC to sampling programs of length {program_length}."
-        f"Start {len(c_range)} MCMC to sample abductions. Each one is run for {total_rounds} steps..."
+        f"Iter {ith_iter}: Start {num_mcmc - len(c_range)} MCMC to sampling programs of length {program_length}."
+        f"Start {len(c_range)} MCMC to sample abductions. Each one is run for {num_steps} steps..."
     )
 
-    for rnd in range(total_rounds):
+    for rnd in range(num_steps):
         s = perf_counter()
         transfers = [spl.sample_next().get_current() for spl in mcmc_samplers]
         func_with_cond_lst = _build_eval_list(
@@ -150,14 +150,14 @@ def synthesize_one_iteration(
         decide_total += perf_counter() - s
 
         # Print the current best result every K rounds
-        if rnd % 250 == 100 or rnd == total_rounds - 1:
+        if rnd % 250 == 100 or rnd == num_steps - 1:
             logger.debug("Sound transformers with most exact outputs:")
-            for i in range(num_programs):
+            for i in range(num_mcmc):
                 res = sound_most_improve_tfs[i][1]
                 if res.is_sound():
                     logger.debug(f"{i}_{sound_most_improve_tfs[i][2]}\n{res}")
             logger.debug("Transformers with most unsolved exact outputs:")
-            for i in range(num_programs):
+            for i in range(num_mcmc):
                 logger.debug(f"{i}_{most_improve_tfs[i][2]}\n{most_improve_tfs[i][1]}")
 
     candidates_sp: list[FunctionWithCondition] = []
@@ -200,7 +200,7 @@ def synthesize_one_iteration(
     iter_time = perf_counter() - iter_start_time
 
     def perf_str(x: float) -> str:
-        return f"{x:.4f}s | avg {x / total_rounds:.4f}s | {100 * x / iter_time:.2f}%"
+        return f"{x:.4f}s | avg {x / num_steps:.4f}s | {100 * x / iter_time:.2f}%"
 
     logger.perf(f"Iter {ith_iter} took {iter_time:.4f}s")
     logger.perf("\tEval took     | " + perf_str(eval_total))

@@ -235,19 +235,19 @@ def build_parser(prog: str) -> Namespace:
     p.add_argument(
         "-program_length",
         type=int,
-        help="length of synthed program",
+        help="length of one single synthed transformer",
         default=28,
     )
     p.add_argument(
-        "-total_rounds",
+        "-num_steps",
         type=int,
-        help="number of rounds the synthesizer should run",
+        help="number of mutation steps in one iteration",
         default=1500,
     )
     p.add_argument(
-        "-num_programs",
+        "-num_mcmc",
         type=int,
-        help="number of programs that run every round",
+        help="number of mcmc processes that run in parallel",
         default=100,
     )
     p.add_argument(
@@ -267,21 +267,21 @@ def build_parser(prog: str) -> Namespace:
         nargs="*",
         type=int,
         default=[4],
-        help="Bitwidths to evaluate exhaustively",
+        help="Low-bitwidths to evaluate exhaustively",
     )
     p.add_argument(
         "-mbw",
         nargs="*",
         type=int_tuple,
         default=[],
-        help="Bitwidths to evaluate sampled lattice elements exhaustively",
+        help="Mid-bitwidths to sample abstract values with, but enumerate the concretizations of each of them exhaustively",
     )
     p.add_argument(
         "-hbw",
         nargs="*",
         type=int_triple,
         default=[],
-        help="Bitwidths to sample the lattice and abstract values with",
+        help="High-bitwidths to sample abstract values with, and sample the concretizations of each of them",
     )
     p.add_argument(
         "-num_iters",
@@ -302,7 +302,7 @@ def build_parser(prog: str) -> Namespace:
     p.add_argument(
         "-num_abd_procs",
         type=int,
-        help="number of mcmc processes used for abduction. Must be less than num_programs",
+        help="number of mcmc processes used for abduction. Must be less than num_mcmc",
         default=30,
     )
     p.add_argument(

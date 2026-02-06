@@ -247,12 +247,12 @@ def setup_mcmc(
     transfer_func: FuncOp,
     precise_set: list[FuncOp],
     num_abd_proc: int,
-    num_programs: int,
+    num_mcmc: int,
     context_regular: SynthesizerContext,
     context_weighted: SynthesizerContext,
     context_cond: SynthesizerContext,
     program_length: int,
-    total_rounds: int,
+    num_steps: int,
     cond_length: int,
 ) -> tuple[list[MCMCSampler], list[FuncOp], tuple[range, range, range]]:
     """
@@ -263,7 +263,7 @@ def setup_mcmc(
 
     p_size = 0
     c_size = num_abd_proc
-    sp_size = num_programs - p_size - c_size
+    sp_size = num_mcmc - p_size - c_size
 
     if len(precise_set) == 0:
         sp_size += c_size
@@ -285,7 +285,7 @@ def setup_mcmc(
                 prec_set_after_distribute.append(item.clone())
 
     mcmc_samplers: list[MCMCSampler] = []
-    for i in range(num_programs):
+    for i in range(num_mcmc):
         if i in sp_range:
             spl = MCMCSampler(
                 transfer_func,
@@ -294,7 +294,7 @@ def setup_mcmc(
                 else context_weighted,
                 sound_and_precise_cost,
                 program_length,
-                total_rounds,
+                num_steps,
                 random_init_program=True,
             )
         elif i in p_range:
@@ -305,7 +305,7 @@ def setup_mcmc(
                 else context_weighted,
                 precise_cost,
                 program_length,
-                total_rounds,
+                num_steps,
                 random_init_program=True,
             )
         else:
@@ -314,7 +314,7 @@ def setup_mcmc(
                 context_cond,
                 abduction_cost,
                 cond_length,
-                total_rounds,
+                num_steps,
                 random_init_program=True,
                 is_cond=True,
             )
