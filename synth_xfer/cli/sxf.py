@@ -142,9 +142,7 @@ def run(
         iter_start = perf_counter()
         # gradually increase the program length
         current_prog_len += (program_length - current_prog_len) // (num_iters - ith_iter)
-        current_num_steps += (num_steps - current_num_steps) // (
-            num_iters - ith_iter
-        )
+        current_num_steps += (num_steps - current_num_steps) // (num_iters - ith_iter)
         current_num_abd_procs += (num_abd_procs - current_num_abd_procs) // (
             num_iters - ith_iter
         )
