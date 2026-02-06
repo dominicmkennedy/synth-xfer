@@ -62,7 +62,6 @@ from xdsl_smt.dialects.transfer import (
 
 
 def lower_type(typ: Attribute, bw: int) -> ir.Type:
-    # TODO only works for arity 2 domains (no IM)
     if isinstance(typ, TransIntegerType):
         return ir.IntType(bw)
     elif isinstance(typ, IntegerType):
@@ -239,7 +238,12 @@ class LowerToLLVM:
     def shim_xfer(self, mlir_fn: FuncOp, old_fn: ir.Function, bw: int) -> ir.Function:
         n_args = len(old_fn.function_type.args)
         i64 = ir.IntType(64)
-        i64_arr_t = ir.ArrayType(i64, 2)
+
+        first_arg = mlir_fn.args[0].type
+        assert isinstance(first_arg, AbstractValueType)
+        num_abst_fields = len(first_arg.get_fields())
+
+        i64_arr_t = ir.ArrayType(i64, num_abst_fields)
 
         fn_name = f"{old_fn.name}_shim"
         shim_ty = ir.FunctionType(i64_arr_t, [i64_arr_t for _ in range(n_args)])
@@ -265,22 +269,28 @@ class LowerToLLVM:
             else:
                 raise ValueError(f"bad type: {arg_field}")
 
-            lane_arr_t = ir.ArrayType(lane_t, 2)
-            empty_arr = ir.Constant(lane_arr_t, None)
+            lane_arr_t = ir.ArrayType(lane_t, num_abst_fields)
+            new_lane = ir.Constant(lane_arr_t, None)
 
-            new_arg_0 = to_lane(b.extract_value(arg, 0), lane_t)
-            new_arg_1 = to_lane(b.extract_value(arg, 1), lane_t)
-            new_lane = b.insert_value(empty_arr, new_arg_0, 0)
-            new_lane = b.insert_value(new_lane, new_arg_1, 1)
+            new_args = []
+            for i in range(num_abst_fields):
+                new_args.append(to_lane(b.extract_value(arg, i), lane_t))
+
+            for i in range(num_abst_fields):
+                new_lane = b.insert_value(new_lane, new_args[i], i)
+
             new_lanes.append(new_lane)
 
         r_n = b.call(old_fn, new_lanes)
-        r0 = to_i64(b.extract_value(r_n, 0))
-        r1 = to_i64(b.extract_value(r_n, 1))
+        r = ir.Constant(i64_arr_t, None)
 
-        empty_i64_arr = ir.Constant(i64_arr_t, None)
-        r = b.insert_value(empty_i64_arr, r0, 0)
-        r = b.insert_value(r, r1, 1)
+        rs = []
+        for i in range(num_abst_fields):
+            rs.append(to_i64(b.extract_value(r_n, i)))
+
+        for i in range(num_abst_fields):
+            r = b.insert_value(r, rs[i], i)
+
         b.ret(r)
 
         return shim_fn

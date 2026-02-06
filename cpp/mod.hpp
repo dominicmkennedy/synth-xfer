@@ -39,10 +39,18 @@ template <std::size_t X_> struct ModT {
       if (x.isTop())
         return os << "(top)\n";
 
-      os << "cong to {";
-      for (unsigned int i = 0; i < X; ++i)
-        if (x[0][i])
-          os << i << ", ";
+      os << "eq to {";
+
+      bool first = true;
+      for (unsigned int i = 0; i < X; ++i) {
+        if (x[0][i]) {
+          if (!first)
+            os << ", ";
+          os << i;
+          first = false;
+        }
+      }
+
       os << "} mod " << X << "\n";
 
       return os;
