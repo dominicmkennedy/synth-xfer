@@ -180,9 +180,6 @@ class MCMCSampler:
             assert isinstance(output, AbstractValueType)
             operands: list[OpResult] = []
             for i, field_type in enumerate(output.get_fields()):
-                # print(field_type)
-                # print(type(field_type))
-                # assert isinstance(field_type, TransIntegerType)
                 assert isinstance(field_type, TransIntegerType) or isinstance(
                     field_type, IntegerType
                 )

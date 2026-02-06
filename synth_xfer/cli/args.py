@@ -37,6 +37,9 @@ def int_triple(s: str) -> tuple[int, int, int]:
 def int_list(s: str) -> list[int]:
     result: list[int] = []
 
+    if s == "[]":
+        return []
+
     for chunk in s.split(","):
         chunk = chunk.strip()
         if not chunk:
@@ -260,7 +263,6 @@ def build_parser(prog: str) -> Namespace:
     )
     p.add_argument(
         "--vbw",
-        nargs="*",
         type=int_list,
         default=list(range(4, 65)),
         help="bws to verify at",
