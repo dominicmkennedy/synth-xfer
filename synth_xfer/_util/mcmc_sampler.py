@@ -183,7 +183,9 @@ class MCMCSampler:
                 # print(field_type)
                 # print(type(field_type))
                 # assert isinstance(field_type, TransIntegerType)
-                assert isinstance(field_type, TransIntegerType) or isinstance(field_type, IntegerType)
+                assert isinstance(field_type, TransIntegerType) or isinstance(
+                    field_type, IntegerType
+                )
                 assert last_int_op is not None
                 operands.append(last_int_op.results[0])
                 while True:
