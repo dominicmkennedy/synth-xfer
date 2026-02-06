@@ -31,7 +31,7 @@ jobs:
       - name: Install dependencies and build
         run: |
           echo "=== Installing dependencies (and building C++ eval engine) ==="
-          pip install ".[dev]" ruff pyright
+          pip install ".[dev]" pyright pre-commit
 
       - name: Formatting check (pre-commit: ruff-format)
         run: |
