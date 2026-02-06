@@ -439,7 +439,10 @@ class _LowerFuncToLLVM:
         res_name = self.result_name(op)
         lhs, rhs = self.operands(op)
 
-        bw_const = ir.Constant(ir.IntType(self.bw), self.bw)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        bw_const = ir.Constant(ty, ty.width)
         true_const = ir.Constant(ir.IntType(1), 1)
         cmp = self.b.icmp_unsigned(">=", rhs, bw_const, name=f"{res_name}_cmp")
 
@@ -486,15 +489,17 @@ class _LowerFuncToLLVM:
         | Constant
         | ConstantOp,
     ) -> None:
-        ty = ir.IntType(self.bw)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
         if isinstance(op, GetSignedMaxValueOp):
-            val = (2 ** (self.bw - 1)) - 1
+            val = (2 ** (ty.width - 1)) - 1
         elif isinstance(op, GetSignedMinValueOp):
-            val = 2 ** (self.bw - 1)
+            val = 2 ** (ty.width - 1)
         elif isinstance(op, GetAllOnesOp):
-            val = (2**self.bw) - 1
+            val = (2**ty.width) - 1
         elif isinstance(op, GetBitWidthOp):
-            val = self.bw
+            val = ty.width
         elif isinstance(op, Constant):
             val: int = op.value.value.data
         elif isinstance(op, ConstantOp):
@@ -525,7 +530,10 @@ class _LowerFuncToLLVM:
         oprnd = self.operands(op)[0]
         res_name = self.result_name(op)
 
-        const_zero = ir.Constant(ir.IntType(self.bw), 0)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        const_zero = ir.Constant(ty, 0)
         self.ssa_map[op.results[0]] = self.b.icmp_signed(
             "<", oprnd, const_zero, name=res_name
         )
@@ -535,11 +543,14 @@ class _LowerFuncToLLVM:
         oprnd = self.operands(op)[0]
         res_name = self.result_name(op)
 
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
         if isinstance(op, SetSignBitOp):
-            mask = ir.Constant(ir.IntType(self.bw), (2 ** (self.bw - 1)))
+            mask = ir.Constant(ty, (2 ** (ty.width - 1)))
             self.ssa_map[op.results[0]] = self.b.or_(oprnd, mask, name=res_name)  # type: ignore
         else:
-            mask = ir.Constant(ir.IntType(self.bw), ((2 ** (self.bw - 1)) - 1))
+            mask = ir.Constant(ty, ((2 ** (ty.width - 1)) - 1))
             self.ssa_map[op.results[0]] = self.b.and_(oprnd, mask, name=res_name)  # type: ignore
 
     @add_op.register
@@ -550,10 +561,13 @@ class _LowerFuncToLLVM:
         res_name = self.result_name(op)
         high = isinstance(op, SetHighBitsOp) or isinstance(op, ClearHighBitsOp)
 
-        allones = ir.Constant(ir.IntType(self.bw), ((2**self.bw) - 1))
-        c_zero = ir.Constant(ir.IntType(self.bw), 0)
-        c_bw = ir.Constant(ir.IntType(self.bw), self.bw)
-        c_bwm1 = ir.Constant(ir.IntType(self.bw), self.bw - 1)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        allones = ir.Constant(ty, ((2**ty.width) - 1))
+        c_zero = ir.Constant(ty, 0)
+        c_bw = ir.Constant(ty, ty.width)
+        c_bwm1 = ir.Constant(ty, ty.width - 1)
 
         ge = self.b.icmp_unsigned(">=", n, c_bw, name=f"{res_name}_ge")
         safe_val = c_zero if high else c_bwm1
@@ -589,10 +603,12 @@ class _LowerFuncToLLVM:
         lhs, rhs = self.operands(op)
         res_name = self.result_name(op)
 
-        int_ty = ir.IntType(self.bw)
-        zero = ir.Constant(int_ty, 0)
-        one = ir.Constant(int_ty, 1)
-        all_ones = ir.Constant(int_ty, (2**self.bw) - 1)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        zero = ir.Constant(ty, 0)
+        one = ir.Constant(ty, 1)
+        all_ones = ir.Constant(ty, (2**ty.width) - 1)
 
         rhs_is_z = self.b.icmp_signed("==", rhs, zero, name=f"{res_name}_rhs_is_zero")
         safe_rhs = self.b.select(rhs_is_z, one, rhs, name=f"{res_name}_safe_rhs")
@@ -610,11 +626,13 @@ class _LowerFuncToLLVM:
         lhs, rhs = self.operands(op)
         res_name = self.result_name(op)
 
-        int_ty = ir.IntType(self.bw)
-        zero = ir.Constant(int_ty, 0)
-        one = ir.Constant(int_ty, 1)
-        all_ones = ir.Constant(int_ty, (2**self.bw) - 1)
-        int_min = ir.Constant(int_ty, (2 ** (self.bw - 1)))
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        zero = ir.Constant(ty, 0)
+        one = ir.Constant(ty, 1)
+        all_ones = ir.Constant(ty, (2**ty.width) - 1)
+        int_min = ir.Constant(ty, (2 ** (ty.width - 1)))
 
         rhs_0 = self.b.icmp_signed("==", rhs, zero, name=f"{res_name}_rhs_is_zero")
 
@@ -642,9 +660,11 @@ class _LowerFuncToLLVM:
         lhs, rhs = self.operands(op)
         res_name = self.result_name(op)
 
-        int_ty = ir.IntType(self.bw)
-        zero = ir.Constant(int_ty, 0)
-        c_bw = ir.Constant(int_ty, self.bw)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        zero = ir.Constant(ty, 0)
+        c_bw = ir.Constant(ty, ty.width)
 
         rhs_ge_bw = self.b.icmp_unsigned(">=", rhs, c_bw, name=f"{res_name}_rhs_ge_bw")
         safe_rhs = self.b.select(rhs_ge_bw, zero, rhs, name=f"{res_name}_safe_rhs")
@@ -663,10 +683,12 @@ class _LowerFuncToLLVM:
         lhs, rhs = self.operands(op)
         res_name = self.result_name(op)
 
-        int_ty = ir.IntType(self.bw)
-        zero = ir.Constant(int_ty, 0)
-        all_ones = ir.Constant(int_ty, (2**self.bw) - 1)
-        c_bw = ir.Constant(int_ty, self.bw)
+        ty = lower_type(op.result_types[0], self.bw)
+        assert isinstance(ty, ir.IntType)
+
+        zero = ir.Constant(ty, 0)
+        all_ones = ir.Constant(ty, (2**ty.width) - 1)
+        c_bw = ir.Constant(ty, ty.width)
 
         rhs_ge_bw = self.b.icmp_unsigned(">=", rhs, c_bw, name=f"{res_name}_rhs_ge_bw")
         lhs_is_neg = self.b.icmp_signed("<", lhs, zero, name=f"{res_name}_lhs_is_neg")

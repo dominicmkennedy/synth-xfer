@@ -1,7 +1,7 @@
 from typing import Callable
 
 import xdsl.dialects.arith as arith
-from xdsl.dialects.builtin import FunctionType, IntegerAttr, UnitAttr, i1
+from xdsl.dialects.builtin import FunctionType, IntegerAttr, IntegerType, UnitAttr, i1
 from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.ir import OpResult
 from xdsl_smt.dialects.transfer import (
@@ -180,7 +180,10 @@ class MCMCSampler:
             assert isinstance(output, AbstractValueType)
             operands: list[OpResult] = []
             for i, field_type in enumerate(output.get_fields()):
-                assert isinstance(field_type, TransIntegerType)
+                # print(field_type)
+                # print(type(field_type))
+                # assert isinstance(field_type, TransIntegerType)
+                assert isinstance(field_type, TransIntegerType) or isinstance(field_type, IntegerType)
                 assert last_int_op is not None
                 operands.append(last_int_op.results[0])
                 while True:
