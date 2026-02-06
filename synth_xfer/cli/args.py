@@ -183,8 +183,8 @@ def build_parser(prog: str) -> Namespace:
     p = ArgumentParser(prog=prog, formatter_class=ArgumentDefaultsHelpFormatter)
 
     if prog == "synth_xfer":
-        p.add_argument("transfer_functions", type=Path, help="path to transfer function")
-        p.add_argument("-random_file", type=FileType("r"), help="file for preset rng")
+        p.add_argument("transfer-functions", type=Path, help="path to transfer function")
+        p.add_argument("-random-file", type=FileType("r"), help="file for preset rng")
         p.add_argument(
             "-domain",
             type=str,
@@ -194,7 +194,7 @@ def build_parser(prog: str) -> Namespace:
         )
 
     p.add_argument(
-        "-dsl_ops",
+        "-dsl-ops",
         type=Path,
         help="Path to DSL op-set JSON (e.g., dsl/ops_set_0.json)",
     )
@@ -231,27 +231,27 @@ def build_parser(prog: str) -> Namespace:
         default=False,
         help="Run e-graph-based rewrite optimizer on synthesized candidates",
     )
-    p.add_argument("-random_seed", type=int, help="seed for synthesis")
+    p.add_argument("-random-seed", type=int, help="seed for synthesis")
     p.add_argument(
-        "-program_length",
+        "-program-length",
         type=int,
-        help="length of synthed program",
+        help="length of one single synthed transformer",
         default=28,
     )
     p.add_argument(
-        "-total_rounds",
+        "-num-steps",
         type=int,
-        help="number of rounds the synthesizer should run",
+        help="number of mutation steps in one iteration",
         default=1500,
     )
     p.add_argument(
-        "-num_programs",
+        "-num-mcmc",
         type=int,
-        help="number of programs that run every round",
+        help="number of mcmc processes that run in parallel",
         default=100,
     )
     p.add_argument(
-        "-inv_temp",
+        "-inv-temp",
         type=int,
         help="Inverse temperature for MCMC. The larger the value is, the lower the probability of accepting a program with a higher cost.",
         default=200,
@@ -267,46 +267,46 @@ def build_parser(prog: str) -> Namespace:
         nargs="*",
         type=int,
         default=[4],
-        help="Bitwidths to evaluate exhaustively",
+        help="Low-bitwidths to evaluate exhaustively",
     )
     p.add_argument(
         "-mbw",
         nargs="*",
         type=int_tuple,
         default=[],
-        help="Bitwidths to evaluate sampled lattice elements exhaustively",
+        help="Mid-bitwidths to sample abstract values with, but enumerate the concretizations of each of them exhaustively",
     )
     p.add_argument(
         "-hbw",
         nargs="*",
         type=int_triple,
         default=[],
-        help="Bitwidths to sample the lattice and abstract values with",
+        help="High-bitwidths to sample abstract values with, and sample the concretizations of each of them",
     )
     p.add_argument(
-        "-num_iters",
+        "-num-iters",
         type=int,
         help="number of iterations for the synthesizer",
         default=10,
     )
     p.add_argument(
-        "-no_weighted_dsl",
+        "-no-weighted-dsl",
         dest="weighted_dsl",
         action="store_false",
         help="Disable learning weights for each DSL operation from previous for future iterations",
     )
     p.set_defaults(weighted_dsl=True)
     p.add_argument(
-        "-condition_length", type=int, help="length of synthd abduction", default=10
+        "-condition-length", type=int, help="length of synthd abduction", default=10
     )
     p.add_argument(
-        "-num_abd_procs",
+        "-num-abd-procs",
         type=int,
-        help="number of mcmc processes used for abduction. Must be less than num_programs",
+        help="number of mcmc processes used for abduction. Must be less than num_mcmc",
         default=30,
     )
     p.add_argument(
-        "-num_unsound_candidates",
+        "-num-unsound-candidates",
         type=int,
         help="number of unsound candidates considered for abduction",
         default=15,

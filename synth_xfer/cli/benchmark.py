@@ -33,8 +33,8 @@ def synth_run(
 
         res = run(
             domain=domain,
-            num_programs=args.num_programs,
-            total_rounds=args.total_rounds,
+            num_mcmc=args.num_mcmc,
+            num_steps=args.num_steps,
             program_length=args.program_length,
             inv_temp=args.inv_temp,
             vbw=args.vbw,
