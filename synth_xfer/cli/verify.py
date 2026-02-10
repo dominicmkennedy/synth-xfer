@@ -56,7 +56,9 @@ def _register_parser() -> Namespace:
 
     p.add_argument("--op", type=Path, required=True, help="Concrete op")
     p.add_argument("--xfer-file", type=Path, required=True, help="Transformer file")
-    p.add_argument("-xfer-name", type=str, required=True, help="Transformer to verify")
+    p.add_argument(
+        "--xfer-name", type=str, default="solution", help="Transformer to verify"
+    )
     p.add_argument("--timeout", type=int, default=30, help="z3 timeout")
 
     return p.parse_args()
