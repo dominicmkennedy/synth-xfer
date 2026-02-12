@@ -10,7 +10,7 @@ build-backend = "scikit_build_core.build"
 name = "synth-xfer"
 version = "0.0.0"
 readme = "README.md"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.13,<3.14"
 dependencies = [
   "xdsl>=0.48.3",
   "xdsl-smt @ https://github.com/dominicmkennedy/xdsl-smt/archive/739aa03.tar.gz",
