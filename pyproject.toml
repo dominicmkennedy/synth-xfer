@@ -10,10 +10,9 @@ build-backend = "scikit_build_core.build"
 name = "synth-xfer"
 version = "0.0.0"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.10,<3.13"
 dependencies = [
   "xdsl>=0.48.3",
-  # "xdsl-smt @ https://github.com/opencompl/xdsl-smt/archive/4704d93.tar.gz",
   "xdsl-smt @ https://github.com/dominicmkennedy/xdsl-smt/archive/739aa03.tar.gz",
   "z3-solver==4.15.1.0",
   "llvmlite==0.44.0",
@@ -23,7 +22,12 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pybind11>=3.0", "pytest>=8.0"]
+dev = [
+  "pytest>=9",
+  "ruff>=0.15",
+  "pyright>=1.1",
+  "pre-commit>=4.5",
+]
 
 [project.scripts]
 sxf = "synth_xfer.cli.sxf:main"
@@ -56,7 +60,5 @@ force-sort-within-sections = true
 pythonVersion = "3.13"
 typeCheckingMode = "standard"
 include = ["synth_xfer", "tests"]
-venvPath = "."
-venv = "venv"
 reportMissingImports = "error"
 reportUnnecessaryTypeIgnoreComment = "warning"

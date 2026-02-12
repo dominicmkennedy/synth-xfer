@@ -54,6 +54,11 @@ def parse_mlir_mod(p: _Readable, inline: bool = False) -> ModuleOp:
             FunctionCallInline(False, get_fns(mod)).apply(_ctx, mod)
 
         return mod
+    elif isinstance(mod, FuncOp):
+        wrapped = ModuleOp([mod])
+        if inline:
+            FunctionCallInline(False, get_fns(wrapped)).apply(_ctx, wrapped)
+        return wrapped
     else:
         raise ValueError(f"mlir in '{func_name}' is not a ModuleOp")
 

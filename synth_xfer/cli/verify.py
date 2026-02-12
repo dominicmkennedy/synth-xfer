@@ -14,6 +14,7 @@ from synth_xfer._util.parse_mlir import (
 )
 from synth_xfer._util.verifier import verify_transfer_function
 from synth_xfer.cli.args import int_list
+from synth_xfer.cli.eval_final import resolve_xfer_name
 
 
 def verify_function(
@@ -56,9 +57,7 @@ def _register_parser() -> Namespace:
 
     p.add_argument("--op", type=Path, required=True, help="Concrete op")
     p.add_argument("--xfer-file", type=Path, required=True, help="Transformer file")
-    p.add_argument(
-        "--xfer-name", type=str, default="solution", help="Transformer to verify"
-    )
+    p.add_argument("--xfer-name", type=str, help="Transformer to verify")
     p.add_argument("--timeout", type=int, default=30, help="z3 timeout")
 
     return p.parse_args()
@@ -67,12 +66,11 @@ def _register_parser() -> Namespace:
 def main() -> None:
     args = _register_parser()
     domain = AbstractDomain[args.domain]
-    xfer_name = str(args.xfer_name)
-
     xfer_fns = get_fns(parse_mlir_mod(args.xfer_file))
+    xfer_name = resolve_xfer_name(xfer_fns, args.xfer_name)
+
     xfer_fn = xfer_fns[xfer_name]
     del xfer_fns[xfer_name]
-
     helper_funcs = get_helper_funcs(args.op, domain)
 
     for bw in args.bw:

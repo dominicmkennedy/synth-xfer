@@ -4,17 +4,24 @@ from argparse import (
     ArgumentTypeError,
     Namespace,
 )
+from dataclasses import dataclass
 from multiprocessing import Pool
 from pathlib import Path
 
 import pandas as pd
+from xdsl.dialects.func import FuncOp
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import eval_transfer_func, setup_eval
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
-from synth_xfer._util.parse_mlir import get_helper_funcs, parse_mlir_mod, top_as_xfer
+from synth_xfer._util.parse_mlir import (
+    get_fns,
+    get_helper_funcs,
+    parse_mlir_mod,
+    top_as_xfer,
+)
 from synth_xfer._util.random import Random, Sampler
 from synth_xfer.cli.args import get_sampler, make_sampler_parser
 
@@ -26,7 +33,7 @@ def _int_tuple(s: str) -> tuple[int, ...]:
             return (int(items[0]),)
         elif len(items) == 2:
             return (int(items[0]), int(items[1]))
-        elif len(items) == 2:
+        elif len(items) == 3:
             return (int(items[0]), int(items[1]), int(items[2]))
         else:
             raise ValueError
@@ -36,12 +43,33 @@ def _int_tuple(s: str) -> tuple[int, ...]:
 
 def _reg_args():
     p = ArgumentParser(prog="eval-final", formatter_class=ArgumentDefaultsHelpFormatter)
-    p.add_argument("solution_path", type=Path, help="path to the solution")
+    p.add_argument(
+        "input_path",
+        type=Path,
+        help="directory of solutions (with config.log) or a single transformer file",
+    )
     p.add_argument("--random-seed", type=int, help="seed for synthesis")
     p.add_argument("--exact-bw", type=_int_tuple, default=(8, 10000))
     p.add_argument("--norm-bw", type=_int_tuple, default=(64, 2500, 50000))
     make_sampler_parser(p)
     p.add_argument("-o", "--output", type=Path, default=None)
+    p.add_argument(
+        "-d",
+        "--domain",
+        type=str,
+        choices=[str(x) for x in AbstractDomain],
+        help="Abstract domain (required for single transformer files)",
+    )
+    p.add_argument(
+        "--op",
+        type=Path,
+        help="Concrete op MLIR (required for single transformer files)",
+    )
+    p.add_argument(
+        "--xfer-name",
+        type=str,
+        help="Transformer function name (optional override)",
+    )
 
     return p.parse_args()
 
@@ -92,13 +120,14 @@ def run(
     lbw: list[int],
     mbw: list[tuple[int, int]],
     hbw: list[tuple[int, int, int]],
-    input_path: Path,
+    op_path: Path,
     solution_path: Path,
+    xfer_name: str,
     random_seed: int | None,
     sampler: Sampler,
 ) -> tuple[EvalResult, EvalResult]:
     all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
-    helpers = get_helper_funcs(input_path, domain)
+    helpers = get_helper_funcs(op_path, domain)
     sol_module = parse_mlir_mod(solution_path)
 
     random = Random(random_seed)
@@ -109,77 +138,173 @@ def run(
     lowerer.add_fn(helpers.meet_func)
     lowerer.add_fn(helpers.get_top_func)
     top_xfer = lowerer.add_fn(top_mlir, shim=True)
-    lowerer.add_mod(sol_module, ["solution"])
+    lowerer.add_mod(sol_module, [xfer_name])
 
     jit = Jit()
     jit.add_mod(str(lowerer))
     to_eval = setup_eval(lbw, mbw, hbw, random_seed, helpers, jit, sampler)
 
-    input = {
+    eval_input = {
         bw: (
             to_eval[bw],
-            [jit.get_fn_ptr(top_xfer[bw].name), jit.get_fn_ptr(f"solution_{bw}_shim")],
+            [
+                jit.get_fn_ptr(top_xfer[bw].name),
+                jit.get_fn_ptr(f"{xfer_name}_{bw}_shim"),
+            ],
             [],
         )
         for bw in all_bws
     }
 
-    res = eval_transfer_func(input)
+    res = eval_transfer_func(eval_input)
     assert len(res) == 2
 
     return (res[0], res[1])
 
 
-def _run_wrapper(x: tuple[AbstractDomain, Path, Path, int | None, tuple, Namespace]):
-    sampler = get_sampler(x[5])
+@dataclass(frozen=True)
+class EvalJob:
+    domain: AbstractDomain
+    op_path: Path
+    solution_path: Path
+    xfer_name: str
+    random_seed: int | None
+    bw_args: tuple[list[int], list[tuple[int, int]], list[tuple[int, int, int]]]
+    args: Namespace
+
+
+def _run_job(job: EvalJob) -> tuple[EvalResult, EvalResult]:
+    sampler = get_sampler(job.args)
 
     return run(
-        domain=x[0],
-        lbw=x[4][0],
-        mbw=x[4][1],
-        hbw=x[4][2],
-        input_path=x[1],
-        solution_path=x[2],
-        random_seed=x[3],
+        domain=job.domain,
+        lbw=job.bw_args[0],
+        mbw=job.bw_args[1],
+        hbw=job.bw_args[2],
+        op_path=job.op_path,
+        solution_path=job.solution_path,
+        xfer_name=job.xfer_name,
+        random_seed=job.random_seed,
         sampler=sampler,
+    )
+
+
+def _parse_bw_args(
+    exact_bw: tuple[int, ...],
+    norm_bw: tuple[int, ...],
+) -> tuple[list[int], list[tuple[int, int]], list[tuple[int, int, int]]]:
+    lbw: list[int] = []
+    mbw: list[tuple[int, int]] = []
+    hbw: list[tuple[int, int, int]] = []
+
+    if len(exact_bw) == 1:
+        lbw.append(exact_bw[0])
+    elif len(exact_bw) == 2:
+        mbw.append(exact_bw)
+    elif len(exact_bw) == 3:
+        raise ValueError("Can't use hbw approx. for exact calculation")
+
+    if len(norm_bw) == 1:
+        lbw.append(norm_bw[0])
+    elif len(norm_bw) == 2:
+        mbw.append(norm_bw)
+    elif len(norm_bw) == 3:
+        hbw.append(norm_bw)
+
+    return lbw, mbw, hbw
+
+
+def resolve_xfer_name(
+    xfer_fns: dict[str, FuncOp],
+    requested_name: str | None,
+) -> str:
+    if requested_name is not None:
+        xfer_name = requested_name
+    elif len(xfer_fns) == 1:
+        xfer_name = list(xfer_fns.keys())[0]
+    else:
+        xfer_name = "solution"
+
+    if xfer_name not in xfer_fns:
+        raise ValueError(f"Function {xfer_name}, not found in MLIR module")
+
+    return xfer_name
+
+
+def _make_job(
+    domain: AbstractDomain,
+    op_path: Path,
+    solution_path: Path,
+    xfer_name: str,
+    args: Namespace,
+    bw_args: tuple[list[int], list[tuple[int, int]], list[tuple[int, int, int]]],
+) -> EvalJob:
+    return EvalJob(
+        domain=domain,
+        op_path=op_path,
+        solution_path=solution_path,
+        xfer_name=xfer_name,
+        random_seed=args.random_seed,
+        bw_args=bw_args,
+        args=args,
     )
 
 
 def main() -> None:
     args = _reg_args()
-    solutions = _get_solutions(args.solution_path)
+    input_path = args.input_path
+    bw_args = _parse_bw_args(args.exact_bw, args.norm_bw)
 
-    inputs: list[tuple[AbstractDomain, Path, Path, int | None, tuple, Namespace]] = []
-    for solution_path, op_path, domain in solutions:
-        lbw, mbw, hbw = [], [], []
-        if len(args.exact_bw) == 1:
-            lbw.append(args.exact_bw[0])
-        elif len(args.exact_bw) == 2:
-            mbw.append(args.exact_bw)
-        elif len(args.exact_bw) == 3:
-            raise ValueError("Can't use hbw approx. for exact calculation")
+    if input_path.is_dir():
+        if args.domain or args.op:
+            raise ValueError("Don't pass --domain/--op when using a solution dir")
 
-        if len(args.norm_bw) == 1:
-            lbw.append(args.norm_bw[0])
-        elif len(args.norm_bw) == 2:
-            mbw.append(args.norm_bw)
-        elif len(args.norm_bw) == 3:
-            hbw.append(args.norm_bw)
+        solutions = _get_solutions(input_path)
+        jobs: list[EvalJob] = []
+        for solution_path, op_path, domain in solutions:
+            sol_module = parse_mlir_mod(solution_path)
+            xfer_name = resolve_xfer_name(get_fns(sol_module), args.xfer_name)
+            jobs.append(
+                _make_job(
+                    domain=domain,
+                    op_path=op_path,
+                    solution_path=solution_path,
+                    xfer_name=xfer_name,
+                    args=args,
+                    bw_args=bw_args,
+                )
+            )
 
-        inputs.append(
-            (domain, op_path, solution_path, args.random_seed, (lbw, mbw, hbw), args)
-        )
+        jobs = sorted(jobs, key=lambda x: (x.domain.value))
+    elif input_path.is_file():
+        assert args.domain is not None
+        domain = AbstractDomain[args.domain]
+        sol_module = parse_mlir_mod(input_path)
+        xfer_name = resolve_xfer_name(get_fns(sol_module), args.xfer_name)
+        jobs = [
+            _make_job(
+                domain=domain,
+                op_path=args.op,
+                solution_path=input_path,
+                xfer_name=xfer_name,
+                args=args,
+                bw_args=bw_args,
+            )
+        ]
+    else:
+        raise ValueError(f"Input path not found: {input_path}")
 
-    inputs = sorted(inputs, key=lambda x: (x[0].value))
-
-    with Pool() as p:
-        data = p.map(_run_wrapper, inputs)
+    if len(jobs) == 1:
+        data = [_run_job(jobs[0])]
+    else:
+        with Pool() as p:
+            data = p.map(_run_job, jobs)
 
     exact_bw = args.exact_bw[0]
     norm_bw = args.norm_bw[0]
 
     rows = []
-    for (domain, op_path, _, _, _, _), (top_r, synth_r) in zip(inputs, data):
+    for job, (top_r, synth_r) in zip(jobs, data):
         top_8 = next(x for x in top_r.per_bit_res if x.bitwidth == exact_bw)
         synth_8 = next(x for x in synth_r.per_bit_res if x.bitwidth == exact_bw)
         top_64 = next(x for x in top_r.per_bit_res if x.bitwidth == norm_bw)
@@ -187,8 +312,8 @@ def main() -> None:
 
         rows.append(
             {
-                "Domain": str(domain),
-                "Op": op_path.stem,
+                "Domain": str(job.domain),
+                "Op": job.op_path.stem,
                 "Top Exact %": top_8.get_exact_prop() * 100.0,
                 "Synth Exact %": synth_8.get_exact_prop() * 100.0,
                 "Top Norm": top_64.dist,

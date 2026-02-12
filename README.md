@@ -11,7 +11,7 @@ Publication: [Nice to Meet You: Synthesizing Practical MLIR Abstract Transformer
 
 ## Requirements
 
-- Python >= 3.13  
+- Python == 3.13
 - Clang >= 18
 
 ## Setup
@@ -23,7 +23,7 @@ source .venv/bin/activate
 ```
 2. Install in editable mode with dev dependencies: 
 ```bash
-pip install -e .[dev]
+pip install -e ".[dev]"
 ```
 3. Run tests to confirm the C++ bindings built correctly:
 ```bash
@@ -32,7 +32,8 @@ pytest -vv
 
 ## Usage
 
-The project provides six executables:
+The project provides six executables,
+these executables depend on paths in the repo the should be run from the project root.
 
 | Executable      | Description                                                                                           |
 |-----------------|-------------------------------------------------------------------------------------------------------|
@@ -47,7 +48,7 @@ The project provides six executables:
 
 ### Quick Run
 
-Here's a simple invocation of the `sxf` program for quick testing:
+Here's a simple invocation of the `sxf` program for quick testing (should take ~60s):
 
 ```bash
 sxf mlir/Operations/And.mlir  \
@@ -67,7 +68,7 @@ Iteration 1  | Exact 96.7078% | 3 solutions | 39.6943s |
 Final Soln   | Exact 96.7078% | 3 solutions |
 ```
 
-(The final output may be different depending on your systems RNG differences).
+(The final output may be different depending on your system's RNG differences).
 
 The command reads the MLIR program `mlir/Operations/And.mlir` and writes outputs into `outputs/And`.
 
@@ -89,8 +90,9 @@ sxf mlir/Operations/Add.mlir          \
 
 ## Important CLI Options for `sxf`
 
-| CMD line flag                    | Description                                                                                                                                                                          |
+| CLI flag                         | Description                                                                                                                                                                          |
 |----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `<input_path>`                   | Path to a concrete operation (`.mlir` file) to sythesize an abstract transformer for.                                                                                                |
 | `-o <path>`                      | Output directory where synthesized results and intermediate outputs will be written.                                                                                                 |
 | `--random-seed <int>`            | Seed for the random number generator to make runs reproducible.                                                                                                                      |
 | `--domain <Name>`                | Abstract domain to evaluate (e.g., `KnownBits`, `UConstRange`, `SConstRange`).                                                                                                       |
@@ -107,3 +109,62 @@ sxf mlir/Operations/Add.mlir          \
 | `--num-unsound-candidates <int>` | Number of unsound candidates considered for abduction (default: `15`).                                                                                                               |
 | `--optimize`                     | Run e-graph-based rewrite optimizer on synthesized candidates.                                                                                                                       |
 | `--quiet`                        | Suppress verbose output.                                                                                                                                                             |
+
+## Important CLI Options for `verify`
+
+| CLI flag             | Description                                                                                                                                        |
+|----------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `--xfer-file <Path>` | Path to the transformer (`.mlir` file), to be transformer to verified.                                                                             |
+| `--xfer-name <str>`  | Name of the function in the transformer file to verify (defaults to `solution`, or the only function in the transformer file if there's just one). |
+| `--bw <list[int]>`   | Bitwidth(s) to verify at (e.g. `-bw 4`, `-bw 4-64` or `-bw 4,8,16`).                                                                               |
+| `--domain <Name>`    | Abstract domain semantics to verify with (e.g., `KnownBits`, `UConstRange`, `SConstRange`).                                                        |
+| `--op <Path>`        | Path to the concrete operation (`.mlir` file), for the concrete semantics to verify with.                                                          |
+| `--timeout <int>`    | Timeout flag (in seconds) to pass to z3 (this is a per bit-width timeout).                                                                         |
+
+For example:
+```bash
+verify --xfer-file tests/data/kb_xor.mlir \
+       --bw 4-8,16,32                     \
+       --domain KnownBits                 \
+       --op mlir/Operations/Xor.mlir
+```
+Should produce:
+```
+4  bits | sound   | took 0.0342s
+5  bits | sound   | took 0.0249s
+6  bits | sound   | took 0.0256s
+7  bits | sound   | took 0.0248s
+8  bits | sound   | took 0.0240s
+16 bits | sound   | took 0.0246s
+32 bits | sound   | took 0.0282s
+```
+
+## Important CLI Options for `eval-final`
+
+| CLI flag              | Description                                                                                                                                         |
+|-----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `<input_path>`        | Path to a solutions directory (with `config.log`) or a single transformer `.mlir` file.                                                             |
+| `--domain <Name>`     | Abstract domain (required only when `<input_path>` is a single transformer file).                                                                   |
+| `--op <Path>`         | Path to the concrete operation (`.mlir` file) (required only when `<input_path>` is a single transformer file).                                     |
+| `--xfer-name <str>`   | Name of the transformer function to evaluate (defaults to `solution`, or the only function in the file if there's just one).                        |
+| `--exact-bw <tuple>`  | Bitwidth for exact percent reporting. Accepts `bw` or `bw,num_samples` (e.g. `4`, or `8,5000`).                                                     |
+| `--norm-bw <tuple>`   | Bitwidth for norm score reporting. Accepts `bw`, `bw,num_samples`, or `bw,num_abs_samples,num_conc_samples` (e.g. `4`, `8,5000` or `64,5000,5000`). |
+| `-o, --output <Path>` | Write results as CSV to the given path.                                                                                                             |
+
+For example:
+```bash
+eval-final tests/data/kb_and.mlir        \
+           --domain KnownBits            \
+           --op mlir/Operations/And.mlir \
+           --exact-bw 8,5000             \
+           --norm-bw 64,5000,5000
+```
+Should produce:
+```
+Exact bw: (8, 5000)
+Norm bw:  (64, 5000, 5000)
+      Domain   Op  Top Exact %  Synth Exact %  Top Norm  Synth Norm
+0  KnownBits  And         4.02          100.0   2494.34           0
+```
+
+(With small differences due to RNG).
