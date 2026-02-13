@@ -58,6 +58,198 @@ def test_jit_with_kb_and():
     assert res.bitwidth == 8
 
 
+def test_jit_with_kb_add():
+    conc_add_f = PROJ_DIR / "mlir" / "Operations" / "Add.mlir"
+
+    lowerer = LowerToLLVM([4, 8])
+    helpers = get_helper_funcs(conc_add_f, AbstractDomain.KnownBits)
+    xfer_mlir = parse_mlir_func(DATA_DIR / "kb_add.mlir")
+    lowerer.add_fn(xfer_mlir, shim=True)
+    lowerer.add_fn(helpers.crt_func, shim=True)
+
+    jit = Jit()
+    jit.add_mod(str(lowerer))
+    conc_op_addr = jit.get_fn_ptr("concrete_op_4_shim")
+    xfer_fn_addr = jit.get_fn_ptr("kb_add_4_shim")
+
+    to_eval_low = enum_low_knownbits_4_4_4(conc_op_addr, None)
+    raw_res = eval_knownbits_4_4_4(to_eval_low, [xfer_fn_addr], [])
+    res = get_per_bit(raw_res)[0]
+    assert res.get_exact_prop() == 1.0
+    assert res.all_cases == 6561
+    assert res.bitwidth == 4
+
+    conc_op_addr = jit.get_fn_ptr("concrete_op_8_shim")
+    xfer_fn_addr = jit.get_fn_ptr("kb_add_8_shim")
+
+    NUM_CASES = 5000
+    sampler = Sampler.uniform()
+    to_eval_mid = enum_mid_knownbits_8_8_8(
+        conc_op_addr, None, NUM_CASES, 100, sampler.sampler
+    )
+    raw_res = eval_knownbits_8_8_8(to_eval_mid, [xfer_fn_addr], [])
+    res = get_per_bit(raw_res)[0]
+    assert res.get_exact_prop() == 1.0
+    assert res.all_cases == NUM_CASES
+    assert res.bitwidth == 8
+
+
+def test_jit_with_kb_addnsw():
+    conc_addnsw_f = PROJ_DIR / "mlir" / "Operations" / "AddNsw.mlir"
+
+    lowerer = LowerToLLVM([4, 8])
+    helpers = get_helper_funcs(conc_addnsw_f, AbstractDomain.KnownBits)
+    xfer_mlir = parse_mlir_func(DATA_DIR / "kb_addnsw.mlir")
+    lowerer.add_fn(xfer_mlir, shim=True)
+    lowerer.add_fn(helpers.crt_func, shim=True)
+    lowerer.add_fn(helpers.op_constraint_func, shim=True)
+
+    jit = Jit()
+    jit.add_mod(str(lowerer))
+    conc_op_addr = jit.get_fn_ptr("concrete_op_4_shim")
+    op_constraint_addr = jit.get_fn_ptr("op_constraint_4_shim")
+    xfer_fn_addr = jit.get_fn_ptr("kb_addnsw_4_shim")
+
+    to_eval_low = enum_low_knownbits_4_4_4(conc_op_addr, op_constraint_addr)
+    raw_res = eval_knownbits_4_4_4(to_eval_low, [xfer_fn_addr], [])
+    res = get_per_bit(raw_res)[0]
+    assert res.get_sound_prop() == 1.0
+    assert res.all_cases > 0
+    assert res.bitwidth == 4
+
+    conc_op_addr = jit.get_fn_ptr("concrete_op_8_shim")
+    op_constraint_addr = jit.get_fn_ptr("op_constraint_8_shim")
+    xfer_fn_addr = jit.get_fn_ptr("kb_addnsw_8_shim")
+
+    NUM_CASES = 5000
+    sampler = Sampler.uniform()
+    to_eval_mid = enum_mid_knownbits_8_8_8(
+        conc_op_addr, op_constraint_addr, NUM_CASES, 100, sampler.sampler
+    )
+    raw_res = eval_knownbits_8_8_8(to_eval_mid, [xfer_fn_addr], [])
+    res = get_per_bit(raw_res)[0]
+    assert res.get_sound_prop() == 1.0
+    assert res.all_cases == NUM_CASES
+    assert res.bitwidth == 8
+
+
+def test_jit_with_kb_mods():
+    conc_mods_f = PROJ_DIR / "mlir" / "Operations" / "Mods.mlir"
+
+    lowerer = LowerToLLVM([4, 8])
+    helpers = get_helper_funcs(conc_mods_f, AbstractDomain.KnownBits)
+    xfer_mlir = parse_mlir_func(DATA_DIR / "kb_mods.mlir")
+    lowerer.add_fn(xfer_mlir, shim=True)
+    lowerer.add_fn(helpers.crt_func, shim=True)
+    lowerer.add_fn(helpers.op_constraint_func, shim=True)
+
+    jit = Jit()
+    jit.add_mod(str(lowerer))
+    conc_op_addr = jit.get_fn_ptr("concrete_op_4_shim")
+    op_constraint_addr = jit.get_fn_ptr("op_constraint_4_shim")
+    xfer_fn_addr = jit.get_fn_ptr("kb_mods_4_shim")
+
+    to_eval_low = enum_low_knownbits_4_4_4(conc_op_addr, op_constraint_addr)
+    raw_res = eval_knownbits_4_4_4(to_eval_low, [xfer_fn_addr], [])
+    res = get_per_bit(raw_res)[0]
+    assert res.get_sound_prop() == 1.0
+    assert res.all_cases > 0
+    assert res.bitwidth == 4
+
+    conc_op_addr = jit.get_fn_ptr("concrete_op_8_shim")
+    op_constraint_addr = jit.get_fn_ptr("op_constraint_8_shim")
+    xfer_fn_addr = jit.get_fn_ptr("kb_mods_8_shim")
+
+    NUM_CASES = 5000
+    sampler = Sampler.uniform()
+    to_eval_mid = enum_mid_knownbits_8_8_8(
+        conc_op_addr, op_constraint_addr, NUM_CASES, 100, sampler.sampler
+    )
+    raw_res = eval_knownbits_8_8_8(to_eval_mid, [xfer_fn_addr], [])
+    res = get_per_bit(raw_res)[0]
+    assert res.get_sound_prop() == 1.0
+    assert res.all_cases == NUM_CASES
+    assert res.bitwidth == 8
+
+
+def test_jit_with_kb_ashr():
+    conc_ashr_f = PROJ_DIR / "mlir" / "Operations" / "Ashr.mlir"
+
+    lowerer = LowerToLLVM([4, 8])
+    helpers = get_helper_funcs(conc_ashr_f, AbstractDomain.KnownBits)
+    xfer_mlir = parse_mlir_func(DATA_DIR / "kb_ashr.mlir")
+    lowerer.add_fn(xfer_mlir, shim=True)
+    lowerer.add_fn(helpers.crt_func, shim=True)
+    lowerer.add_fn(helpers.op_constraint_func, shim=True)
+
+    jit = Jit()
+    jit.add_mod(str(lowerer))
+    conc_op_addr = jit.get_fn_ptr("concrete_op_4_shim")
+    op_constraint_addr = jit.get_fn_ptr("op_constraint_4_shim")
+    xfer_fn_addr = jit.get_fn_ptr("kb_ashr_4_shim")
+
+    to_eval_low = enum_low_knownbits_4_4_4(conc_op_addr, op_constraint_addr)
+    raw_res = eval_knownbits_4_4_4(to_eval_low, [xfer_fn_addr], [])
+    res = get_per_bit(raw_res)[0]
+    assert res.get_sound_prop() == 1.0
+    assert res.all_cases > 0
+    assert res.bitwidth == 4
+
+    conc_op_addr = jit.get_fn_ptr("concrete_op_8_shim")
+    op_constraint_addr = jit.get_fn_ptr("op_constraint_8_shim")
+    xfer_fn_addr = jit.get_fn_ptr("kb_ashr_8_shim")
+
+    NUM_CASES = 5000
+    sampler = Sampler.uniform()
+    to_eval_mid = enum_mid_knownbits_8_8_8(
+        conc_op_addr, op_constraint_addr, NUM_CASES, 100, sampler.sampler
+    )
+    raw_res = eval_knownbits_8_8_8(to_eval_mid, [xfer_fn_addr], [])
+    res = get_per_bit(raw_res)[0]
+    assert res.get_sound_prop() == 1.0
+    assert res.all_cases == NUM_CASES
+    assert res.bitwidth == 8
+
+
+def test_jit_with_kb_udivexact():
+    conc_udivexact_f = PROJ_DIR / "mlir" / "Operations" / "UdivExact.mlir"
+
+    lowerer = LowerToLLVM([4, 8])
+    helpers = get_helper_funcs(conc_udivexact_f, AbstractDomain.KnownBits)
+    xfer_mlir = parse_mlir_func(DATA_DIR / "kb_udivexact.mlir")
+    lowerer.add_fn(xfer_mlir, shim=True)
+    lowerer.add_fn(helpers.crt_func, shim=True)
+    lowerer.add_fn(helpers.op_constraint_func, shim=True)
+
+    jit = Jit()
+    jit.add_mod(str(lowerer))
+    conc_op_addr = jit.get_fn_ptr("concrete_op_4_shim")
+    op_constraint_addr = jit.get_fn_ptr("op_constraint_4_shim")
+    xfer_fn_addr = jit.get_fn_ptr("kb_udivexact_4_shim")
+
+    to_eval_low = enum_low_knownbits_4_4_4(conc_op_addr, op_constraint_addr)
+    raw_res = eval_knownbits_4_4_4(to_eval_low, [xfer_fn_addr], [])
+    res = get_per_bit(raw_res)[0]
+    assert res.get_sound_prop() == 1.0
+    assert res.all_cases > 0
+    assert res.bitwidth == 4
+
+    conc_op_addr = jit.get_fn_ptr("concrete_op_8_shim")
+    op_constraint_addr = jit.get_fn_ptr("op_constraint_8_shim")
+    xfer_fn_addr = jit.get_fn_ptr("kb_udivexact_8_shim")
+
+    NUM_CASES = 5000
+    sampler = Sampler.uniform()
+    to_eval_mid = enum_mid_knownbits_8_8_8(
+        conc_op_addr, op_constraint_addr, NUM_CASES, 100, sampler.sampler
+    )
+    raw_res = eval_knownbits_8_8_8(to_eval_mid, [xfer_fn_addr], [])
+    res = get_per_bit(raw_res)[0]
+    assert res.get_sound_prop() == 1.0
+    assert res.all_cases == NUM_CASES
+    assert res.bitwidth == 8
+
+
 def test_jit_with_ucr_add():
     conc_add_f = PROJ_DIR / "mlir" / "Operations" / "Add.mlir"
 
