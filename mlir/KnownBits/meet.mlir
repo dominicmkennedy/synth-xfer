@@ -1,11 +1,10 @@
-"func.func"() ({
-^bb0(%arg0: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1: !transfer.abs_value<[!transfer.integer, !transfer.integer]>):
-  %arg00 = "transfer.get"(%arg0) {index=0:index}: (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
-  %arg01 = "transfer.get"(%arg0) {index=1:index}: (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
-  %arg10 = "transfer.get"(%arg1) {index=0:index}: (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
-  %arg11 = "transfer.get"(%arg1) {index=1:index}: (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
-  %and0 = "transfer.or"(%arg00,%arg10): (!transfer.integer, !transfer.integer)->!transfer.integer
-  %and1 = "transfer.or"(%arg01,%arg11): (!transfer.integer, !transfer.integer)->!transfer.integer
-  %result = "transfer.make"(%and0, %and1) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
-  "func.return"(%result) : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> ()
-}) {function_type = (!transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>, sym_name = "meet"} : () -> ()
+func.func @meet(%lhs: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %rhs: !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+  %lhs_z = "transfer.get"(%lhs) {index = 0 : index} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
+  %lhs_o = "transfer.get"(%lhs) {index = 1 : index} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
+  %rhs_z = "transfer.get"(%rhs) {index = 0 : index} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
+  %rhs_o = "transfer.get"(%rhs) {index = 1 : index} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
+  %res_z = "transfer.or"(%lhs_z, %rhs_z) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+  %res_o = "transfer.or"(%lhs_o, %rhs_o) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+  %result = "transfer.make"(%res_z, %res_o) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
+  return %result : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
+}

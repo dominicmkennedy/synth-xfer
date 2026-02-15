@@ -1,12 +1,11 @@
-"func.func"() ({
-^bb0(%arg0: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %inst: !transfer.integer):
-  %arg00 = "transfer.get"(%arg0) {index=0:index}: (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
-  %arg01 = "transfer.get"(%arg0) {index=1:index}: (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
-  %neg_inst = "transfer.neg"(%inst) : (!transfer.integer) -> !transfer.integer
-  %or1 = "transfer.or"(%neg_inst,%arg00): (!transfer.integer, !transfer.integer)->!transfer.integer
-  %or2 = "transfer.or"(%inst,%arg01): (!transfer.integer, !transfer.integer)->!transfer.integer
-  %cmp1="transfer.cmp"(%or1,%neg_inst){predicate=0:i64}:(!transfer.integer, !transfer.integer)->i1
-  %cmp2="transfer.cmp"(%or2,%inst){predicate=0:i64}:(!transfer.integer, !transfer.integer)->i1
-  %result="arith.andi"(%cmp1,%cmp2):(i1,i1)->i1
-  "func.return"(%result) : (i1) -> ()
-}) {function_type = (!transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.integer) -> i1, sym_name = "getInstanceConstraint"} : () -> ()
+func.func @getInstanceConstraint(%abst_val: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %inst: !transfer.integer) -> !transfer.integer<1> {
+  %known_z = "transfer.get"(%abst_val) {index = 0 : index} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
+  %known_o = "transfer.get"(%abst_val) {index = 1 : index} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
+  %inst_not = "transfer.neg"(%inst) : (!transfer.integer) -> !transfer.integer
+  %or_0 = "transfer.or"(%inst_not, %known_z) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+  %or_1 = "transfer.or"(%inst, %known_o) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+  %cmp_0 = "transfer.cmp"(%or_0, %inst_not) {predicate = 0 : index} : (!transfer.integer, !transfer.integer) -> !transfer.integer<1>
+  %cmp_1 = "transfer.cmp"(%or_1, %inst) {predicate = 0 : index} : (!transfer.integer, !transfer.integer) -> !transfer.integer<1>
+  %result = "transfer.and"(%cmp_0, %cmp_1) : (!transfer.integer<1>, !transfer.integer<1>) -> !transfer.integer<1>
+  return %result : !transfer.integer<1>
+}

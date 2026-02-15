@@ -1,7 +1,6 @@
-"func.func"() ({
-^bb0(%arg0: !transfer.abs_value<[!transfer.integer, !transfer.integer]>):
-  %arg00 = "transfer.get"(%arg0) {index=0:index}: (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
-  %const0 = "transfer.constant"(%arg00){value=0:index} : (!transfer.integer) -> !transfer.integer
-  %result = "transfer.make"(%const0, %const0) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
-  "func.return"(%result) : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> ()
-}) {function_type = (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>, sym_name = "getTop"} : () -> ()
+func.func @getTop(%abst_val: !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+  %known_z = "transfer.get"(%abst_val) {index = 0 : index} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
+  %const_0 = "transfer.constant"(%known_z) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
+  %result = "transfer.make"(%const_0, %const_0) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
+  return %result : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
+}
