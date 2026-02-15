@@ -36,7 +36,7 @@ Implement or improve one transfer function in this repo.
 
 2. Transfer must be sound and as precise as possible.
 3. Keep code bitwidth-agnostic.
-4. Keep solver timeout at or below `120` seconds. It is fine to use lower timeouts to quickly ascertain the soundness of intermediate or partial transfer functions, but you should use the full timeout before reporting your final version to the user.
+4. Keep solver timeout at or below `120` seconds. It is fine to use lower timeouts to quickly ascertain the soundness of intermediate or partial transfer functions, but use `--timeout 120` for your final reported `verify-upto` run.
 5. Keep changes minimal and repo-consistent.
 6. Reuse existing transfer primitives whenever possible.
 
@@ -84,7 +84,7 @@ timeout 300 sxf mlir/Operations/<Op>.mlir \
 - This MLIR parser uses strict SSA form: each `%name = ...` must be an operation result.
 - Do not write alias assignments like `%x = %y : !transfer.integer`.
 - If you need another reference, reuse the original SSA value directly.
-- After drafting a transfer file, run a quick small-limit `verify-upto` first to catch parser/syntax issues, then run a broader limit.
+- After drafting a transfer file, run a quick timeout-limited `verify-upto` first (still with `--bw 64`) to catch parser/syntax issues, then run your final `--timeout 120` check.
 
 ## Domain-Specific Mapping
 
@@ -108,30 +108,32 @@ Run only the commands for your chosen domain.
 KnownBits:
 
 ```bash
-verify-upto --xfer-file tests/data/kb_<op>.mlir --bw 64 --timeout 60 --domain KnownBits --op mlir/Operations/<Op>.mlir
+verify-upto --xfer-file tests/data/kb_<op>.mlir --bw 64 --timeout 120 --domain KnownBits --op mlir/Operations/<Op>.mlir
 eval-final tests/data/kb_<op>.mlir --domain KnownBits --op mlir/Operations/<Op>.mlir --exact-bw 8,1000 --norm-bw 64,10000,1000
 ```
 
 Unsigned ConstantRange (`UConstRange`):
 
 ```bash
-verify-upto --xfer-file tests/data/ucr_<op>.mlir --bw 64 --timeout 60 --domain UConstRange --op mlir/Operations/<Op>.mlir
+verify-upto --xfer-file tests/data/ucr_<op>.mlir --bw 64 --timeout 120 --domain UConstRange --op mlir/Operations/<Op>.mlir
 eval-final tests/data/ucr_<op>.mlir --domain UConstRange --op mlir/Operations/<Op>.mlir --exact-bw 8,1000 --norm-bw 64,10000,1000
 ```
 
 Signed ConstantRange (`SConstRange`):
 
 ```bash
-verify-upto --xfer-file tests/data/scr_<op>.mlir --bw 64 --timeout 60 --domain SConstRange --op mlir/Operations/<Op>.mlir
+verify-upto --xfer-file tests/data/scr_<op>.mlir --bw 64 --timeout 120 --domain SConstRange --op mlir/Operations/<Op>.mlir
 eval-final tests/data/scr_<op>.mlir --domain SConstRange --op mlir/Operations/<Op>.mlir --exact-bw 8,1000 --norm-bw 64,10000,1000
 ```
 
 ## Testing Guidance
 
 - Use `verify-upto` as the soundness oracle.
-- `verify-upto` uses the same core arguments as `verify`, but checks all bitwidths from `1` up to the requested max width.
+- `verify-upto` uses the same core arguments as `verify`, checks bitwidths from `1` up to the requested max width, and stops early on the first `timeout`.
 - Use `eval-final` as the precision/quality metric.
-- Always use 64 as the max width, but use shorter timeouts as needed for intermediate results.
+- Always use `--bw 64` for `verify-upto`.
+- For faster intermediate feedback, lower `--timeout` (never lower `--bw`).
+- For final reporting, use `--timeout 120`.
 
 ## Optional Test File Updates (Only If Asked)
 
