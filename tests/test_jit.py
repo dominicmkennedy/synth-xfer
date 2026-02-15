@@ -63,7 +63,7 @@ def test_jit_with_ucr_add():
 
     lowerer = LowerToLLVM([4, 8])
     helpers = get_helper_funcs(conc_add_f, AbstractDomain.UConstRange)
-    xfer_mlir = parse_mlir_func(DATA_DIR / "cr_add.mlir")
+    xfer_mlir = parse_mlir_func(DATA_DIR / "ucr_add.mlir")
     lowerer.add_fn(xfer_mlir, shim=True)
     lowerer.add_fn(helpers.crt_func, shim=True)
 

@@ -9,9 +9,9 @@ entry:
   %"lhs_ub" = extractvalue [2 x i4] %".1", 1
   %"rhs_lb" = extractvalue [2 x i4] %".2", 0
   %"rhs_ub" = extractvalue [2 x i4] %".2", 1
-  %"res_lb_cmp" = icmp ugt i4 %"lhs_lb", %"rhs_lb"
+  %"res_lb_cmp" = icmp sgt i4 %"lhs_lb", %"rhs_lb"
   %"res_lb" = select  i1 %"res_lb_cmp", i4 %"lhs_lb", i4 %"rhs_lb"
-  %"res_ub_cmp" = icmp ult i4 %"lhs_ub", %"rhs_ub"
+  %"res_ub_cmp" = icmp slt i4 %"lhs_ub", %"rhs_ub"
   %"res_ub" = select  i1 %"res_ub_cmp", i4 %"lhs_ub", i4 %"rhs_ub"
   %"result" = insertvalue [2 x i4] zeroinitializer, i4 %"res_lb", 0
   %"result.1" = insertvalue [2 x i4] %"result", i4 %"res_ub", 1
@@ -25,9 +25,9 @@ entry:
   %"lhs_ub" = extractvalue [2 x i8] %".1", 1
   %"rhs_lb" = extractvalue [2 x i8] %".2", 0
   %"rhs_ub" = extractvalue [2 x i8] %".2", 1
-  %"res_lb_cmp" = icmp ugt i8 %"lhs_lb", %"rhs_lb"
+  %"res_lb_cmp" = icmp sgt i8 %"lhs_lb", %"rhs_lb"
   %"res_lb" = select  i1 %"res_lb_cmp", i8 %"lhs_lb", i8 %"rhs_lb"
-  %"res_ub_cmp" = icmp ult i8 %"lhs_ub", %"rhs_ub"
+  %"res_ub_cmp" = icmp slt i8 %"lhs_ub", %"rhs_ub"
   %"res_ub" = select  i1 %"res_ub_cmp", i8 %"lhs_ub", i8 %"rhs_ub"
   %"result" = insertvalue [2 x i8] zeroinitializer, i8 %"res_lb", 0
   %"result.1" = insertvalue [2 x i8] %"result", i8 %"res_ub", 1
@@ -41,9 +41,9 @@ entry:
   %"lhs_ub" = extractvalue [2 x i64] %".1", 1
   %"rhs_lb" = extractvalue [2 x i64] %".2", 0
   %"rhs_ub" = extractvalue [2 x i64] %".2", 1
-  %"res_lb_cmp" = icmp ugt i64 %"lhs_lb", %"rhs_lb"
+  %"res_lb_cmp" = icmp sgt i64 %"lhs_lb", %"rhs_lb"
   %"res_lb" = select  i1 %"res_lb_cmp", i64 %"lhs_lb", i64 %"rhs_lb"
-  %"res_ub_cmp" = icmp ult i64 %"lhs_ub", %"rhs_ub"
+  %"res_ub_cmp" = icmp slt i64 %"lhs_ub", %"rhs_ub"
   %"res_ub" = select  i1 %"res_ub_cmp", i64 %"lhs_ub", i64 %"rhs_ub"
   %"result" = insertvalue [2 x i64] zeroinitializer, i64 %"res_lb", 0
   %"result.1" = insertvalue [2 x i64] %"result", i64 %"res_ub", 1
@@ -54,8 +54,8 @@ define [2 x i4] @"getTop_4"([2 x i4] %".1") alwaysinline norecurse nounwind read
 {
 entry:
   %"lb" = extractvalue [2 x i4] %".1", 0
-  %"result" = insertvalue [2 x i4] zeroinitializer, i4 0, 0
-  %"result.1" = insertvalue [2 x i4] %"result", i4 15, 1
+  %"result" = insertvalue [2 x i4] zeroinitializer, i4 8, 0
+  %"result.1" = insertvalue [2 x i4] %"result", i4 7, 1
   ret [2 x i4] %"result.1"
 }
 
@@ -63,8 +63,8 @@ define [2 x i8] @"getTop_8"([2 x i8] %".1") alwaysinline norecurse nounwind read
 {
 entry:
   %"lb" = extractvalue [2 x i8] %".1", 0
-  %"result" = insertvalue [2 x i8] zeroinitializer, i8 0, 0
-  %"result.1" = insertvalue [2 x i8] %"result", i8 255, 1
+  %"result" = insertvalue [2 x i8] zeroinitializer, i8 128, 0
+  %"result.1" = insertvalue [2 x i8] %"result", i8 127, 1
   ret [2 x i8] %"result.1"
 }
 
@@ -72,8 +72,8 @@ define [2 x i64] @"getTop_64"([2 x i64] %".1") alwaysinline norecurse nounwind r
 {
 entry:
   %"lb" = extractvalue [2 x i64] %".1", 0
-  %"result" = insertvalue [2 x i64] zeroinitializer, i64 0, 0
-  %"result.1" = insertvalue [2 x i64] %"result", i64 18446744073709551615, 1
+  %"result" = insertvalue [2 x i64] zeroinitializer, i64 9223372036854775808, 0
+  %"result.1" = insertvalue [2 x i64] %"result", i64 9223372036854775807, 1
   ret [2 x i64] %"result.1"
 }
 

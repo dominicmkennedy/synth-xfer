@@ -1,9 +1,8 @@
-"func.func"() ({
-^bb0(%arg0: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %inst: !transfer.integer):
-    %arg00 = "transfer.get"(%arg0) {index=0:index}: (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
-    %arg01 = "transfer.get"(%arg0) {index=1:index}: (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
-    %cmp1 = "transfer.cmp"(%arg00, %inst){predicate=7:i64}:(!transfer.integer, !transfer.integer) -> i1
-    %cmp2="transfer.cmp"(%inst,%arg01){predicate=7:i64}:(!transfer.integer, !transfer.integer) -> i1
-    %result="arith.andi"(%cmp1,%cmp2):(i1,i1)->i1
-    "func.return"(%result) : (i1) -> ()
-}) {function_type = (!transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.integer) -> i1, sym_name = "getInstanceConstraint"} : () -> ()
+func.func @getInstanceConstraint(%abst_val: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %inst: !transfer.integer) -> !transfer.integer<1> {
+  %lb = "transfer.get"(%abst_val) {index = 0 : index} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
+  %ub = "transfer.get"(%abst_val) {index = 1 : index} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
+  %cmp_0 = "transfer.cmp"(%lb, %inst) {predicate = 7 : index} : (!transfer.integer, !transfer.integer) -> !transfer.integer<1>
+  %cmp_1 = "transfer.cmp"(%inst, %ub) {predicate = 7 : index} : (!transfer.integer, !transfer.integer) -> !transfer.integer<1>
+  %result = "transfer.and"(%cmp_0, %cmp_1) : (!transfer.integer<1>, !transfer.integer<1>) -> !transfer.integer<1>
+  return %result : !transfer.integer<1>
+}

@@ -1,9 +1,7 @@
-"func.func"() ({
-^bb0(%arg0: !transfer.abs_value<[!transfer.integer, !transfer.integer]>):
-  %arg00 = "transfer.get"(%arg0) {index=0:index}: (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
-  %const0 = "transfer.constant"(%arg00){value=0:index} : (!transfer.integer) -> !transfer.integer
-  %const1 = "transfer.constant"(%arg00){value=1:index} : (!transfer.integer) -> !transfer.integer
-  %constMax = "transfer.sub"(%const0, %const1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-  %result = "transfer.make"(%const0, %constMax) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
-  "func.return"(%result) : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> ()
-}) {function_type = (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>, sym_name = "getTop"} : () -> ()
+func.func @getTop(%abst_val: !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+  %lb = "transfer.get"(%abst_val) {index = 0 : index} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
+  %uint_min = "transfer.constant"(%lb) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
+  %uint_max = "transfer.get_all_ones"(%lb) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
+  %result = "transfer.make"(%uint_min, %uint_max) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
+  return %result : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
+}

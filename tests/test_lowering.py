@@ -12,13 +12,13 @@ def test_xfer_lowering():
     kb_and_mlir = parse_mlir_func(DATA_DIR / "kb_and.mlir")
     kb_or_mlir = parse_mlir_func(DATA_DIR / "kb_or.mlir")
     kb_xor_mlir = parse_mlir_func(DATA_DIR / "kb_xor.mlir")
-    cr_add_mlir = parse_mlir_func(DATA_DIR / "cr_add.mlir")
+    ucr_add_mlir = parse_mlir_func(DATA_DIR / "ucr_add.mlir")
 
     lowerer = LowerToLLVM([4, 8, 64])
     lowerer.add_fn(kb_and_mlir, shim=True)
     lowerer.add_fn(kb_or_mlir, shim=True)
     lowerer.add_fn(kb_xor_mlir, shim=True)
-    lowerer.add_fn(cr_add_mlir, shim=True)
+    lowerer.add_fn(ucr_add_mlir, shim=True)
     assert str(lowerer) == (DATA_DIR / "xfer_lowering.ll").read_text()
 
 
@@ -39,3 +39,11 @@ def test_conc_lowering():
     lowerer.add_fn(add_ucr_helpers.get_top_func)
     lowerer.add_fn(add_ucr_helpers.crt_func, shim=True)
     assert str(lowerer) == (DATA_DIR / "ucr_add_conc.ll").read_text()
+
+
+    lowerer = LowerToLLVM([4, 8, 64])
+    add_scr_helpers = get_helper_funcs(conc_add_f, AbstractDomain.SConstRange)
+    lowerer.add_fn(add_scr_helpers.meet_func)
+    lowerer.add_fn(add_scr_helpers.get_top_func)
+    lowerer.add_fn(add_scr_helpers.crt_func, shim=True)
+    assert str(lowerer) == (DATA_DIR / "scr_add_conc.ll").read_text()

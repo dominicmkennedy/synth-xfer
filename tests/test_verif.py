@@ -20,7 +20,7 @@ def test_verif_kb_and():
 def test_verif_ucr_add():
     conc_add_f = PROJ_DIR / "mlir" / "Operations" / "Add.mlir"
     helpers = get_helper_funcs(conc_add_f, AbstractDomain.UConstRange)
-    xfer_mlir = parse_mlir_func(DATA_DIR / "cr_add.mlir")
+    xfer_mlir = parse_mlir_func(DATA_DIR / "ucr_add.mlir")
     for bw in range(1, 17):
         res, _ = verify_function(bw, xfer_mlir, [], helpers, 3)
         assert res is True
