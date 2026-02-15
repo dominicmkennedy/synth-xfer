@@ -32,7 +32,7 @@ pytest -vv
 
 ## Usage
 
-The project provides six executables,
+The project provides seven executables,
 these executables depend on paths in the repo the should be run from the project root.
 
 | Executable      | Description                                                                                           |
@@ -40,6 +40,7 @@ these executables depend on paths in the repo the should be run from the project
 | `sxf`           | Given an abstract domain and a concrete function, synthesizes an abstract transformer (the main tool) |
 | `benchmark`     | Runs multiple synthesis experiments in parallel across available CPU cores                            |
 | `eval-final`    | Measures the precision of a previously synthesized transformer                                        |
+| `eval-point`    | Evaluates one transfer function on one concrete/abstract input tuple                                  |
 | `verify`        | Checks the soundness of a previously synthesized transformer                                          |
 | `lower-to-llvm` | Lowers a synthesized transformer from MLIR to LLVM IR                                                 |
 | `simplifier`    | Applies a peephole optimizer to simplify synthesized transformer code                                 |
@@ -168,6 +169,29 @@ Norm bw:  (64, 5000, 5000)
 ```
 
 (With small differences due to RNG).
+
+## Important CLI Options for `eval-point`
+
+| CLI flag                 | Description                                                                                                                             |
+|--------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
+| `--bw <int>`             | Bitwidth used to instantiate transfer integer lanes.                                                                                    |
+| `--xfer-file <Path>`     | Transfer `.mlir` file to evaluate.                                                                                                      |
+| `--xfer-name <str>`      | Function name override inside `--xfer-file` (defaults to `solution`, or the only function in file).                                   |
+| `--domain <Name>`        | Domain name. Required for inferring `--xfer-file` from `--op`, and required for concrete input encoding when file-prefix inference fails. |
+| `--op <str|Path>`        | Op name/path used with `--domain` to infer `tests/data/<prefix>_<op>.mlir`.                                                           |
+| `--arg <lane0,lane1,...>` | One abstract argument value as explicit lanes. Repeat once per op argument.                                                            |
+| `--concrete-arg <int>`   | One concrete argument value, auto-encoded to the chosen domain. Repeat once per op argument.                                          |
+| `--concrete-lhs <int>`   | Convenience alias for first concrete argument.                                                                                          |
+| `--concrete-rhs <int>`   | Convenience alias for second concrete argument.                                                                                         |
+
+For example:
+```bash
+eval-point --bw 32         \
+           -d KnownBits    \
+           --op Ashr       \
+           --concrete-lhs 0xdeadbeef \
+           --concrete-rhs 16
+```
 
 ## Important CLI Options for `simplifier`
 
