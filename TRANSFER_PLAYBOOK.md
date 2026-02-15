@@ -92,7 +92,7 @@ eval-final tests/data/scr_<op>.mlir --domain SConstRange --op mlir/Operations/<O
 - Use `verify-upto` as the soundness oracle.
 - `verify-upto` uses the same core arguments as `verify`, but checks all bitwidths from `1` up to the requested max width.
 - Use `eval-final` as the precision/quality metric.
-- Suggested max widths include `16, 32, 64` (you can run several limits as needed).
+- Always use 64 as the max width, but use shorter timeouts as needed for intermediate results.
 
 ## Optional Test File Updates (Only If Asked)
 
