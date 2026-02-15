@@ -11,8 +11,8 @@ Implement or improve one transfer function in this repo.
 ## Key Clarifications
 
 - CI integration is not required for this task.
-- Primary tools are `verify` and `final-eval`.
-- `final-eval` must always use: `--exact-bw 8,1000 --norm-bw 64,10000,1000`.
+- Primary tools are `verify` and `eval-final`.
+- `eval-final` must always use: `--exact-bw 8,1000 --norm-bw 64,10000,1000`.
 - Width lists are suggestions only; choose widths that maximize useful signal.
 - You may optionally suggest concrete missing `transfer` dialect integer ops that would enable better precision or efficiency.
 
@@ -26,7 +26,7 @@ Implement or improve one transfer function in this repo.
 
 2. Transfer must be sound and as precise as possible.
 3. Keep code bitwidth-agnostic.
-4. Keep solver timeout at or below `120` seconds.
+4. Keep solver timeout at or below `120` seconds. It is fine to use lower timeouts to quickly ascertain the soundness of intermediate or partial transfer functions, but you should use the full timeout before reporting your final version to the user.
 5. Keep changes minimal and repo-consistent.
 6. Reuse existing transfer primitives whenever possible.
 
@@ -60,27 +60,27 @@ KnownBits:
 
 ```bash
 verify --xfer-file tests/data/kb_<op>.mlir --bw <chosen-widths> --timeout 60 --domain KnownBits --op mlir/Operations/<Op>.mlir
-final-eval tests/data/kb_<op>.mlir --domain KnownBits --op mlir/Operations/<Op>.mlir --exact-bw 8,1000 --norm-bw 64,10000,1000
+eval-final tests/data/kb_<op>.mlir --domain KnownBits --op mlir/Operations/<Op>.mlir --exact-bw 8,1000 --norm-bw 64,10000,1000
 ```
 
 Unsigned ConstantRange (`UConstRange`):
 
 ```bash
 verify --xfer-file tests/data/ucr_<op>.mlir --bw <chosen-widths> --timeout 60 --domain UConstRange --op mlir/Operations/<Op>.mlir
-final-eval tests/data/ucr_<op>.mlir --domain UConstRange --op mlir/Operations/<Op>.mlir --exact-bw 8,1000 --norm-bw 64,10000,1000
+eval-final tests/data/ucr_<op>.mlir --domain UConstRange --op mlir/Operations/<Op>.mlir --exact-bw 8,1000 --norm-bw 64,10000,1000
 ```
 
 Signed ConstantRange (`SConstRange`):
 
 ```bash
 verify --xfer-file tests/data/scr_<op>.mlir --bw <chosen-widths> --timeout 60 --domain SConstRange --op mlir/Operations/<Op>.mlir
-final-eval tests/data/scr_<op>.mlir --domain SConstRange --op mlir/Operations/<Op>.mlir --exact-bw 8,1000 --norm-bw 64,10000,1000
+eval-final tests/data/scr_<op>.mlir --domain SConstRange --op mlir/Operations/<Op>.mlir --exact-bw 8,1000 --norm-bw 64,10000,1000
 ```
 
 ## Testing Guidance
 
 - Use `verify` as the soundness oracle.
-- Use `final-eval` as the precision/quality metric.
+- Use `eval-final` as the precision/quality metric.
 - Suggested widths include `4, 8, 16, 24, 32, 40, 48, 56, 64`, but choose as needed.
 - Prefer separate width runs (parallel if convenient) so one slow width does not block all results.
 
@@ -102,5 +102,5 @@ SConstRange:
 
 1. Files changed.
 2. Soundness results per tested bitwidth (`sound` / `unsound` / `timeout` plus runtime).
-3. `final-eval` table values (run with `--exact-bw 8,1000 --norm-bw 64,10000,1000`).
+3. `eval-final` table values (run with `--exact-bw 8,1000 --norm-bw 64,10000,1000`).
 4. Precision and soundness caveats, clearly separating `timeout/unresolved` from `unsound`.
