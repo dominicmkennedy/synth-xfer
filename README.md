@@ -21,7 +21,7 @@ Publication: [Nice to Meet You: Synthesizing Practical MLIR Abstract Transformer
 python3 -m venv .venv
 source .venv/bin/activate
 ```
-2. Install in editable mode with dev dependencies: 
+2. Install in editable mode with dev dependencies:
 ```bash
 pip install -e ".[dev]"
 ```
@@ -168,3 +168,11 @@ Norm bw:  (64, 5000, 5000)
 ```
 
 (With small differences due to RNG).
+
+## Important CLI Options for `simplifier`
+
+| CLI flag              | Description                                                                                                 |
+|-----------------------|-------------------------------------------------------------------------------------------------------------|
+| `<input_path>`        | Path to a transformer `.mlir` file. Accepts a single function or a module (defaults to the `solution` function). |
+| `--rewrite-meet`      | Rewrite the meet of all rewritten functions instead of individual functions.                                |
+| `--quiet` / `--no-quiet` | Suppress or enable console output from the optimizer (default: quiet).                                   |
