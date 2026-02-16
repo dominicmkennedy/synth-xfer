@@ -19,6 +19,7 @@ dependencies = [
   "pandas==2.3.3",
   "egglog>=1.0.0",
   "cloudpickle",
+  "openai>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -36,6 +37,7 @@ eval-final = "synth_xfer.cli.eval_final:main"
 verify = "synth_xfer.cli.verify:main"
 lower-to-llvm = "synth_xfer.cli.lower_to_llvm:main"
 simplifier = "synth_xfer.cli.simplifier:main"
+agent-synth = "agent.main:main"
 
 [tool.scikit-build]
 minimum-version = "0.9"
