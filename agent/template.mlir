@@ -8,7 +8,7 @@
     %const1 = "transfer.constant"(%lhs0) {value = 1 : index} : (!transfer.integer) -> !transfer.integer
     %const_all_ones = "transfer.get_all_ones"(%lhs0) : (!transfer.integer) -> !transfer.integer
     %bw = "transfer.get_bit_width"(%lhs0) : (!transfer.integer) -> !transfer.integer
-    // TODO (multiple lines) 
+    // TODO (multiple lines)
     // use %lhs0, %lhs1, %rhs0, %rhs1 to compute the result
     %r = "transfer.make"(%res0, %res1) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
     "func.return"(%r) : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> ()
