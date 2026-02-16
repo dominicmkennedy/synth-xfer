@@ -168,3 +168,17 @@ Norm bw:  (64, 5000, 5000)
 ```
 
 (With small differences due to RNG).
+
+## Agent Synthesis
+
+To run agent synthesis, first set your OpenAI API key in the `.env` file, then
+```bash
+source .env
+```
+(or set your API key in the environment variable `OPENAI_API_KEY`)
+
+Then you can run the agent synthesis with:
+```bash
+python agent/main.py mlir/Operations/Add.mlir -o outputs/agent --model gpt-5.1-codex-mini
+```
+or any model given here: https://developers.openai.com/api/docs/pricing

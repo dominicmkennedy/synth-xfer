@@ -2,6 +2,7 @@
 """Agent for synthesizing transfer functions using LLM."""
 
 import argparse
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -94,29 +95,78 @@ def instantiate_prompt(template: str, op_name: str, op_content: str) -> str:
     return prompt
 
 
-def call_llm(prompt: str, api_key: str, model: str = "gpt-4") -> str:
-    """Call OpenAI API to generate the transformer."""
-    client = OpenAI(api_key=api_key)
+def _use_responses_api(model: str) -> bool:
+    """True if this model uses the Responses API (v1/responses) rather than Chat Completions.
 
-    response = client.chat.completions.create(
-        model=model,
-        messages=[
-            {
-                "role": "system",
-                "content": "You are an expert in MLIR and abstract interpretation. Your task is to generate sound and highly precise abstract transformers for the given operation. Generate only the requested MLIR code without any explanation or markdown formatting.",
-            },
-            {"role": "user", "content": prompt},
-        ],
-        temperature=0.7,
-        max_tokens=5000,
+    Includes: GPT-5.x, Codex (e.g. gpt-5.2-codex), and o-series reasoning (o1, o3, o4).
+    """
+    m = model.lower()
+    return (
+        "-codex" in m
+        or m.startswith("gpt-5")
+        or m.startswith("o1")
+        or m.startswith("o3")
+        or m.startswith("o4")
     )
 
-    # Ensure content is not None
-    content = response.choices[0].message.content
-    if content is None:
-        raise ValueError("LLM response content is None")
 
-    return content.strip()
+def call_llm(prompt: str, api_key: str, model: str = "gpt-4") -> tuple[str, dict]:
+    """Call OpenAI API to generate the transformer. Returns (content, usage_dict)."""
+    client = OpenAI(api_key=api_key)
+    system_msg = (
+        "You are an expert in MLIR and abstract interpretation. Your task is to "
+        "generate sound and highly precise abstract transformers for the given operation. "
+        "Generate only the requested MLIR code without any explanation or markdown formatting."
+    )
+
+    if _use_responses_api(model):
+        # Responses API: required for Codex/GPT-5/o-series
+        # Need to bump max tokens here so that it is able to do reasoning
+        response = client.responses.create(
+            model=model,
+            instructions=system_msg,
+            input=[
+                {
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": prompt}],
+                }
+            ],
+            max_output_tokens=64000,
+        )
+        content = response.output_text
+        u = response.usage
+        usage = {
+            "input_tokens": u.input_tokens if u else 0,
+            "output_tokens": u.output_tokens if u else 0,
+            "reasoning_tokens": (
+                u.output_tokens_details.reasoning_tokens
+                if u and u.output_tokens_details and hasattr(u.output_tokens_details, "reasoning_tokens")
+                else 0
+            ),
+        }
+    else:
+        # Chat Completions API
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_msg},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.7,
+            max_tokens=5000,
+        )
+        content = response.choices[0].message.content
+        u = response.usage
+        usage = {
+            "input_tokens": u.prompt_tokens if u else 0,
+            "output_tokens": u.completion_tokens if u else 0,
+            "reasoning_tokens": 0,
+        }
+
+    if not content:
+        raise ValueError("LLM response content is None or empty")
+
+    return content.strip(), usage
 
 
 def clean_llm_output(output: str) -> str:
@@ -210,15 +260,17 @@ def main():
 
     args = parser.parse_args()
 
-    # Get API key from api_key.txt
-    api_key_file = Path(__file__).parent / "api_key.txt"
-    if not api_key_file.exists():
-        print(f"Error: API key file not found at {api_key_file}", file=sys.stderr)
-        return 1
-
-    api_key = api_key_file.read_text().strip()
+    # Prefer OPENAI_API_KEY env var; fall back to agent/api_key.txt
+    api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
-        print(f"Error: API key file {api_key_file} is empty", file=sys.stderr)
+        api_key_file = Path(__file__).parent / "api_key.txt"
+        if api_key_file.exists():
+            api_key = api_key_file.read_text().strip()
+    if not api_key:
+        print(
+            "Error: No API key found. Set OPENAI_API_KEY or create agent/api_key.txt",
+            file=sys.stderr,
+        )
         return 1
 
     # Extract operation name
@@ -241,7 +293,15 @@ def main():
 
     # Call LLM
     print("Calling OpenAI API...")
-    llm_output = call_llm(prompt, api_key, args.model)
+    llm_output, usage = call_llm(prompt, api_key, args.model)
+    inp = usage["input_tokens"]
+    out = usage["output_tokens"]
+    reasoning = usage.get("reasoning_tokens") or 0
+    total = inp + out + reasoning
+    if reasoning:
+        print(f"Tokens used: {inp:,} input, {out:,} output, {reasoning:,} reasoning ({total:,} total)")
+    else:
+        print(f"Tokens used: {inp:,} input, {out:,} output ({total:,} total)")
 
     # Save raw LLM output for debugging
     llm_output_file = output_dir / f"llm_output_{op_name.lower()}.txt"
