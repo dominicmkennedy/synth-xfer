@@ -44,7 +44,7 @@ def read_op_file(op_file_path: str) -> str:
 
 def read_example_files() -> str:
     """Read example transfer function files for reference."""
-    examples_dir = Path(__file__).parent.parent / "example"
+    examples_dir = Path(__file__).parent / "examples"
     examples = []
 
     for example_file in sorted(examples_dir.glob("*.mlir")):
@@ -140,7 +140,9 @@ def call_llm(prompt: str, api_key: str, model: str = "gpt-4") -> tuple[str, dict
             "output_tokens": u.output_tokens if u else 0,
             "reasoning_tokens": (
                 u.output_tokens_details.reasoning_tokens
-                if u and u.output_tokens_details and hasattr(u.output_tokens_details, "reasoning_tokens")
+                if u
+                and u.output_tokens_details
+                and hasattr(u.output_tokens_details, "reasoning_tokens")
                 else 0
             ),
         }
@@ -299,7 +301,9 @@ def main():
     reasoning = usage.get("reasoning_tokens") or 0
     total = inp + out + reasoning
     if reasoning:
-        print(f"Tokens used: {inp:,} input, {out:,} output, {reasoning:,} reasoning ({total:,} total)")
+        print(
+            f"Tokens used: {inp:,} input, {out:,} output, {reasoning:,} reasoning ({total:,} total)"
+        )
     else:
         print(f"Tokens used: {inp:,} input, {out:,} output ({total:,} total)")
 
