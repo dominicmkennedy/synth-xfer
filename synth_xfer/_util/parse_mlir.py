@@ -4,11 +4,16 @@ from typing import Protocol, runtime_checkable
 
 from xdsl.context import Context
 from xdsl.dialects.arith import Arith
-from xdsl.dialects.builtin import Builtin, ModuleOp
+from xdsl.dialects.builtin import Builtin, ModuleOp, NoneAttr, SymbolRefAttr
 from xdsl.dialects.func import CallOp, Func, FuncOp, ReturnOp
 from xdsl.ir import Attribute, Operation
 from xdsl.parser import IntegerType, Parser
-from xdsl_smt.dialects.transfer import AbstractValueType, Transfer, TransIntegerType
+from xdsl_smt.dialects.transfer import (
+    AbstractValueType,
+    Transfer,
+    TransIntegerType,
+    TupleType,
+)
 from xdsl_smt.passes.transfer_inline import FunctionCallInline
 
 from synth_xfer._util.domain import AbstractDomain
@@ -63,6 +68,50 @@ def parse_mlir_mod(p: _Readable, inline: bool = False) -> ModuleOp:
         raise ValueError(f"mlir in '{func_name}' is not a ModuleOp")
 
 
+def is_heterogeneous_module(mod: ModuleOp) -> bool:
+    seen_legacy = False
+    seen_symbolic = False
+
+    def note_width(width: Attribute) -> None:
+        nonlocal seen_legacy, seen_symbolic
+        if isinstance(width, NoneAttr):
+            seen_legacy = True
+        elif isinstance(width, SymbolRefAttr):
+            seen_symbolic = True
+
+    def inspect_attr(attr: Attribute) -> None:
+        if isinstance(attr, TransIntegerType):
+            note_width(attr.width)
+            return
+        if isinstance(attr, AbstractValueType):
+            for field in attr.fields.data:
+                inspect_attr(field)
+            return
+        if isinstance(attr, TupleType):
+            for field in attr.fields.data:
+                inspect_attr(field)
+            return
+
+    for op in mod.walk():
+        for res in op.results:
+            inspect_attr(res.type)
+        for operand in op.operands:
+            inspect_attr(operand.type)
+        for region in op.regions:
+            for block in region.blocks:
+                for arg in block.args:
+                    inspect_attr(arg.type)
+        for attr in op.attributes.values():
+            inspect_attr(attr)
+        for attr in op.properties.values():
+            inspect_attr(attr)
+
+    if seen_legacy and seen_symbolic:
+        raise ValueError("module mixes legacy and parameterized transfer.integer")
+
+    return seen_legacy
+
+
 def get_fns(mod: ModuleOp) -> dict[str, FuncOp]:
     return {x.sym_name.data: x for x in mod.ops if isinstance(x, FuncOp)}
 
@@ -79,11 +128,14 @@ class HelperFuncs:
     get_top_func: FuncOp
     transfer_func: FuncOp
     meet_func: FuncOp
+    is_heterogeneous: bool
 
 
 def get_helper_funcs(p: Path, d: AbstractDomain) -> HelperFuncs:
     mod = parse_mlir_mod(p, inline=True)
     fns = get_fns(mod)
+
+    is_heterogeneous = is_heterogeneous_module(mod)
 
     assert "concrete_op" in fns
     crt_func = fns["concrete_op"]
@@ -129,6 +181,7 @@ def get_helper_funcs(p: Path, d: AbstractDomain) -> HelperFuncs:
         get_top_func=top,
         transfer_func=xfer_fn,
         meet_func=meet,
+        is_heterogeneous=is_heterogeneous,
     )
 
 

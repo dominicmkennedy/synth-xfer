@@ -77,6 +77,44 @@ def int_list(s: str) -> list[int]:
     return result
 
 
+# def width_spec(s: str) -> tuple[int, list[int]]:
+#     raw = s.strip()
+#     if "<" not in raw:
+#         raise ArgumentTypeError("Invalid width spec. Expected 'RET <A, B, ...>'")
+#     head, tail = raw.split("<", 1)
+#     head = head.strip()
+#     if not head:
+#         raise ArgumentTypeError("Invalid width spec. Missing return width")
+#     tail = tail.strip()
+#     if not tail.endswith(">"):
+#         raise ArgumentTypeError("Invalid width spec. Missing closing '>'")
+#     tail = tail[:-1].strip()
+#     if not tail:
+#         raise ArgumentTypeError("Invalid width spec. Missing argument widths")
+#
+#     try:
+#         ret_width = int(head)
+#     except ValueError:
+#         raise ArgumentTypeError(f"Invalid return width: {head!r}")
+#     if ret_width <= 0:
+#         raise ArgumentTypeError("Return width must be positive")
+#
+#     args: list[int] = []
+#     for part in tail.split(","):
+#         part = part.strip()
+#         if not part:
+#             raise ArgumentTypeError("Invalid width spec. Empty argument width")
+#         try:
+#             val = int(part)
+#         except ValueError:
+#             raise ArgumentTypeError(f"Invalid argument width: {part!r}")
+#         if val <= 0:
+#             raise ArgumentTypeError("Argument widths must be positive")
+#         args.append(val)
+#
+#     return ret_width, args
+
+
 def make_sampler_parser(p: ArgumentParser):
     mx = p.add_mutually_exclusive_group(required=False)
     mx.add_argument(

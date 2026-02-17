@@ -2,17 +2,16 @@ from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from sys import stdin, stdout
 
-from xdsl.dialects.builtin import ModuleOp
-from xdsl.dialects.func import FuncOp
+from xdsl_smt.passes.resolve_transfer_widths import ResolveTransferWidths
 
 from synth_xfer._util.lower import LowerToLLVM
-from synth_xfer._util.parse_mlir import parse_mlir
+from synth_xfer._util.parse_mlir import parse_mlir_mod
 
 
 def _register_parser() -> Namespace:
     p = ArgumentParser()
 
-    p.add_argument("-bw", type=int, required=True, help="Bitwidth")
+    p.add_argument("--bw", type=int, required=True, help="Bitwidth")
     p.add_argument("-i", "--input", type=Path, default=None)
     p.add_argument("-o", "--output", type=Path, default=None)
 
@@ -34,15 +33,10 @@ def main() -> None:
     in_f = _StdinReadable() if args.input is None else args.input
     out_f = stdout if args.output is None else args.output.open("w")
 
-    mlir = parse_mlir(in_f)
-    lowerer = LowerToLLVM(args.bw)
-
-    if isinstance(mlir, ModuleOp):
-        lowerer.add_mod(mlir)
-    elif isinstance(mlir, FuncOp):
-        lowerer.add_fn(mlir)
-    else:
-        raise ValueError(f"Not a FuncOp or a ModuleOp: {mlir}")
+    mlir_mod = parse_mlir_mod(in_f)
+    ResolveTransferWidths(width=args.bw).apply(None, mlir_mod)
+    lowerer = LowerToLLVM()
+    lowerer.add_mod(mlir_mod)
 
     out_f.write(str(lowerer))
 

@@ -21,6 +21,7 @@ from xdsl_smt.passes.lower_to_smt import func_to_smt_patterns
 from xdsl_smt.passes.lower_to_smt.lower_to_smt import LowerToSMTPass
 from xdsl_smt.passes.lower_to_smt.smt_lowerer import SMTLowerer
 from xdsl_smt.passes.merge_func_results import MergeFuncResultsPass
+from xdsl_smt.passes.resolve_transfer_widths import ResolveTransferWidths
 from xdsl_smt.passes.transfer_inline import FunctionCallInline
 from xdsl_smt.passes.transfer_unroll_loop import UnrollTransferLoop
 from xdsl_smt.semantics.arith_semantics import arith_semantics
@@ -71,12 +72,14 @@ def _verify_pattern(
         return True, None
 
 
+# TODO get width map for this fn
+# TODO probs don't need integer type semantics anymore
 def _lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
     SMTLowerer.rewrite_patterns = {**func_to_smt_patterns}
     SMTLowerer.type_lowerers = {
         IntegerType: IntegerTypeSemantics(),
         AbstractValueType: AbstractValueTypeSemantics(),
-        TransIntegerType: TransferIntegerTypeSemantics(width),
+        TransIntegerType: TransferIntegerTypeSemantics(),
         TupleType: AbstractValueTypeSemantics(),
     }
     SMTLowerer.op_semantics = {
@@ -85,6 +88,8 @@ def _lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
         **comb_semantics,
     }
 
+    # TODO width map here
+    ResolveTransferWidths(width=width).apply(ctx, module)
     LowerToSMTPass().apply(ctx, module)
     MergeFuncResultsPass().apply(ctx, module)
     LowerEffectPass().apply(ctx, module)
@@ -92,30 +97,34 @@ def _lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
 
 def _add_poison_to_conc_fn(concrete_func: FuncOp) -> FuncOp:
     """
-    Input: a concrete function with shape (trans.integer, trans.integer) -> trans.integer
-    Output: a new function with shape (tuple<trans.integer, bool>
+    Input: a concrete function with shape (trans.integer, ...) -> trans.integer
+    Output: a new function with shape (tuple<trans.integer, bool>, ...) -> tuple<trans.integer, bool>
     """
+
     result_func = concrete_func.clone()
     block = result_func.body.block
-    # Add poison to every args
-    new_arg_type = TupleType([TransIntegerType(), BoolType()])
+
+    # Add poison to every argument
     while isinstance(result_func.args[0].type, TransIntegerType):
+        new_arg_type = TupleType([result_func.args[0].type, BoolType()])
         new_arg = block.insert_arg(new_arg_type, len(result_func.args))
         new_get_op = GetOp(new_arg, 0)
         assert block.first_op is not None
+
         block.insert_op_before(new_get_op, block.first_op)
         result_func.args[0].replace_by(new_get_op.result)
         block.erase_arg(result_func.args[0])
+
     last_op = block.last_op
     assert last_op is not None
     poison_val = ConstantBoolOp(False)
-    poison_val.is_ancestor
     new_return_val = MakeOp([last_op.operands[0], poison_val.result])
     block.insert_ops_before([poison_val, new_return_val], last_op)
     last_op.operands[0] = new_return_val.result
     new_args_type = [arg.type for arg in result_func.args]
     new_return_type = new_return_val.result.type
     result_func.function_type = FunctionType.from_lists(new_args_type, [new_return_type])
+
     return result_func
 
 
@@ -144,7 +153,6 @@ def _soundness_check(
     ctx: Context,
     timeout: int,
 ) -> tuple[bool | None, ModelRef | None]:
-    query_module = ModuleOp([])
     if smt_transfer_function.is_forward:
         added_ops: list[Operation] = forward_soundness_check(
             smt_transfer_function,
@@ -159,6 +167,7 @@ def _soundness_check(
             instance_constraint,
             int_attr,
         )
+    query_module = ModuleOp([])
     query_module.body.block.add_ops(added_ops)
     FunctionCallInline(True, {}).apply(ctx, query_module)
 

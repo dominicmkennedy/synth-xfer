@@ -2,8 +2,7 @@ from functools import singledispatchmethod
 from typing import Protocol
 
 from llvmlite import ir
-from xdsl.dialects.arith import AndIOp, ConstantOp, OrIOp, XOrIOp
-from xdsl.dialects.builtin import IntegerType, ModuleOp
+from xdsl.dialects.builtin import IntegerAttr, ModuleOp
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 from xdsl.ir import Attribute, Operation
 from xdsl.irdl import SSAValue
@@ -48,7 +47,6 @@ from xdsl_smt.dialects.transfer import (
     SSubOverflowOp,
     SubOp,
     TransIntegerType,
-    TupleType,
     UAddOverflowOp,
     UDivOp,
     UMaxOp,
@@ -61,26 +59,30 @@ from xdsl_smt.dialects.transfer import (
 )
 
 
-def lower_type(typ: Attribute, bw: int) -> ir.Type:
+def lower_type(typ: Attribute) -> ir.Type:
     if isinstance(typ, TransIntegerType):
-        return ir.IntType(bw)
-    elif isinstance(typ, IntegerType):
-        return ir.IntType(typ.width.data)
-    elif isinstance(typ, AbstractValueType) or isinstance(typ, TupleType):
+        assert isinstance(typ.width, IntegerAttr)
+        return ir.IntType(typ.width.value.data)
+    elif isinstance(typ, AbstractValueType):
         fields = typ.get_fields()
-        sub_type = lower_type(fields[0], bw)
+        assert isinstance(fields[0], TransIntegerType)
+        assert isinstance(fields[0].width, IntegerAttr)
+        width = fields[0].width.value.data
 
-        for other_type in fields:
-            assert lower_type(other_type, bw) == sub_type
+        assert all(
+            isinstance(x, TransIntegerType)
+            and isinstance(x.width, IntegerAttr)
+            and width == x.width.value.data
+            for x in fields
+        )
 
-        return ir.ArrayType(sub_type, len(fields))
+        return ir.ArrayType(ir.IntType(width), len(fields))
 
     raise ValueError("Unsupported Type", typ)
 
 
 class LowerToLLVM:
-    def __init__(self, bws: list[int], name: str = "") -> None:
-        self.bws = bws
+    def __init__(self, name: str = "") -> None:
         self.llvm_mod = ir.Module(name=name)
         self.fns: dict[str, ir.Function] = {}
 
@@ -98,67 +100,48 @@ class LowerToLLVM:
 
     @staticmethod
     def is_concrete_op(mlir_fn: FuncOp) -> bool:
-        def trans_or_int(x: Attribute):
-            return isinstance(x, TransIntegerType) or isinstance(x, IntegerType)
-
         one_ret_val = len(mlir_fn.function_type.outputs.data) == 1
-        valid_ret = trans_or_int(mlir_fn.function_type.outputs.data[0])
-        valid_args = all(trans_or_int(x.type) for x in mlir_fn.args)
+        trans_ret = isinstance(mlir_fn.function_type.outputs.data[0], TransIntegerType)
+        trans_int_args = all(isinstance(x.type, TransIntegerType) for x in mlir_fn.args)
 
-        return one_ret_val and valid_ret and valid_args
+        return one_ret_val and trans_ret and trans_int_args
 
     @staticmethod
     def is_constraint(mlir_fn: FuncOp) -> bool:
-        def trans_or_int(x: Attribute):
-            return isinstance(x, TransIntegerType) or isinstance(x, IntegerType)
-
         one_ret_val = len(mlir_fn.function_type.outputs.data) == 1
-        ret_bool = lower_type(mlir_fn.function_type.outputs.data[0], 64) == ir.IntType(1)
-        valid_args = all(trans_or_int(x.type) for x in mlir_fn.args)
+        ret_bool = lower_type(mlir_fn.function_type.outputs.data[0]) == ir.IntType(1)
+        trans_int_args = all(isinstance(x.type, TransIntegerType) for x in mlir_fn.args)
 
-        return one_ret_val and ret_bool and valid_args
+        return one_ret_val and ret_bool and trans_int_args
 
     @staticmethod
     def is_transfer_fn(mlir_fn: FuncOp) -> bool:
-        def is_abst_val(ty: Attribute):
-            if isinstance(ty, AbstractValueType):
-                all_trans = all(isinstance(x, TransIntegerType) for x in ty.get_fields())
-                all_ints = all(isinstance(x, IntegerType) for x in ty.get_fields())
-                return all_trans or all_ints
-            else:
-                return False
-
         one_ret_val = len(mlir_fn.function_type.outputs.data) == 1
-        ret_is_abst = is_abst_val(mlir_fn.function_type.outputs.data[0])
-        abst_args = all(is_abst_val(x.type) for x in mlir_fn.args)
+        ret_is_abst = isinstance(mlir_fn.function_type.outputs.data[0], AbstractValueType)
+        abst_args = all(isinstance(x.type, TransIntegerType) for x in mlir_fn.args)
 
         return one_ret_val and ret_is_abst and abst_args
 
-    def add_fn(self, mlir_fn: FuncOp, shim: bool = False) -> dict[int, ir.Function]:
-        bw_fns: dict[int, ir.Function] = {}
+    def add_fn(self, mlir_fn: FuncOp, shim: bool = False) -> ir.Function:
+        fn_name = mlir_fn.sym_name.data
+        fn_ret_type = lower_type(mlir_fn.function_type.outputs.data[0])
+        fn_arg_types = (lower_type(x.type) for x in mlir_fn.args)
+        fn_type = ir.FunctionType(fn_ret_type, fn_arg_types)
 
-        for bw in self.bws:
-            bw_fn_name = f"{mlir_fn.sym_name.data}_{bw}"
+        llvm_fn = ir.Function(self.llvm_mod, fn_type, name=fn_name)
+        llvm_fn = self.add_attrs(llvm_fn)
 
-            fn_ret_type = lower_type(mlir_fn.function_type.outputs.data[0], bw)
-            fn_arg_types = (lower_type(x.type, bw) for x in mlir_fn.args)
-            fn_type = ir.FunctionType(fn_ret_type, fn_arg_types)
+        self.fns[fn_name] = _LowerFuncToLLVM(
+            mlir_fn, llvm_fn, self.llvm_mod, self.fns, "name_suffix_todo"
+        ).llvm_fn
 
-            llvm_fn = ir.Function(self.llvm_mod, fn_type, name=bw_fn_name)
-            llvm_fn = self.add_attrs(llvm_fn)
+        if shim:
+            shimmed_fn = self.shim(mlir_fn, self.fns[fn_name])
+            self.fns[f"{fn_name}_shim"] = shimmed_fn
 
-            self.fns[bw_fn_name] = _LowerFuncToLLVM(
-                mlir_fn, llvm_fn, self.llvm_mod, self.fns, bw
-            ).llvm_fn
-
-            if shim:
-                shimmed_fn = self.shim(mlir_fn, self.fns[bw_fn_name], bw)
-                self.fns[f"{bw_fn_name}_shim"] = shimmed_fn
-                bw_fns[bw] = shimmed_fn
-            else:
-                bw_fns[bw] = self.fns[bw_fn_name]
-
-        return bw_fns
+            return shimmed_fn
+        else:
+            return self.fns[fn_name]
 
     def add_mod(self, mod: ModuleOp, to_shim: list[str] = []) -> dict[str, ir.Function]:
         fns: dict[str, ir.Function] = {}
@@ -167,30 +150,27 @@ class LowerToLLVM:
             assert isinstance(mlir_func, FuncOp)
             fn_name = mlir_func.sym_name.data
             shim = fn_name in to_shim
-            fs = self.add_fn(mlir_func, shim=False)
-            for bw, f in fs.items():
-                fns[f.name] = f
-                if shim:
-                    shimmed = self.shim(mlir_func, f, bw)
-                    fns[shimmed.name] = shimmed
+            f = self.add_fn(mlir_func, shim=False)
+            fns[f.name] = f
+            if shim:
+                shimmed = self.shim(mlir_func, f)
+                fns[shimmed.name] = shimmed
 
         return fns
 
-    def shim(self, mlir_fn: FuncOp, llvm_fn: ir.Function, bw: int) -> ir.Function:
+    def shim(self, mlir_fn: FuncOp, llvm_fn: ir.Function) -> ir.Function:
         if self.is_concrete_op(mlir_fn):
-            return self.shim_conc(mlir_fn, llvm_fn, bw)
+            return self.shim_conc(mlir_fn, llvm_fn)
         elif self.is_constraint(mlir_fn):
-            return self.shim_constraint(mlir_fn, llvm_fn, bw)
+            return self.shim_constraint(mlir_fn, llvm_fn)
         elif self.is_transfer_fn(mlir_fn):
-            return self.shim_xfer(mlir_fn, llvm_fn, bw)
+            return self.shim_xfer(mlir_fn, llvm_fn)
         else:
             raise ValueError(
                 f"Cannot shim non concrete and non transfer function: {llvm_fn}"
             )
 
-    def shim_constraint(
-        self, mlir_fn: FuncOp, old_fn: ir.Function, bw: int
-    ) -> ir.Function:
+    def shim_constraint(self, mlir_fn: FuncOp, old_fn: ir.Function) -> ir.Function:
         n_args = len(old_fn.function_type.args)
         wide_t = ir.IntType(64)
 
@@ -205,7 +185,7 @@ class LowerToLLVM:
         new_args: list[ir.Argument] = []
         for arg, mlir_arg in zip(shim_fn.args, mlir_fn.args):
             arg.name = f"{arg.name}_wide"
-            new_args.append(b.trunc(arg, lower_type(mlir_arg.type, bw)))  # type: ignore
+            new_args.append(b.trunc(arg, lower_type(mlir_arg.type)))  # type: ignore
 
         r_n = b.call(old_fn, new_args)
         r64 = b.zext(r_n, wide_t)
@@ -213,7 +193,7 @@ class LowerToLLVM:
 
         return shim_fn
 
-    def shim_conc(self, mlir_fn: FuncOp, old_fn: ir.Function, bw: int) -> ir.Function:
+    def shim_conc(self, mlir_fn: FuncOp, old_fn: ir.Function) -> ir.Function:
         n_args = len(old_fn.function_type.args)
         wide_t = ir.IntType(64)
 
@@ -228,14 +208,14 @@ class LowerToLLVM:
         new_args: list[ir.Argument] = []
         for arg, mlir_arg in zip(shim_fn.args, mlir_fn.args):
             arg.name = f"{arg.name}_wide"
-            new_args.append(b.trunc(arg, lower_type(mlir_arg.type, bw)))  # type: ignore
+            new_args.append(b.trunc(arg, lower_type(mlir_arg.type)))  # type: ignore
 
         r_n = b.call(old_fn, new_args)
         b.ret(b.zext(r_n, wide_t))
 
         return shim_fn
 
-    def shim_xfer(self, mlir_fn: FuncOp, old_fn: ir.Function, bw: int) -> ir.Function:
+    def shim_xfer(self, mlir_fn: FuncOp, old_fn: ir.Function) -> ir.Function:
         n_args = len(old_fn.function_type.args)
         i64 = ir.IntType(64)
 
@@ -262,12 +242,8 @@ class LowerToLLVM:
         for arg, mlir_arg in zip(shim_fn.args, mlir_fn.args):
             assert isinstance(mlir_arg.type, AbstractValueType)
             arg_field = mlir_arg.type.get_fields()[0]
-            if isinstance(arg_field, TransIntegerType):
-                lane_t = ir.IntType(bw)
-            elif isinstance(arg_field, IntegerType):
-                lane_t = ir.IntType(arg_field.width.data)
-            else:
-                raise ValueError(f"bad type: {arg_field}")
+            assert isinstance(arg_field, TransIntegerType)
+            lane_t = lower_type(arg_field)
 
             lane_arr_t = ir.ArrayType(lane_t, num_abst_fields)
             new_lane = ir.Constant(lane_arr_t, None)
@@ -310,24 +286,21 @@ class _LowerFuncToLLVM:
         PopCountOp: ir.IRBuilder.ctpop,
         # binary
         AndOp: ir.IRBuilder.and_,
-        AndIOp: ir.IRBuilder.and_,
         AddOp: ir.IRBuilder.add,
         OrOp: ir.IRBuilder.or_,
-        OrIOp: ir.IRBuilder.or_,
         XorOp: ir.IRBuilder.xor,
-        XOrIOp: ir.IRBuilder.xor,
         SubOp: ir.IRBuilder.sub,
         MulOp: ir.IRBuilder.mul,
         # ternery
         SelectOp: ir.IRBuilder.select,
     }
 
-    bw: int
     b: ir.IRBuilder
     ssa_map: dict[SSAValue, ir.Value]
     llvm_fn: ir.Function
     llvm_mod: ir.Module
     fns: dict[str, ir.Function]
+    name_suffix: str
 
     def __init__(
         self,
@@ -335,9 +308,9 @@ class _LowerFuncToLLVM:
         llvm_fn: ir.Function,
         llvm_mod: ir.Module,
         fns: dict[str, ir.Function],
-        bw: int,
+        name_suffix: str,
     ) -> None:
-        self.bw = bw
+        self.name_suffix = name_suffix
         self.fns = fns
         self.llvm_mod = llvm_mod
 
@@ -375,11 +348,11 @@ class _LowerFuncToLLVM:
     def _(self, op: CallOp) -> None:
         res_name = self.result_name(op)
         callee = op.callee.string_value()
-        callee = f"{callee}_{self.bw}"
+        callee = f"{callee}_{self.name_suffix}"
 
         if callee not in self.fns:
-            ret_ty = lower_type(op.results[0].type, self.bw)
-            in_tys = [lower_type(x.type, self.bw) for x in op.arguments]
+            ret_ty = lower_type(op.results[0].type)
+            in_tys = [lower_type(x.type) for x in op.arguments]
             func_ty = ir.FunctionType(ret_ty, in_tys)
             new_fn = ir.Function(self.llvm_mod, func_ty, name=callee)
             self.fns[callee] = new_fn
@@ -439,7 +412,7 @@ class _LowerFuncToLLVM:
         res_name = self.result_name(op)
         lhs, rhs = self.operands(op)
 
-        ty = lower_type(op.result_types[0], self.bw)
+        ty = lower_type(op.result_types[0])
         assert isinstance(ty, ir.IntType)
 
         bw_const = ir.Constant(ty, ty.width)
@@ -469,7 +442,7 @@ class _LowerFuncToLLVM:
     def _(self, op: MakeOp) -> None:
         res_name = self.result_name(op)
 
-        res = ir.Constant(lower_type(op.results[0].type, self.bw), None)
+        res = ir.Constant(lower_type(op.results[0].type), None)
         for i, oprnd in enumerate(self.operands(op)):
             res = self.b.insert_value(res, oprnd, i, name=res_name)
 
@@ -486,10 +459,9 @@ class _LowerFuncToLLVM:
         | GetSignedMinValueOp
         | GetAllOnesOp
         | GetBitWidthOp
-        | Constant
-        | ConstantOp,
+        | Constant,
     ) -> None:
-        ty = lower_type(op.result_types[0], self.bw)
+        ty = lower_type(op.result_types[0])
         assert isinstance(ty, ir.IntType)
 
         if isinstance(op, GetSignedMaxValueOp):
@@ -502,10 +474,6 @@ class _LowerFuncToLLVM:
             val = ty.width
         elif isinstance(op, Constant):
             val: int = op.value.value.data
-        elif isinstance(op, ConstantOp):
-            assert isinstance(op.value.type, IntegerType)
-            ty = ir.IntType(op.value.type.width.data)
-            val: int = op.value.value.data  # type: ignore
 
         self.ssa_map[op.results[0]] = ir.Constant(ty, val)
 
@@ -530,7 +498,7 @@ class _LowerFuncToLLVM:
         oprnd = self.operands(op)[0]
         res_name = self.result_name(op)
 
-        ty = lower_type(op.result_types[0], self.bw)
+        ty = lower_type(op.result_types[0])
         assert isinstance(ty, ir.IntType)
 
         const_zero = ir.Constant(ty, 0)
@@ -543,7 +511,7 @@ class _LowerFuncToLLVM:
         oprnd = self.operands(op)[0]
         res_name = self.result_name(op)
 
-        ty = lower_type(op.result_types[0], self.bw)
+        ty = lower_type(op.result_types[0])
         assert isinstance(ty, ir.IntType)
 
         if isinstance(op, SetSignBitOp):
@@ -561,7 +529,7 @@ class _LowerFuncToLLVM:
         res_name = self.result_name(op)
         high = isinstance(op, SetHighBitsOp) or isinstance(op, ClearHighBitsOp)
 
-        ty = lower_type(op.result_types[0], self.bw)
+        ty = lower_type(op.result_types[0])
         assert isinstance(ty, ir.IntType)
 
         allones = ir.Constant(ty, ((2**ty.width) - 1))
@@ -603,7 +571,7 @@ class _LowerFuncToLLVM:
         lhs, rhs = self.operands(op)
         res_name = self.result_name(op)
 
-        ty = lower_type(op.result_types[0], self.bw)
+        ty = lower_type(op.result_types[0])
         assert isinstance(ty, ir.IntType)
 
         zero = ir.Constant(ty, 0)
@@ -626,7 +594,7 @@ class _LowerFuncToLLVM:
         lhs, rhs = self.operands(op)
         res_name = self.result_name(op)
 
-        ty = lower_type(op.result_types[0], self.bw)
+        ty = lower_type(op.result_types[0])
         assert isinstance(ty, ir.IntType)
 
         zero = ir.Constant(ty, 0)
@@ -660,7 +628,7 @@ class _LowerFuncToLLVM:
         lhs, rhs = self.operands(op)
         res_name = self.result_name(op)
 
-        ty = lower_type(op.result_types[0], self.bw)
+        ty = lower_type(op.result_types[0])
         assert isinstance(ty, ir.IntType)
 
         zero = ir.Constant(ty, 0)
@@ -683,7 +651,7 @@ class _LowerFuncToLLVM:
         lhs, rhs = self.operands(op)
         res_name = self.result_name(op)
 
-        ty = lower_type(op.result_types[0], self.bw)
+        ty = lower_type(op.result_types[0])
         assert isinstance(ty, ir.IntType)
 
         zero = ir.Constant(ty, 0)
