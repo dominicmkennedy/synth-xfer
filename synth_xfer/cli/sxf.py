@@ -237,12 +237,12 @@ def main() -> None:
     op_path = Path(args.transfer_function)
 
     if args.output is None:
-        outputs_folder = Path(f"{domain}_{op_path.stem}")
+        outputs_folder = Path("outputs", f"{domain}_{op_path.stem}")
     else:
         outputs_folder = Path(args.output)
 
     if not outputs_folder.is_dir():
-        outputs_folder.mkdir()
+        outputs_folder.mkdir(parents=True)
 
     sampler = get_sampler(args)
 
