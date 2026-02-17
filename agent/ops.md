@@ -33,10 +33,10 @@
 - transfer.clear_low_bits: (!transfer.integer, !transfer.integer) -> !transfer.integer
 - transfer.set_signed_bits: (!transfer.integer, !transfer.integer) -> !transfer.integer
 - transfer.clear_signed_bits: (!transfer.integer, !transfer.integer) -> !transfer.integer
-- transfer.count_l_one: (!transfer.integer) -> !transfer.integer
-- transfer.count_l_zero: (!transfer.integer) -> !transfer.integer
-- transfer.count_r_one: (!transfer.integer) -> !transfer.integer
-- transfer.count_r_zero: (!transfer.integer) -> !transfer.integer
+- transfer.countl_one: (!transfer.integer) -> !transfer.integer
+- transfer.countl_zero: (!transfer.integer) -> !transfer.integer
+- transfer.countr_one: (!transfer.integer) -> !transfer.integer
+- transfer.countr_zero: (!transfer.integer) -> !transfer.integer
 
 ## Utility Operations
 
