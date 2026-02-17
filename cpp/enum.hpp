@@ -65,15 +65,10 @@ public:
     r.reserve(num_lat_samples);
 
     for (unsigned int i = 0; i < num_lat_samples; ++i) {
-      while (true) {
-        ArgsTuple args = make_random_args(rng, sampler);
-        ResD res = toBestAbst(args);
+      ArgsTuple args = make_random_args(rng, sampler);
+      ResD res = toBestAbst(args);
 
-        if (!res.isBottom()) {
-          r.emplace_back(std::tuple_cat(args, std::tuple<ResD>{res}));
-          break;
-        }
-      }
+      r.emplace_back(std::tuple_cat(args, std::tuple<ResD>{res}));
     }
 
     return r;
@@ -104,6 +99,7 @@ public:
           res = res.join(ResD::fromConcrete(APInt<ResBw>(out)));
         }
       }
+
       r.emplace_back(std::tuple_cat(args, std::tuple<ResD>{res}));
     }
 
