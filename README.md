@@ -52,7 +52,6 @@ Here's a simple invocation of the `sxf` program for quick testing (should take ~
 
 ```bash
 sxf mlir/Operations/And.mlir  \
-    -o outputs/And            \
     --domain KnownBits        \
     --num-iters 2             \
     --num-steps 100           \
@@ -70,15 +69,14 @@ Final Soln   | Exact 96.7078% | 3 solutions |
 
 (The final output may be different depending on your system's RNG differences).
 
-The command reads the MLIR program `mlir/Operations/And.mlir` and writes outputs into `outputs/And`.
+The command reads the MLIR program `mlir/Operations/And.mlir` and writes addtional output infor into `outputs/KnownBits_And/`.
 
 ### Full Experiment Setup
 
-This is a more comprehensive invocation closer to the experiment setup used in the paper:
+This is a more comprehensive invocation closer to the experiment setup used in the paper (this can take up to an hour depending on your machine):
 
 ```bash
 sxf mlir/Operations/Add.mlir          \
-    -o outputs/Add                    \
     --domain KnownBits                \
     --num-iters 5                     \
     --num-steps 1000                  \
