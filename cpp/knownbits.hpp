@@ -118,6 +118,34 @@ public:
     return KnownBits({~x, x});
   }
 
+  static KnownBits parse(std::string_view s) {
+    if (s.size() != BW) {
+      throw std::invalid_argument("KnownBits: invalid bitstring length");
+    }
+
+    std::uint64_t zero_mask = 0;
+    std::uint64_t one_mask = 0;
+
+    for (std::size_t i = 0; i < BW; ++i) {
+      const char c = s[i];
+      const std::size_t bit = BW - 1 - i;
+      switch (c) {
+      case '0':
+        zero_mask |= (1ULL << bit);
+        break;
+      case '1':
+        one_mask |= (1ULL << bit);
+        break;
+      case '?':
+        break;
+      default:
+        throw std::invalid_argument("KnownBits: invalid character");
+      }
+    }
+
+    return KnownBits({APInt<BW>(zero_mask), APInt<BW>(one_mask)});
+  }
+
   APInt<BW> sample_concrete(std::mt19937 &rng) const {
     std::uniform_int_distribution<unsigned long> dist(
         0, APInt<BW>::getAllOnes().getZExtValue());

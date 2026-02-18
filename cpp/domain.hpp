@@ -31,6 +31,7 @@ concept Domain =
       { D<BW>::enumLattice() } -> std::same_as<std::vector<D<BW>>>;
       { D<BW>::fromConcrete(a) } noexcept -> std::same_as<D<BW>>;
       { D<BW>::num_levels() } noexcept -> std::same_as<std::uint64_t>;
+      { D<BW>::parse(std::string_view{}) } -> std::same_as<D<BW>>;
 
       // Instance methods
       { d.isTop() } noexcept -> std::same_as<bool>;
@@ -64,10 +65,18 @@ constexpr bool operator!=(const D<BW> &lhs, const D<BW> &rhs) {
 
 namespace DomainHelpers {
 
+template <template <std::size_t> class Dom, std::size_t... BWs>
+  requires(Domain<Dom, BWs> && ...)
+using Args = std::tuple<Dom<BWs>...>;
+
+template <template <std::size_t> class Dom, std::size_t... BWs>
+  requires(Domain<Dom, BWs> && ...)
+using ArgsVec = std::vector<Args<Dom, BWs...>>;
+
 template <template <std::size_t> class Dom, std::size_t ResBw,
           std::size_t... BWs>
   requires(Domain<Dom, ResBw> && (Domain<Dom, BWs> && ...))
-using ToEval = std::vector<std::tuple<Dom<BWs>..., Dom<ResBw>>>;
+using ToEval = std::vector<std::tuple<Args<Dom, BWs...>, Dom<ResBw>>>;
 
 template <template <std::size_t> class D, std::size_t BW>
   requires Domain<D, BW>

@@ -45,12 +45,12 @@ def test_kb_lattice():
     xfer_fn_addr = jit.get_fn_ptr("xfer_nop_4_shim")
 
     to_eval = enum_low_knownbits_4_4(conc_op_addr, None)
-    lattice_str = "\n".join(str(x[0]) for x in to_eval).strip()
+    lattice_str = "\n".join(str(x) for (x,), _ in to_eval).strip()
     assert lattice_str == (DATA_DIR / "kb_lattice_4.txt").read_text().strip()
 
     raw_res = eval_knownbits_4_4(to_eval, [xfer_fn_addr], [])
-    for x in to_eval:
-        assert str(x[0]) == str(x[1])
+    for (x,), y in to_eval:
+        assert str(x) == str(y)
     res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
@@ -73,12 +73,12 @@ def test_ucr_lattice():
     xfer_fn_addr = jit.get_fn_ptr("xfer_nop_4_shim")
 
     to_eval = enum_low_uconstrange_4_4(conc_op_addr, None)
-    lattice_str = "\n".join(str(x[0]) for x in to_eval).strip()
+    lattice_str = "\n".join(str(x) for (x,), _ in to_eval).strip()
     assert lattice_str == (DATA_DIR / "ucr_lattice_4.txt").read_text().strip()
 
     raw_res = eval_uconstrange_4_4(to_eval, [xfer_fn_addr], [])
-    for x in to_eval:
-        assert str(x[0]) == str(x[1])
+    for (x,), y in to_eval:
+        assert str(x) == str(y)
     res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
@@ -101,12 +101,12 @@ def test_scr_lattice():
     xfer_fn_addr = jit.get_fn_ptr("xfer_nop_4_shim")
 
     to_eval = enum_low_sconstrange_4_4(conc_op_addr, None)
-    lattice_str = "\n".join(str(x[0]) for x in to_eval).strip()
+    lattice_str = "\n".join(str(x) for (x,), _ in to_eval).strip()
     assert lattice_str == (DATA_DIR / "scr_lattice_4.txt").read_text().strip()
 
     raw_res = eval_sconstrange_4_4(to_eval, [xfer_fn_addr], [])
-    for x in to_eval:
-        assert str(x[0]) == str(x[1])
+    for (x,), y in to_eval:
+        assert str(x) == str(y)
     res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
@@ -146,12 +146,12 @@ def test_mod3_lattice():
     xfer_fn_addr = jit.get_fn_ptr("xfer_nop_8_shim")
 
     to_eval = enum_low_mod3_8_8(conc_op_addr, None)
-    lattice_str = "\n".join(str(x[0]) for x in to_eval).strip()
+    lattice_str = "\n".join(str(x) for (x,), _ in to_eval).strip()
     assert lattice_str == (DATA_DIR / "mod3_lattice.txt").read_text().strip()
 
     raw_res = eval_mod3_8_8(to_eval, [xfer_fn_addr], [])
-    for x in to_eval:
-        assert str(x[0]) == str(x[1])
+    for (x,), y in to_eval:
+        assert str(x) == str(y)
     res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
@@ -174,12 +174,12 @@ def test_mod5_lattice():
     xfer_fn_addr = jit.get_fn_ptr("xfer_nop_8_shim")
 
     to_eval = enum_low_mod5_8_8(conc_op_addr, None)
-    lattice_str = "\n".join(str(x[0]) for x in to_eval).strip()
+    lattice_str = "\n".join(str(x) for (x,), _ in to_eval).strip()
     assert lattice_str == (DATA_DIR / "mod5_lattice.txt").read_text().strip()
 
     raw_res = eval_mod5_8_8(to_eval, [xfer_fn_addr], [])
-    for x in to_eval:
-        assert str(x[0]) == str(x[1])
+    for (x,), y in to_eval:
+        assert str(x) == str(y)
     res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
@@ -202,12 +202,12 @@ def test_mod7_lattice():
     xfer_fn_addr = jit.get_fn_ptr("xfer_nop_8_shim")
 
     to_eval = enum_low_mod7_8_8(conc_op_addr, None)
-    lattice_str = "\n".join(str(x[0]) for x in to_eval).strip()
+    lattice_str = "\n".join(str(x) for (x,), _ in to_eval).strip()
     assert lattice_str == (DATA_DIR / "mod7_lattice.txt").read_text().strip()
 
     raw_res = eval_mod7_8_8(to_eval, [xfer_fn_addr], [])
-    for x in to_eval:
-        assert str(x[0]) == str(x[1])
+    for (x,), y in to_eval:
+        assert str(x) == str(y)
     res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
@@ -230,12 +230,12 @@ def test_mod11_lattice():
     xfer_fn_addr = jit.get_fn_ptr("xfer_nop_16_shim")
 
     to_eval = enum_low_mod11_16_16(conc_op_addr, None)
-    lattice_str = "\n".join(str(x[0]) for x in to_eval).strip()
+    lattice_str = "\n".join(str(x) for (x,), _ in to_eval).strip()
     assert lattice_str == (DATA_DIR / "mod11_lattice.txt").read_text().strip()
 
     raw_res = eval_mod11_16_16(to_eval, [xfer_fn_addr], [])
-    for x in to_eval:
-        assert str(x[0]) == str(x[1])
+    for (x,), y in to_eval:
+        assert str(x) == str(y)
     res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
@@ -258,12 +258,12 @@ def test_mod13_lattice():
     xfer_fn_addr = jit.get_fn_ptr("xfer_nop_16_shim")
 
     to_eval = enum_low_mod13_16_16(conc_op_addr, None)
-    lattice_str = "\n".join(str(x[0]) for x in to_eval).strip()
+    lattice_str = "\n".join(str(x) for (x,), _ in to_eval).strip()
     assert lattice_str == (DATA_DIR / "mod13_lattice.txt").read_text().strip()
 
     raw_res = eval_mod13_16_16(to_eval, [xfer_fn_addr], [])
-    for x in to_eval:
-        assert str(x[0]) == str(x[1])
+    for (x,), y in to_eval:
+        assert str(x) == str(y)
     res = get_per_bit(raw_res)[0]
     assert (
         str(res).strip()
