@@ -60,5 +60,6 @@ class Jit:
 
     def get_fn_ptr(self, fn: str) -> int:
         ptr = self.engine.get_function_address(fn)
-        assert ptr != 0
+        if ptr == 0:
+            raise ValueError(f"Function: {fn!r}, not found in in jit.")
         return ptr

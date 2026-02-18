@@ -32,9 +32,6 @@ public:
     os << '[' << x.lower().getSExtValue() << ", " << x.upper().getSExtValue()
        << ']';
 
-    if (x.isTop())
-      os << " (top)";
-
     return os << "\n";
   }
 
@@ -101,6 +98,10 @@ public:
   }
 
   static SConstRange parse(std::string_view s) {
+    if (s == "(bottom)") {
+      return SConstRange::bottom();
+    }
+
     if (s.size() < 6 || s.front() != '[' || s.back() != ']') {
       throw std::invalid_argument("SConstRange: invalid format");
     }
@@ -129,18 +130,15 @@ public:
       throw std::invalid_argument("SConstRange: invalid format");
     }
 
-    const std::int64_t minv =
-        APInt<BW>::getSignedMinValue().getSExtValue();
-    const std::int64_t maxv =
-        APInt<BW>::getSignedMaxValue().getSExtValue();
+    const std::int64_t minv = APInt<BW>::getSignedMinValue().getSExtValue();
+    const std::int64_t maxv = APInt<BW>::getSignedMaxValue().getSExtValue();
 
     if (low < minv || low > maxv || high < minv || high > maxv) {
       throw std::invalid_argument("SConstRange: value out of range");
     }
 
-    return SConstRange(
-        {APInt<BW>(static_cast<std::uint64_t>(low)),
-         APInt<BW>(static_cast<std::uint64_t>(high))});
+    return SConstRange({APInt<BW>(static_cast<std::uint64_t>(low)),
+                        APInt<BW>(static_cast<std::uint64_t>(high))});
   }
 
   APInt<BW> sample_concrete(std::mt19937 &rng) const {

@@ -38,22 +38,19 @@ template <std::size_t X_> struct ModT {
         return os << "(bottom)\n";
       }
 
-      if (x.isTop())
-        return os << "(top)\n";
-
-      os << "eq to {";
+      os << "{";
 
       bool first = true;
       for (unsigned int i = 0; i < X; ++i) {
         if (x[0][i]) {
           if (!first)
-            os << ", ";
+            os << ",";
           os << i;
           first = false;
         }
       }
 
-      os << "} mod " << X << "\n";
+      os << "} mod" << X << "\n";
 
       return os;
     }
@@ -142,8 +139,12 @@ template <std::size_t X_> struct ModT {
     }
 
     static Mod parse(std::string_view s) {
-      const std::string prefix = "eq to {";
-      const std::string suffix = "} mod " + std::to_string(X);
+      if (s == "(bottom)") {
+        return Mod::bottom();
+      }
+
+      const std::string prefix = "{";
+      const std::string suffix = "} mod" + std::to_string(X);
 
       if (s.size() <= prefix.size() + suffix.size()) {
         throw std::invalid_argument("Mod: invalid format");
@@ -165,11 +166,10 @@ template <std::size_t X_> struct ModT {
       std::size_t start = 0;
 
       while (true) {
-        const std::size_t sep = list_sv.find(", ", start);
-        const std::string_view tok =
-            (sep == std::string_view::npos)
-                ? list_sv.substr(start)
-                : list_sv.substr(start, sep - start);
+        const std::size_t sep = list_sv.find(",", start);
+        const std::string_view tok = (sep == std::string_view::npos)
+                                         ? list_sv.substr(start)
+                                         : list_sv.substr(start, sep - start);
 
         if (tok.empty()) {
           throw std::invalid_argument("Mod: invalid element");
@@ -194,7 +194,7 @@ template <std::size_t X_> struct ModT {
         if (sep == std::string_view::npos) {
           break;
         }
-        start = sep + 2;
+        start = sep + 1;
       }
 
       if (mask == 0) {

@@ -32,13 +32,6 @@ public:
     for (unsigned int i = BW; i > 0; --i)
       os << (x.one()[i - 1] ? '1' : x.zero()[i - 1] ? '0' : '?');
 
-    if (x.isConstant())
-      os << " const: "
-         << static_cast<std::uint64_t>(x.getConstant().getZExtValue());
-
-    if (x.isTop())
-      os << " (top)";
-
     return os << "\n";
   }
 
@@ -119,6 +112,10 @@ public:
   }
 
   static KnownBits parse(std::string_view s) {
+    if (s == "(bottom)") {
+      return KnownBits::bottom();
+    }
+
     if (s.size() != BW) {
       throw std::invalid_argument("KnownBits: invalid bitstring length");
     }

@@ -32,9 +32,6 @@ public:
     os << '[' << x.lower().getZExtValue() << ", " << x.upper().getZExtValue()
        << ']';
 
-    if (x.isTop())
-      os << " (top)";
-
     return os << "\n";
   }
 
@@ -101,6 +98,10 @@ public:
   }
 
   static UConstRange parse(std::string_view s) {
+    if (s == "(bottom)") {
+      return UConstRange::bottom();
+    }
+
     if (s.size() < 5 || s.front() != '[' || s.back() != ']') {
       throw std::invalid_argument("UConstRange: invalid format");
     }

@@ -99,27 +99,27 @@ def test_scr_parse():
 
 
 def test_mod3_parse():
-    test_str_1 = "eq to {1, 2} mod 3"
+    test_str_1 = "{1,2} mod3"
     assert str(Mod34(test_str_1)) == test_str_1
 
-    test_str_2 = "eq to {1} mod 3"
+    test_str_2 = "{1} mod3"
     assert str(Mod34(test_str_2)) == test_str_2
 
-    test_str_3 = "eq to {0, 2} mod 3"
+    test_str_3 = "{0,2} mod3"
     assert str(Mod34(test_str_3)) == test_str_3
 
 
 def test_domain_top_bottom():
-    assert str(KnownBits8.top()) == "???????? (top)"
+    assert str(KnownBits8.top()) == "????????"
     assert str(KnownBits8.bottom()) == "(bottom)"
 
-    assert str(UConstRange8.top()) == "[0, 255] (top)"
+    assert str(UConstRange8.top()) == "[0, 255]"
     assert str(UConstRange8.bottom()) == "(bottom)"
 
-    assert str(SConstRange8.top()) == "[-128, 127] (top)"
+    assert str(SConstRange8.top()) == "[-128, 127]"
     assert str(SConstRange8.bottom()) == "(bottom)"
 
-    assert str(Mod34.top()) == "(top)"
+    assert str(Mod34.top()) == "{0,1,2} mod3"
     assert str(Mod34.bottom()) == "(bottom)"
 
 

@@ -4,6 +4,7 @@ from xdsl.parser import IntegerType
 from xdsl_smt.dialects.transfer import TransIntegerType
 
 from synth_xfer import _eval_engine
+from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval_result import EvalResult, PerBitRes
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
@@ -11,7 +12,7 @@ from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.random import Sampler
 
 if TYPE_CHECKING:
-    from synth_xfer._eval_engine import Results, ToEval
+    from synth_xfer._eval_engine import Args, Results, ToEval
 
 
 def get_per_bit(a: "Results") -> list[PerBitRes]:
@@ -98,7 +99,10 @@ def setup_eval(
         try:
             enum_fn = getattr(_eval_engine, func_name)
         except AttributeError as e:
-            raise ImportError(f"Function {func_name!r} not found in enum engine") from e
+            raise ImportError(
+                f"Function {func_name!r} not compiled into enum engine.\n"
+                "Add function to bindings.cpp and recompile the enum engine."
+            ) from e
         if not callable(enum_fn):
             raise TypeError(
                 f"{func_name} exists but is not callable (got {type(enum_fn).__name__})"
@@ -159,7 +163,10 @@ def eval_transfer_func(
         try:
             eval_fn = getattr(_eval_engine, func_name)
         except AttributeError as e:
-            raise ImportError(f"Function {func_name!r} not found in eval engine") from e
+            raise ImportError(
+                f"Function {func_name!r} not compiled into eval engine.\n"
+                "Add function to bindings.cpp and recompile the eval engine."
+            ) from e
         if not callable(eval_fn):
             raise TypeError(
                 f"{func_name} exists but is not callable (got {type(eval_fn).__name__})"
@@ -172,3 +179,45 @@ def eval_transfer_func(
     ]
 
     return get_eval_res(per_bits)
+
+
+def parse_to_run_inputs(
+    domain: AbstractDomain, bw: int, arity: int, inputs: list[tuple[str, ...]]
+) -> "Args":
+    cls_name = f"Args{domain}"
+    for _ in range(arity):
+        cls_name += f"_{bw}"
+
+    try:
+        args_cls = getattr(_eval_engine, cls_name)
+    except AttributeError as e:
+        raise ImportError(
+            f"Args class: {cls_name!r} not compiled into eval engine.\n"
+            "Add Args to bindings.cpp and recompile the eval engine."
+        ) from e
+    if not callable(args_cls):
+        raise TypeError(
+            f"{cls_name} exists but is not callable (got {type(args_cls).__name__})"
+        )
+
+    return args_cls(inputs)
+
+
+def eval_to_run(domain: AbstractDomain, bw: int, arity: int, inputs: "Args", fn_ptr: int):
+    fn_name = f"run_transformer_{str(domain).lower()}"
+    for _ in range(arity + 1):
+        fn_name += f"_{bw}"
+
+    try:
+        run_fn = getattr(_eval_engine, fn_name)
+    except AttributeError as e:
+        raise ImportError(
+            f"run function: {fn_name!r} not compiled into eval engine.\n"
+            "Add run function to bindings.cpp and recompile the eval engine."
+        ) from e
+    if not callable(run_fn):
+        raise TypeError(
+            f"{run_fn} exists but is not callable (got {type(run_fn).__name__})"
+        )
+
+    return run_fn(inputs, fn_ptr)
