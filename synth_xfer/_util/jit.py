@@ -6,8 +6,14 @@ import llvmlite.binding as llvm
 
 @dataclass(frozen=True)
 class FnPtr:
-    addr: int
+    _addr: int
     _jit: "Jit"
+
+    @property
+    def addr(self) -> int:
+        if self._jit._closed:
+            raise RuntimeError("FnPtr used after Jit was closed")
+        return self._addr
 
 
 class Jit:
@@ -40,9 +46,13 @@ class Jit:
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        self.close()
-
-    def close(self) -> None:
+        if self._closed:
+            return
+        for mod in self.mods:
+            try:
+                self.engine.remove_module(mod)
+            except Exception:
+                pass
         self.mods.clear()
         self._closed = True
 

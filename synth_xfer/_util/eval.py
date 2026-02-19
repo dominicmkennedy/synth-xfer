@@ -72,7 +72,6 @@ def setup_eval(
     hbw: list[tuple[int, int, int]],
     seed: int,
     helper_funcs: HelperFuncs,
-    jit: Jit,
     sampler: Sampler,
 ) -> dict[int, "ToEval"]:
     all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
@@ -83,8 +82,6 @@ def setup_eval(
         if helper_funcs.op_constraint_func
         else None
     )
-
-    jit.add_mod(lowerer)
 
     def get_bw(x: TransIntegerType | IntegerType, bw: int):
         return bw if isinstance(x, TransIntegerType) else x.width.data
@@ -110,36 +107,38 @@ def setup_eval(
 
         return enum_fn
 
-    low_to_evals: dict[int, "ToEval"] = {
-        bw: get_enum_f("low", bw)(
-            jit.get_fn_ptr(crt[bw].name).addr,
-            jit.get_fn_ptr(op_constraint[bw].name).addr if op_constraint else None,
-        )
-        for bw in lbw
-    }
+    with Jit() as jit:
+        jit.add_mod(lowerer)
+        low_to_evals: dict[int, "ToEval"] = {
+            bw: get_enum_f("low", bw)(
+                jit.get_fn_ptr(crt[bw].name).addr,
+                jit.get_fn_ptr(op_constraint[bw].name).addr if op_constraint else None,
+            )
+            for bw in lbw
+        }
 
-    mid_to_evals: dict[int, "ToEval"] = {
-        bw: get_enum_f("mid", bw)(
-            jit.get_fn_ptr(crt[bw].name).addr,
-            jit.get_fn_ptr(op_constraint[bw].name).addr if op_constraint else None,
-            samples,
-            seed,
-            sampler.sampler,
-        )
-        for bw, samples in mbw
-    }
+        mid_to_evals: dict[int, "ToEval"] = {
+            bw: get_enum_f("mid", bw)(
+                jit.get_fn_ptr(crt[bw].name).addr,
+                jit.get_fn_ptr(op_constraint[bw].name).addr if op_constraint else None,
+                samples,
+                seed,
+                sampler.sampler,
+            )
+            for bw, samples in mbw
+        }
 
-    high_to_evals: dict[int, "ToEval"] = {
-        bw: get_enum_f("high", bw)(
-            jit.get_fn_ptr(crt[bw].name).addr,
-            jit.get_fn_ptr(op_constraint[bw].name).addr if op_constraint else None,
-            lat_samples,
-            crt_samples,
-            seed,
-            sampler.sampler,
-        )
-        for bw, lat_samples, crt_samples in hbw
-    }
+        high_to_evals: dict[int, "ToEval"] = {
+            bw: get_enum_f("high", bw)(
+                jit.get_fn_ptr(crt[bw].name).addr,
+                jit.get_fn_ptr(op_constraint[bw].name).addr if op_constraint else None,
+                lat_samples,
+                crt_samples,
+                seed,
+                sampler.sampler,
+            )
+            for bw, lat_samples, crt_samples in hbw
+        }
 
     return low_to_evals | mid_to_evals | high_to_evals
 

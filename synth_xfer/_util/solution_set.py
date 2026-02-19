@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 import io
-from typing import Callable
+from typing import Callable, TypeAlias
 
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
@@ -25,6 +25,11 @@ def _rename_functions(lst: list[FunctionWithCondition], prefix: str) -> list[str
     return func_names
 
 
+EvalFn: TypeAlias = Callable[
+    [list[FunctionWithCondition], list[FunctionWithCondition]], list[EvalResult]
+]
+
+
 class SolutionSet(ABC):
     "This class is an abstract class for maintaining solutions. It supports to generate the meet of solutions"
 
@@ -39,30 +44,27 @@ class SolutionSet(ABC):
     list of name of base functions
     list of base functions
     """
-    eval_func: Callable[
-        [list[FunctionWithCondition], list[FunctionWithCondition]], list[EvalResult]
-    ]
     optimize: bool
 
     def __init__(
         self,
         initial_solutions: list[FunctionWithCondition],
-        eval_func: Callable[
-            [list[FunctionWithCondition], list[FunctionWithCondition]], list[EvalResult]
-        ],
         is_perfect: bool = False,
         optimize: bool = True,
     ):
         _rename_functions(initial_solutions, "partial_solution_")
         self.solutions = initial_solutions
         self.solutions_size = len(initial_solutions)
-        self.eval_func = eval_func
         self.precise_set = []
         self.is_perfect = is_perfect
         self.optimize = optimize
 
-    def eval_improve(self, transfers: list[FunctionWithCondition]) -> list[EvalResult]:
-        return self.eval_func(transfers, self.solutions)
+    def eval_improve(
+        self,
+        transfers: list[FunctionWithCondition],
+        eval_func: EvalFn,
+    ) -> list[EvalResult]:
+        return eval_func(transfers, self.solutions)
 
     @abstractmethod
     def construct_new_solution_set(
@@ -75,6 +77,7 @@ class SolutionSet(ABC):
         # Parameters used by SMT verifier
         helper_funcs: HelperFuncs,
         num_unsound_candidates: int,
+        eval_func: EvalFn,
     ) -> SolutionSet: ...
 
     def has_solution(self) -> bool:
@@ -138,17 +141,10 @@ class UnsizedSolutionSet(SolutionSet):
     def __init__(
         self,
         initial_solutions: list[FunctionWithCondition],
-        eval_func_with_cond: Callable[
-            [
-                list[FunctionWithCondition],
-                list[FunctionWithCondition],
-            ],
-            list[EvalResult],
-        ],
         is_perfect: bool = False,
         optimize: bool = True,
     ):
-        super().__init__(initial_solutions, eval_func_with_cond, is_perfect, optimize)
+        super().__init__(initial_solutions, is_perfect, optimize)
 
     def handle_inconsistent_result(self, f: FunctionWithCondition):
         str_output = io.StringIO()
@@ -194,6 +190,7 @@ class UnsizedSolutionSet(SolutionSet):
         new_candidates_c: list[FunctionWithCondition],
         helper_funcs: HelperFuncs,
         num_unsound_candidates: int,
+        eval_func: EvalFn,
     ) -> SolutionSet:
         logger = get_logger()
         candidates = self.solutions + new_candidates_sp + new_candidates_c
@@ -208,7 +205,7 @@ class UnsizedSolutionSet(SolutionSet):
         num_cond_solutions = 0
 
         while len(candidates) > 0:
-            result = self.eval_improve(candidates)
+            result = self.eval_improve(candidates, eval_func)
             if result[0].get_base_dist() == 0:  # current solution set is already perfect
                 break
             cand, max_improve_res = max(
@@ -314,7 +311,7 @@ class UnsizedSolutionSet(SolutionSet):
         logger.info(f"The number of conditional solutions: {num_cond_solutions}")
         self.solutions_size = len(self.solutions)
 
-        final_result = self.eval_improve([])[0]
+        final_result = self.eval_improve([], eval_func)[0]
         if final_result.get_unsolved_cases() == 0:
             self.is_perfect = True
             return self
@@ -324,7 +321,7 @@ class UnsizedSolutionSet(SolutionSet):
             FunctionWithCondition(f.clone()) for f in precise_candidates
         ]
         _rename_functions(precise_candidates_to_eval, "precise_candidates_")
-        result = self.eval_improve(precise_candidates_to_eval)
+        result = self.eval_improve(precise_candidates_to_eval, eval_func)
 
         sorted_pairs = sorted(
             zip(precise_candidates, result),
@@ -343,16 +340,19 @@ class UnsizedSolutionSet(SolutionSet):
 
         return self
 
-    def learn_weights(self, context: SynthesizerContext):
+    def learn_weights(
+        self,
+        context: SynthesizerContext,
+        eval_func: EvalFn,
+    ):
         "Set weights in context according to the frequencies of each DSL operation that appear in func in solution set"
 
         logger = get_logger()
         logger.info("Improvement by each individual function")
         learn_form_funcs: list[FuncOp] = []
         for i, sol in enumerate(self.solutions):
-            cmp_results: list[EvalResult] = self.eval_func(
-                [sol],
-                self.solutions[:i] + self.solutions[i + 1 :],
+            cmp_results: list[EvalResult] = eval_func(
+                [sol], self.solutions[:i] + self.solutions[i + 1 :]
             )
             res = cmp_results[0]
             to_learn = res.get_new_exact_prop() > 0.005
