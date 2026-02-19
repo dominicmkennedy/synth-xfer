@@ -60,10 +60,10 @@ def main() -> None:
     lowerer = LowerToLLVM([bw])
     lowerer.add_mod(mlir_mod, [xfer_name])
 
-    jit = Jit()
-    jit.add_mod(str(lowerer))
-    fn_ptr = jit.get_fn_ptr(f"{xfer_name}_{bw}_shim")
-    outputs = eval_to_run(domain, bw, arity, input_args, fn_ptr)
+    with Jit() as jit:
+        jit.add_mod(lowerer)
+        fn_ptr = jit.get_fn_ptr(f"{xfer_name}_{bw}_shim")
+        outputs = eval_to_run(domain, bw, arity, input_args, fn_ptr)
 
     out_ctx = nullcontext(stdout) if args.output is None else args.output.open("w")
     with out_ctx as out_f:

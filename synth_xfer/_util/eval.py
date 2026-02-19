@@ -6,13 +6,13 @@ from xdsl_smt.dialects.transfer import TransIntegerType
 from synth_xfer import _eval_engine
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval_result import EvalResult, PerBitRes
-from synth_xfer._util.jit import Jit
+from synth_xfer._util.jit import FnPtr, Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.random import Sampler
 
 if TYPE_CHECKING:
-    from synth_xfer._eval_engine import Args, Results, ToEval
+    from synth_xfer._eval_engine import ArgsVec, Results, ToEval
 
 
 def get_per_bit(a: "Results") -> list[PerBitRes]:
@@ -84,7 +84,7 @@ def setup_eval(
         else None
     )
 
-    jit.add_mod(str(lowerer))
+    jit.add_mod(lowerer)
 
     def get_bw(x: TransIntegerType | IntegerType, bw: int):
         return bw if isinstance(x, TransIntegerType) else x.width.data
@@ -112,16 +112,16 @@ def setup_eval(
 
     low_to_evals: dict[int, "ToEval"] = {
         bw: get_enum_f("low", bw)(
-            jit.get_fn_ptr(crt[bw].name),
-            jit.get_fn_ptr(op_constraint[bw].name) if op_constraint else None,
+            jit.get_fn_ptr(crt[bw].name).addr,
+            jit.get_fn_ptr(op_constraint[bw].name).addr if op_constraint else None,
         )
         for bw in lbw
     }
 
     mid_to_evals: dict[int, "ToEval"] = {
         bw: get_enum_f("mid", bw)(
-            jit.get_fn_ptr(crt[bw].name),
-            jit.get_fn_ptr(op_constraint[bw].name) if op_constraint else None,
+            jit.get_fn_ptr(crt[bw].name).addr,
+            jit.get_fn_ptr(op_constraint[bw].name).addr if op_constraint else None,
             samples,
             seed,
             sampler.sampler,
@@ -131,8 +131,8 @@ def setup_eval(
 
     high_to_evals: dict[int, "ToEval"] = {
         bw: get_enum_f("high", bw)(
-            jit.get_fn_ptr(crt[bw].name),
-            jit.get_fn_ptr(op_constraint[bw].name) if op_constraint else None,
+            jit.get_fn_ptr(crt[bw].name).addr,
+            jit.get_fn_ptr(op_constraint[bw].name).addr if op_constraint else None,
             lat_samples,
             crt_samples,
             seed,
@@ -154,7 +154,7 @@ def get_eval_res(per_bits: list[list[PerBitRes]]) -> list[EvalResult]:
 
 
 def eval_transfer_func(
-    x: dict[int, tuple["ToEval", list[int], list[int]]],
+    x: dict[int, tuple["ToEval", list[FnPtr], list[FnPtr]]],
 ) -> list[EvalResult]:
     def get_eval_f(x: "ToEval") -> Callable[["ToEval", list[int], list[int]], "Results"]:
         suffix = x.__class__.__name__.lower()[6:]
@@ -173,17 +173,18 @@ def eval_transfer_func(
             )
         return eval_fn
 
-    per_bits = [
-        get_per_bit(get_eval_f(to_eval)(to_eval, xs, bs))
-        for to_eval, xs, bs in x.values()
-    ]
+    per_bits = []
+    for to_eval, xs, bs in x.values():
+        xs_addrs = [x.addr for x in xs]
+        bs_addrs = [b.addr for b in bs]
+        per_bits.append(get_per_bit(get_eval_f(to_eval)(to_eval, xs_addrs, bs_addrs)))
 
     return get_eval_res(per_bits)
 
 
 def parse_to_run_inputs(
     domain: AbstractDomain, bw: int, arity: int, inputs: list[tuple[str, ...]]
-) -> "Args":
+) -> "ArgsVec":
     cls_name = f"Args{domain}"
     for _ in range(arity):
         cls_name += f"_{bw}"
@@ -203,7 +204,9 @@ def parse_to_run_inputs(
     return args_cls(inputs)
 
 
-def eval_to_run(domain: AbstractDomain, bw: int, arity: int, inputs: "Args", fn_ptr: int):
+def eval_to_run(
+    domain: AbstractDomain, bw: int, arity: int, inputs: "ArgsVec", fn_ptr: FnPtr
+):
     fn_name = f"run_transformer_{str(domain).lower()}"
     for _ in range(arity + 1):
         fn_name += f"_{bw}"
@@ -220,4 +223,4 @@ def eval_to_run(domain: AbstractDomain, bw: int, arity: int, inputs: "Args", fn_
             f"{run_fn} exists but is not callable (got {type(run_fn).__name__})"
         )
 
-    return run_fn(inputs, fn_ptr)
+    return run_fn(inputs, fn_ptr.addr)

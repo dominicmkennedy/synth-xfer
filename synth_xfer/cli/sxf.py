@@ -49,7 +49,7 @@ def _eval_helper(
         xfer_names = {bw: [d[bw] for d in xfer_names] for bw in bws}
         base_names = {bw: [d[bw] for d in base_names] for bw in bws}
 
-        jit.add_mod(str(lowerer))
+        jit.add_mod(lowerer)
         xfer_fns = {bw: [jit.get_fn_ptr(x) for x in xfer_names[bw]] for bw in xfer_names}
         base_fns = {bw: [jit.get_fn_ptr(x) for x in base_names[bw]] for bw in base_names}
 
@@ -96,7 +96,6 @@ def run(
     sampler: Sampler,
 ) -> EvalResult:
     logger = get_logger()
-    jit = Jit()
     dsl_ops: DslOpSet | None = load_dsl_ops(dsl_ops_path) if dsl_ops_path else None
 
     EvalResult.init_bw_settings(
@@ -111,123 +110,129 @@ def run(
         random.read_from_file(random_number_file)
 
     helper_funcs = get_helper_funcs(transformer_file, domain)
-
-    start_time = perf_counter()
-    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helper_funcs, jit, sampler)
-    run_time = perf_counter() - start_time
-    logger.perf(f"Enum engine took {run_time:.4f}s")
-
     all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
-    solution_eval_func = _eval_helper(to_eval, all_bws, helper_funcs, jit)
-    solution_set = UnsizedSolutionSet([], solution_eval_func, optimize=optimize)
+
+    with Jit() as enum_jit:
+        start_time = perf_counter()
+        to_eval = setup_eval(lbw, mbw, hbw, random_seed, helper_funcs, enum_jit, sampler)
+        run_time = perf_counter() - start_time
+        logger.perf(f"Enum engine took {run_time:.4f}s")
 
     context = _setup_context(random, False, dsl_ops)
     context_weighted = _setup_context(random, False, dsl_ops)
     context_cond = _setup_context(random, True, dsl_ops)
 
-    start_time = perf_counter()
-    init_cmp_res = solution_set.eval_improve([])[0]
-    run_time = perf_counter() - start_time
-    logger.perf(f"Init Eval took {run_time:.4f}s")
+    with Jit() as jit:
+        solution_eval_func = _eval_helper(to_eval, all_bws, helper_funcs, jit)
+        solution_set = UnsizedSolutionSet([], solution_eval_func, optimize=optimize)
 
-    init_exact = init_cmp_res.get_exact_prop() * 100
-    s = f"Top Solution | Exact {init_exact:.4f}% |"
-    logger.info(s)
-    print(s)
+        start_time = perf_counter()
+        init_cmp_res = solution_set.eval_improve([])[0]
+        run_time = perf_counter() - start_time
+        logger.perf(f"Init Eval took {run_time:.4f}s")
 
-    current_prog_len = program_length
-    current_num_steps = num_steps
-    current_num_abd_procs = num_abd_procs
-    for ith_iter in range(num_iters):
-        iter_start = perf_counter()
-        # gradually increase the program length
-        current_prog_len += (program_length - current_prog_len) // (num_iters - ith_iter)
-        current_num_steps += (num_steps - current_num_steps) // (num_iters - ith_iter)
-        current_num_abd_procs += (num_abd_procs - current_num_abd_procs) // (
-            num_iters - ith_iter
-        )
+        init_exact = init_cmp_res.get_exact_prop() * 100
+        s = f"Top Solution | Exact {init_exact:.4f}% |"
+        logger.info(s)
+        print(s)
 
-        if weighted_dsl:
-            assert isinstance(solution_set, UnsizedSolutionSet)
-            context_weighted.weighted = True
-            solution_set.learn_weights(context_weighted)
+        current_prog_len = program_length
+        current_num_steps = num_steps
+        current_num_abd_procs = num_abd_procs
+        for ith_iter in range(num_iters):
+            iter_start = perf_counter()
+            # gradually increase the program length
+            current_prog_len += (program_length - current_prog_len) // (
+                num_iters - ith_iter
+            )
+            current_num_steps += (num_steps - current_num_steps) // (num_iters - ith_iter)
+            current_num_abd_procs += (num_abd_procs - current_num_abd_procs) // (
+                num_iters - ith_iter
+            )
 
-        mcmc_samplers, prec_set, ranges = setup_mcmc(
-            helper_funcs.transfer_func,
-            solution_set.precise_set,
-            current_num_abd_procs,
-            num_mcmc,
-            context,
-            context_weighted,
-            context_cond,
-            current_prog_len,
-            current_num_steps,
-            condition_length,
-        )
+            if weighted_dsl:
+                assert isinstance(solution_set, UnsizedSolutionSet)
+                context_weighted.weighted = True
+                solution_set.learn_weights(context_weighted)
 
-        solution_set = synthesize_one_iteration(
-            ith_iter,
-            random,
-            solution_set,
-            helper_funcs,
-            inv_temp,
-            num_unsound_candidates,
-            ranges,
-            mcmc_samplers,
-            prec_set,
-            lbw,
-            vbw,
-        )
+            mcmc_samplers, prec_set, ranges = setup_mcmc(
+                helper_funcs.transfer_func,
+                solution_set.precise_set,
+                current_num_abd_procs,
+                num_mcmc,
+                context,
+                context_weighted,
+                context_cond,
+                current_prog_len,
+                current_num_steps,
+                condition_length,
+            )
 
-        write_log_file(
-            f"iter{ith_iter}.mlir", "\n".join(map(str, solution_set.solutions))
-        )
+            solution_set = synthesize_one_iteration(
+                ith_iter,
+                random,
+                solution_set,
+                helper_funcs,
+                inv_temp,
+                num_unsound_candidates,
+                ranges,
+                mcmc_samplers,
+                prec_set,
+                lbw,
+                vbw,
+            )
 
-        final_cmp_res = solution_set.eval_improve([])[0]
-        lbw_mbw_log = "\n".join(
-            f"bw: {res.bitwidth}, dist: {res.dist:.2f}, exact%: {res.get_exact_prop() * 100:.4f}"
-            for res in final_cmp_res.get_low_med_res()
-        )
-        hbw_log = "\n".join(
-            f"bw: {res.bitwidth}, dist: {res.dist:.2f}"
-            for res in final_cmp_res.get_high_res()
-        )
+            write_log_file(
+                f"iter{ith_iter}.mlir", "\n".join(map(str, solution_set.solutions))
+            )
 
-        iter_time = perf_counter() - iter_start
-        final_exact = final_cmp_res.get_exact_prop() * 100
-        print(
-            f"Iteration {ith_iter}  | Exact {final_exact:.4f}% | {solution_set.solutions_size} solutions | {iter_time:.4f}s |"
-        )
+            final_cmp_res = solution_set.eval_improve([])[0]
+            lbw_mbw_log = "\n".join(
+                f"bw: {res.bitwidth}, dist: {res.dist:.2f}, exact%: {res.get_exact_prop() * 100:.4f}"
+                for res in final_cmp_res.get_low_med_res()
+            )
+            hbw_log = "\n".join(
+                f"bw: {res.bitwidth}, dist: {res.dist:.2f}"
+                for res in final_cmp_res.get_high_res()
+            )
 
-        logger.info(
-            f"Iter {ith_iter} Finished. Result of Current Solution: \n{lbw_mbw_log}\n{hbw_log}\n"
-        )
+            iter_time = perf_counter() - iter_start
+            final_exact = final_cmp_res.get_exact_prop() * 100
+            print(
+                f"Iteration {ith_iter}  | Exact {final_exact:.4f}% | {solution_set.solutions_size} solutions | {iter_time:.4f}s |"
+            )
 
-        if solution_set.is_perfect:
-            print("Found a perfect solution")
-            break
+            logger.info(
+                f"Iter {ith_iter} Finished. Result of Current Solution: \n{lbw_mbw_log}\n{hbw_log}\n"
+            )
 
-    # Eval last solution:
-    if not solution_set.has_solution():
-        raise Exception("Found no solutions")
-    solution_module = solution_set.generate_solution_mlir()
-    write_log_file("solution.mlir", solution_module)
+            if solution_set.is_perfect:
+                print("Found a perfect solution")
+                break
+
+        # Eval last solution:
+        if not solution_set.has_solution():
+            raise Exception("Found no solutions")
+        solution_module = solution_set.generate_solution_mlir()
+        write_log_file("solution.mlir", solution_module)
 
     lowerer = LowerToLLVM(all_bws)
     lowerer.add_fn(helper_funcs.meet_func)
     lowerer.add_fn(helper_funcs.get_top_func)
     lowerer.add_mod(solution_module, ["solution"])
-    jit.add_mod(str(lowerer))
-    sol_ptrs = {bw: jit.get_fn_ptr(f"solution_{bw}_shim") for bw in all_bws}
-    sol_to_eval = {bw: (to_eval[bw], [sol_ptrs[bw]], []) for bw in all_bws}
-    solution_result = eval_transfer_func(sol_to_eval)[0]
 
-    solution_exact = solution_result.get_exact_prop() * 100
-    print(
-        f"Final Soln   | Exact {solution_exact:.4f}% | {solution_set.solutions_size} solutions |"
-    )
+    with Jit() as jit:
+        jit.add_mod(lowerer)
+        sol_ptrs = {bw: jit.get_fn_ptr(f"solution_{bw}_shim") for bw in all_bws}
+        sol_to_eval = {bw: (to_eval[bw], [sol_ptrs[bw]], []) for bw in all_bws}
+        solution_result = eval_transfer_func(sol_to_eval)[0]
 
-    return solution_result
+        solution_exact = solution_result.get_exact_prop() * 100
+        print(
+            f"Final Soln   | Exact {solution_exact:.4f}% | {solution_set.solutions_size} solutions |"
+        )
+
+        return solution_result
 
 
 def main() -> None:
