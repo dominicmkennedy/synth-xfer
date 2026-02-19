@@ -1,6 +1,8 @@
 from argparse import ArgumentParser, Namespace
+from contextlib import nullcontext
+from csv import reader, writer
 from pathlib import Path
-from sys import stdout
+from sys import stdin, stdout
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import eval_to_run, parse_to_run_inputs
@@ -31,8 +33,12 @@ def _register_parser() -> Namespace:
 
     p.add_argument("--xfer-file", type=Path, required=True, help="Transformer file")
     p.add_argument("--xfer-name", type=str, help="Transformer to verify")
-    p.add_argument("-i", "--input", nargs="+", required=True)
+    p.add_argument("-i", "--input", type=Path, default=None)
     p.add_argument("-o", "--output", type=Path, default=None)
+    p.add_argument("--size", action="store_true", help="Show abstract value sizes")
+    p.add_argument(
+        "--show-inputs", action="store_true", help="Show abstract value inputs"
+    )
 
     return p.parse_args()
 
@@ -40,31 +46,35 @@ def _register_parser() -> Namespace:
 def main() -> None:
     args = _register_parser()
     domain = AbstractDomain[args.domain]
-    out_f = stdout if args.output is None else args.output.open("w")
+    bw: int = args.bw
 
-    if len(args.input) == 1 and Path(args.input[0]).is_file():
-        text = Path(args.input[0]).read_text().split("\n")[:-1]
-        input_text = [tuple(y for y in x.split(" ")) for x in text]
-        arity = len(input_text[0])
-    else:
-        text = tuple(str(x) for x in args.input)
-        arity = len(text)
-        input_text = [text]
+    in_ctx = nullcontext(stdin) if args.input is None else args.input.open("r")
+    with in_ctx as in_f:
+        input_text = list(tuple(x) for x in reader(in_f, delimiter="\t"))
 
+    arity = len(input_text[0])
+    input_args = parse_to_run_inputs(domain, bw, arity, input_text)
     mlir_mod = parse_mlir_mod(args.xfer_file)
     xfer_name = resolve_xfer_name(get_fns(mlir_mod), args.xfer_name)
-    input_args = parse_to_run_inputs(domain, args.bw, arity, input_text)
 
-    lowerer = LowerToLLVM([args.bw])
+    lowerer = LowerToLLVM([bw])
     lowerer.add_mod(mlir_mod, [xfer_name])
 
     jit = Jit()
     jit.add_mod(str(lowerer))
-    fn_ptr = jit.get_fn_ptr(f"{xfer_name}_{args.bw}_shim")
-    outputs = eval_to_run(domain, args.bw, arity, input_args, fn_ptr)
+    fn_ptr = jit.get_fn_ptr(f"{xfer_name}_{bw}_shim")
+    outputs = eval_to_run(domain, bw, arity, input_args, fn_ptr)
 
-    for output in outputs:  # type: ignore
-        out_f.write(f"{output}\n")
+    out_ctx = nullcontext(stdout) if args.output is None else args.output.open("w")
+    with out_ctx as out_f:
+        csv_w = writer(out_f, delimiter="\t")
+        input_rows = [f"arg_{x}" for x in range(arity)] if args.show_inputs else []
+
+        csv_w.writerow(input_rows + ["Output"] + (["Size"] if args.size else []))
+        for input, output in zip(input_args, outputs):  # type: ignore
+            in_row = [f"{x}" for x in input] if args.show_inputs else []
+            size_row = [str(output.size())] if args.size else []
+            csv_w.writerow(in_row + [str(output)] + size_row)
 
 
 if __name__ == "__main__":

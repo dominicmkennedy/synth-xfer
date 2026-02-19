@@ -83,6 +83,7 @@ void register_domain_class(py::module_ &m) {
   cls.def_static("top", []() { return D<BW>::top(); });
   cls.def_static("bottom", []() { return D<BW>::bottom(); });
   cls.def(py::init([](const std::string &s) { return D<BW>::parse(s); }));
+  cls.def("size", [](const D<BW> &self) { return self.size(); });
   cls.def("__str__", [](const D<BW> &self) {
     std::ostringstream oss;
     oss << self;
