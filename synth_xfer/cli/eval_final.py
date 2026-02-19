@@ -140,9 +140,9 @@ def run(
     top_xfer = lowerer.add_fn(top_mlir, shim=True)
     lowerer.add_mod(sol_module, [xfer_name])
 
+    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helpers, sampler)
     with Jit() as jit:
         jit.add_mod(lowerer)
-        to_eval = setup_eval(lbw, mbw, hbw, random_seed, helpers, jit, sampler)
 
         eval_input = {
             bw: (
@@ -275,7 +275,7 @@ def main() -> None:
                 )
             )
 
-        jobs = sorted(jobs, key=lambda x: (x.domain.value))
+        jobs = sorted(jobs, key=lambda x: x.domain.value)
     elif input_path.is_file():
         assert args.domain is not None
         domain = AbstractDomain[args.domain]
