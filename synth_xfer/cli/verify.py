@@ -59,6 +59,14 @@ def _register_parser() -> Namespace:
     p.add_argument("--xfer-file", type=Path, required=True, help="Transformer file")
     p.add_argument("--xfer-name", type=str, help="Transformer to verify")
     p.add_argument("--timeout", type=int, default=30, help="z3 timeout")
+    p.add_argument(
+        "--continue-unsound",
+        action="store_true",
+        help="Continue after hitting an unsound bw",
+    )
+    p.add_argument(
+        "--continue-timeout", action="store_true", help="Continue after a timeout"
+    )
 
     return p.parse_args()
 
@@ -81,13 +89,23 @@ def main() -> None:
         run_time = perf_counter() - start_time
 
         if is_sound is None:
-            print(f"{bw:<2} bits | timeout | took {run_time:.4f}s")
+            if args.continue_timeout:
+                print(f"{bw:<2} bits | timeout | took {args.timeout}s")
+            else:
+                print(
+                    f"Verifier TIMEOUT at {bw}-bits.\nTimeout was {args.timeout} second."
+                )
+                break
         elif is_sound:
             print(f"{bw:<2} bits | sound   | took {run_time:.4f}s")
         else:
-            print(f"{bw:<2} bits | unsound | took {run_time:.4f}s")
-            print("counterexample:")
-            print(model)
+            if args.continue_unsound:
+                print(f"{bw:<2} bits | unsound | took {run_time:.4f}s")
+            else:
+                print(f"Verifier UNSOUND at {bw}-bits. Took {run_time:.4f}s.")
+                print("Counterexample:")
+                print(model)
+                break
 
 
 if __name__ == "__main__":

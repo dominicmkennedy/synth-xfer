@@ -291,7 +291,7 @@ def main() -> None:
                 )
             )
 
-        jobs = sorted(jobs, key=lambda x: (x.domain.value))
+        jobs = sorted(jobs, key=lambda x: x.domain.value)
     elif input_path.is_file():
         assert args.domain is not None
         domain = AbstractDomain[args.domain]
