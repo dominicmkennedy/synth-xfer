@@ -3,7 +3,7 @@ from pathlib import Path
 from time import perf_counter
 
 from xdsl.dialects.func import FuncOp
-from z3 import ModelRef
+from z3 import BitVecNumRef, FuncDeclRef, ModelRef
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.parse_mlir import (
@@ -67,8 +67,88 @@ def _register_parser() -> Namespace:
     p.add_argument(
         "--continue-timeout", action="store_true", help="Continue after a timeout"
     )
+    # TODO
+    # p.add_argument(
+    #     "--no-exec", action="store_true", help="Don't execute unsound models"
+    # )
 
     return p.parse_args()
+
+
+def parse_counter_example(
+    model: ModelRef, domain: AbstractDomain, bw: int
+) -> tuple[dict[int, int], dict[int, str]]:
+    # TODO doesn't support all domains yet.
+    assert domain.vec_size == 2
+
+    func_arity = len(model) // 3
+    abst0_args: dict[int, BitVecNumRef] = {}
+    abst1_args: dict[int, BitVecNumRef] = {}
+    conc_args: dict[int, int] = {}
+
+    for var_ref in model:
+        var_name = str(var_ref)
+        var_val = model[var_ref]
+        assert isinstance(var_ref, FuncDeclRef)
+        assert isinstance(var_val, BitVecNumRef)
+
+        if var_name == "$const_first":
+            abst0_args[0] = var_val
+        elif var_name == "$const_second_first":
+            abst1_args[0] = var_val
+
+        elif var_name.startswith("$const_first_"):
+            number = int(var_name.split("$const_first_")[1])
+
+            if number >= func_arity - 1:
+                arg_number = number - (func_arity - 1)
+                conc_args[arg_number] = var_val.as_long()
+            else:
+                arg_number = number + 1
+                abst0_args[arg_number] = var_val
+        elif var_name.startswith("$const_second_first_"):
+            number = int(var_name.split("$const_second_first_")[1])
+            abst1_args[number + 1] = var_val
+        else:
+            raise ValueError(f"Unexpected var name: {var_name}")
+
+    assert len(abst0_args) == func_arity
+    assert len(abst1_args) == func_arity
+    assert len(conc_args) == func_arity
+
+    abst_args = {
+        num: bv_ref_to_abst_str(domain, bw, (arg0, abst1_args[num]))
+        for num, arg0 in abst0_args.items()
+    }
+
+    return dict(sorted(conc_args.items())), dict(sorted(abst_args.items()))
+
+
+def bv_ref_to_abst_str(
+    domain: AbstractDomain, bw: int, abst_bv: tuple[BitVecNumRef, BitVecNumRef]
+) -> str:
+    if domain == AbstractDomain.KnownBits:
+        known_zeros = bin(abst_bv[0].as_long())[2:].zfill(bw)
+        known_ones = bin(abst_bv[1].as_long())[2:].zfill(bw)
+        abst_val_str = ""
+        for zero, one in zip(known_zeros, known_ones):
+            if zero == "0" and one == "0":
+                abst_val_str += "?"
+            elif zero == "0" and one == "1":
+                abst_val_str += "1"
+            elif zero == "1" and one == "0":
+                abst_val_str += "0"
+            else:
+                abst_val_str = "(bottom)"
+                break
+    elif domain == AbstractDomain.UConstRange:
+        abst_val_str = f"[{abst_bv[0].as_long()}, {abst_bv[1].as_long()}]"
+    elif domain == AbstractDomain.SConstRange:
+        abst_val_str = f"[{abst_bv[0].as_signed_long()}, {abst_bv[1].as_signed_long()}]"
+    else:
+        raise ValueError(f"Unsupported domain: {domain}")
+
+    return abst_val_str
 
 
 def main() -> None:
@@ -99,12 +179,22 @@ def main() -> None:
         elif is_sound:
             print(f"{bw:<2} bits | sound   | took {run_time:.4f}s")
         else:
-            if args.continue_unsound:
-                print(f"{bw:<2} bits | unsound | took {run_time:.4f}s")
-            else:
-                print(f"Verifier UNSOUND at {bw}-bits. Took {run_time:.4f}s.")
-                print("Counterexample:")
-                print(model)
+            print("-----------------------------------------------------")
+            print(f"Verifier UNSOUND at {bw}-bits. Took {run_time:.4f}s.")
+            print("Counterexample:")
+
+            op_name = str(args.op.stem)
+            assert isinstance(model, ModelRef)
+            conc_args, abst_args = parse_counter_example(model, domain, bw)
+
+            print(f"Concrete: {op_name}(", end="")
+            print(", ".join(map(str, conc_args.values())), end="")
+            print(")")
+            print(f"Abstract: {op_name}(", end="")
+            print(", ".join(map(str, abst_args.values())), end="")
+            print(")")
+
+            if not args.continue_unsound:
                 break
 
 
