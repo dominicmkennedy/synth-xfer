@@ -1,6 +1,7 @@
+from ctypes import CFUNCTYPE, c_bool, c_int64
 from typing import TYPE_CHECKING, Callable
 
-from xdsl.parser import IntegerType
+from xdsl.parser import IntegerType, ModuleOp
 from xdsl_smt.dialects.transfer import TransIntegerType
 
 from synth_xfer import _eval_engine
@@ -223,3 +224,59 @@ def eval_to_run(
         )
 
     return run_fn(inputs, fn_ptr.addr)
+
+
+def run_xfer_fn(
+    domain: AbstractDomain,
+    bw: int,
+    input: list[tuple[str, ...]],
+    mlir_mod: ModuleOp,
+    xfer_name: str,
+):
+    arity = len(input[0])
+    input_args = parse_to_run_inputs(domain, bw, arity, input)
+
+    lowerer = LowerToLLVM([bw])
+    lowerer.add_mod(mlir_mod, [xfer_name])
+
+    with Jit() as jit:
+        jit.add_mod(lowerer)
+        fn_ptr = jit.get_fn_ptr(f"{xfer_name}_{bw}_shim")
+        outputs = eval_to_run(domain, bw, arity, input_args, fn_ptr)
+
+    return outputs
+
+
+def run_concrete_fn(
+    helper_funcs: HelperFuncs, bw: int, args: list[tuple[int, ...]]
+) -> list[int | None]:
+    lowerer = LowerToLLVM([bw])
+    crt = lowerer.add_fn(helper_funcs.crt_func, shim=True)
+    op_constraint = (
+        lowerer.add_fn(helper_funcs.op_constraint_func, shim=True)
+        if helper_funcs.op_constraint_func
+        else None
+    )
+
+    arity = len(args[0])
+    conc_op_type = CFUNCTYPE(c_int64, *(c_int64 for _ in range(arity)))
+    op_con_type = CFUNCTYPE(c_bool, *(c_int64 for _ in range(arity)))
+
+    results: list[int | None] = []
+
+    with Jit() as jit:
+        jit.add_mod(lowerer)
+        conc_op_fn = conc_op_type(jit.get_fn_ptr(crt[bw].name).addr)
+        op_con_fn = (
+            op_con_type(jit.get_fn_ptr(op_constraint[bw].name).addr)
+            if op_constraint
+            else None
+        )
+
+        for x in args:
+            if not op_con_fn or op_con_fn(*x):
+                results.append(conc_op_fn(*x))
+
+            results.append(None)
+
+    return results
