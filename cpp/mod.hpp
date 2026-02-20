@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <ostream>
 #include <random>
+#include <string>
+#include <string_view>
 #include <vector>
 
 #include "apint.hpp"
@@ -36,22 +38,19 @@ template <std::size_t X_> struct ModT {
         return os << "(bottom)\n";
       }
 
-      if (x.isTop())
-        return os << "(top)\n";
-
-      os << "eq to {";
+      os << "{";
 
       bool first = true;
       for (unsigned int i = 0; i < X; ++i) {
         if (x[0][i]) {
           if (!first)
-            os << ", ";
+            os << ",";
           os << i;
           first = false;
         }
       }
 
-      os << "} mod " << X << "\n";
+      os << "} mod" << X << "\n";
 
       return os;
     }
@@ -137,6 +136,72 @@ template <std::size_t X_> struct ModT {
       APInt<X> a(0);
       a.setBit(static_cast<unsigned int>(x.urem(APInt<BW>(X)).getZExtValue()));
       return Mod({a});
+    }
+
+    static Mod parse(std::string_view s) {
+      if (s == "(bottom)") {
+        return Mod::bottom();
+      }
+
+      const std::string prefix = "{";
+      const std::string suffix = "} mod" + std::to_string(X);
+
+      if (s.size() <= prefix.size() + suffix.size()) {
+        throw std::invalid_argument("Mod: invalid format");
+      }
+
+      if (!s.starts_with(prefix) || !s.ends_with(suffix)) {
+        throw std::invalid_argument("Mod: invalid format");
+      }
+
+      const std::string_view list_sv =
+          s.substr(prefix.size(), s.size() - prefix.size() - suffix.size());
+
+      if (list_sv.empty()) {
+        throw std::invalid_argument("Mod: empty set");
+      }
+
+      std::uint64_t mask = 0;
+      std::int64_t last = -1;
+      std::size_t start = 0;
+
+      while (true) {
+        const std::size_t sep = list_sv.find(",", start);
+        const std::string_view tok = (sep == std::string_view::npos)
+                                         ? list_sv.substr(start)
+                                         : list_sv.substr(start, sep - start);
+
+        if (tok.empty()) {
+          throw std::invalid_argument("Mod: invalid element");
+        }
+
+        std::size_t pos = 0;
+        const std::uint64_t val = std::stoull(std::string(tok), &pos, 10);
+        if (pos != tok.size()) {
+          throw std::invalid_argument("Mod: invalid element");
+        }
+
+        if (val >= X) {
+          throw std::invalid_argument("Mod: element out of range");
+        }
+        if (static_cast<std::int64_t>(val) <= last) {
+          throw std::invalid_argument("Mod: elements not strictly increasing");
+        }
+
+        last = static_cast<std::int64_t>(val);
+        mask |= (1ULL << val);
+
+        if (sep == std::string_view::npos) {
+          break;
+        }
+        start = sep + 1;
+      }
+
+      if (mask == 0) {
+        throw std::invalid_argument("Mod: empty set");
+      }
+
+      return Mod({APInt<X>(mask)});
     }
 
     APInt<BW> sample_concrete(std::mt19937 &rng) const {

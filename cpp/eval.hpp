@@ -30,6 +30,34 @@ using xfer_fn_t =
 template <template <std::size_t> class Dom, std::size_t ResBw,
           std::size_t... BWs>
   requires(Domain<Dom, ResBw> && (Domain<Dom, BWs> && ...))
+std::vector<Dom<ResBw>> run_transformer(const std::uintptr_t &xfer_addr,
+                                        const ArgsVec<Dom, BWs...> &to_run) {
+  using ResultD = Dom<ResBw>;
+  static constexpr std::size_t N = sizeof...(BWs);
+  using XferFn = detail::xfer_fn_t<N, ResultD::arity>;
+  using BWConstTuple = std::tuple<std::integral_constant<std::size_t, BWs>...>;
+  constexpr auto idxs = std::make_index_sequence<N>{};
+
+  XferFn xfer_fn = reinterpret_cast<XferFn>(xfer_addr);
+
+  std::vector<ResultD> out;
+  out.reserve(to_run.size());
+
+  for (const auto &row : to_run) {
+    auto packed_res = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+      return xfer_fn(pack<Dom, std::tuple_element_t<Is, BWConstTuple>::value>(
+          std::get<Is>(row).v)...);
+    }(idxs);
+
+    out.emplace_back(ResultD(unpack<Dom, ResBw>(packed_res)));
+  }
+
+  return out;
+}
+
+template <template <std::size_t> class Dom, std::size_t ResBw,
+          std::size_t... BWs>
+  requires(Domain<Dom, ResBw> && (Domain<Dom, BWs> && ...))
 class Eval {
 public:
   static constexpr std::size_t N = sizeof...(BWs);
@@ -38,7 +66,7 @@ public:
   static constexpr std::size_t arity = ResultD::arity;
 
   using ArgsTuple = std::tuple<Dom<BWs>...>;
-  using Row = std::tuple<Dom<BWs>..., ResultD>;
+  using Row = std::tuple<Args<Dom, BWs...>, ResultD>;
   using EvalVec = ToEval<Dom, ResBw, BWs...>;
   using XferFn = detail::xfer_fn_t<N, arity>;
 
@@ -61,8 +89,8 @@ public:
               ResultD::num_levels};
 
     for (const Row &row : toEval) {
-      const ArgsTuple args = take_args(row);
-      const ResultD &best = std::get<N>(row);
+      const ArgsTuple &args = std::get<0>(row);
+      const ResultD &best = std::get<1>(row);
       evalSingle(args, best, r);
     }
 
@@ -70,12 +98,6 @@ public:
   }
 
 private:
-  static ArgsTuple take_args(const Row &row) {
-    return [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-      return ArgsTuple{std::get<Is>(row)...};
-    }(std::make_index_sequence<N>{});
-  }
-
   void evalSingle(const ArgsTuple &args, const ResultD &best,
                   Results &r) const {
     using BWConstTuple =

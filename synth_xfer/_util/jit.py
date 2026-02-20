@@ -1,4 +1,19 @@
+from dataclasses import dataclass
+from typing import Any
+
 import llvmlite.binding as llvm
+
+
+@dataclass(frozen=True)
+class FnPtr:
+    _addr: int
+    _jit: "Jit"
+
+    @property
+    def addr(self) -> int:
+        if self._jit._closed:
+            raise RuntimeError("FnPtr used after Jit was closed")
+        return self._addr
 
 
 class Jit:
@@ -25,10 +40,27 @@ class Jit:
 
     def __init__(self) -> None:
         self.mods: list[llvm.ModuleRef] = []
+        self._closed = False
 
-    def add_mod(self, llvm_ir: str) -> llvm.ModuleRef:
-        mod = self.create_mod(llvm_ir)
-        self.run_passes(mod)
+    def __enter__(self) -> "Jit":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self._closed:
+            return
+        for mod in self.mods:
+            try:
+                self.engine.remove_module(mod)
+            except Exception:
+                pass
+        self.mods.clear()
+        self._closed = True
+
+    def add_mod(self, llvm_ir: Any) -> llvm.ModuleRef:
+        if self._closed:
+            raise RuntimeError("Jit is closed")
+        mod = self._create_mod(str(llvm_ir))
+        self._run_passes(mod)
         self.engine.add_module(mod)
         self.engine.finalize_object()
         self.engine.run_static_constructors()
@@ -36,7 +68,9 @@ class Jit:
 
         return mod
 
-    def create_mod(self, llvm_ir: str) -> llvm.ModuleRef:
+    def _create_mod(self, llvm_ir: str) -> llvm.ModuleRef:
+        if self._closed:
+            raise RuntimeError("Jit is closed")
         mod = llvm.parse_assembly(llvm_ir)
         mod.triple = self.target.triple
         mod.data_layout = str(self.tm.target_data)
@@ -44,7 +78,9 @@ class Jit:
 
         return mod
 
-    def run_passes(self, mod: llvm.ModuleRef):
+    def _run_passes(self, mod: llvm.ModuleRef):
+        if self._closed:
+            raise RuntimeError("Jit is closed")
         pb = llvm.PassBuilder(self.tm, llvm.PipelineTuningOptions())
         mpm = pb.getModulePassManager()
         mpm.add_instruction_combine_pass()
@@ -58,7 +94,12 @@ class Jit:
 
         mpm.run(mod, pb)
 
-    def get_fn_ptr(self, fn: str) -> int:
+    def get_fn_ptr(self, fn: str) -> FnPtr:
+        if self._closed:
+            raise RuntimeError("Jit is closed")
+
         ptr = self.engine.get_function_address(fn)
-        assert ptr != 0
-        return ptr
+        if ptr == 0:
+            raise ValueError(f"Function: {fn!r}, not found in in jit.")
+
+        return FnPtr(ptr, self)

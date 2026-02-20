@@ -53,7 +53,7 @@ public:
 
     ArgsTuple current{};
     for_each_combination<0>(lattices, current, [&](const ArgsTuple &args) {
-      r.emplace_back(std::tuple_cat(args, std::tuple<ResD>{toBestAbst(args)}));
+      r.emplace_back(std::make_tuple(args, toBestAbst(args)));
     });
 
     return r;
@@ -68,7 +68,7 @@ public:
       ArgsTuple args = make_random_args(rng, sampler);
       ResD res = toBestAbst(args);
 
-      r.emplace_back(std::tuple_cat(args, std::tuple<ResD>{res}));
+      r.emplace_back(std::make_tuple(args, res));
     }
 
     return r;
@@ -100,7 +100,7 @@ public:
         }
       }
 
-      r.emplace_back(std::tuple_cat(args, std::tuple<ResD>{res}));
+      r.emplace_back(std::make_tuple(args, res));
     }
 
     return r;

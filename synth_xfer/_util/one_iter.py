@@ -10,7 +10,7 @@ from synth_xfer._util.log import get_logger
 from synth_xfer._util.mcmc_sampler import MCMCSampler
 from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.random import Random
-from synth_xfer._util.solution_set import SolutionSet
+from synth_xfer._util.solution_set import EvalFn, SolutionSet
 
 
 def _build_eval_list(
@@ -51,6 +51,7 @@ def synthesize_one_iteration(
     random: Random,
     solution_set: SolutionSet,
     helper_funcs: HelperFuncs,
+    eval_func: EvalFn,
     inv_temp: int,
     num_unsound_candidates: int,
     ranges: tuple[range, range, range],
@@ -75,7 +76,7 @@ def synthesize_one_iteration(
     transfers = [spl.get_current() for spl in mcmc_samplers]
     func_with_cond_lst = _build_eval_list(transfers, sp_range, p_range, c_range, prec_set)
 
-    cmp_results = solution_set.eval_improve(func_with_cond_lst)
+    cmp_results = solution_set.eval_improve(func_with_cond_lst, eval_func)
 
     for i, cmp in enumerate(cmp_results):
         mcmc_samplers[i].current_cmp = cmp
@@ -106,7 +107,7 @@ def synthesize_one_iteration(
         sample_total += perf_counter() - s
 
         s = perf_counter()
-        cmp_results = solution_set.eval_improve(func_with_cond_lst)
+        cmp_results = solution_set.eval_improve(func_with_cond_lst, eval_func)
         eval_total += perf_counter() - s
 
         s = perf_counter()
@@ -195,6 +196,7 @@ def synthesize_one_iteration(
         candidates_c,
         helper_funcs,
         num_unsound_candidates,
+        eval_func,
     )
     verif_time = perf_counter() - verif_start_time
     iter_time = perf_counter() - iter_start_time

@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <ostream>
 #include <random>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -30,9 +31,6 @@ public:
 
     os << '[' << x.lower().getZExtValue() << ", " << x.upper().getZExtValue()
        << ']';
-
-    if (x.isTop())
-      os << " (top)";
 
     return os << "\n";
   }
@@ -97,6 +95,47 @@ public:
 
   static constexpr UConstRange fromConcrete(const APInt<BW> &x) noexcept {
     return UConstRange({x, x});
+  }
+
+  static UConstRange parse(std::string_view s) {
+    if (s == "(bottom)") {
+      return UConstRange::bottom();
+    }
+
+    if (s.size() < 5 || s.front() != '[' || s.back() != ']') {
+      throw std::invalid_argument("UConstRange: invalid format");
+    }
+
+    const std::size_t comma = s.find(", ");
+    if (comma == std::string_view::npos) {
+      throw std::invalid_argument("UConstRange: invalid format");
+    }
+
+    if (comma == 1 || comma + 2 >= s.size() - 1) {
+      throw std::invalid_argument("UConstRange: invalid format");
+    }
+
+    const std::string_view low_sv = s.substr(1, comma - 1);
+    const std::string_view high_sv =
+        s.substr(comma + 2, s.size() - (comma + 2) - 1);
+
+    std::size_t pos = 0;
+    const std::uint64_t low = std::stoull(std::string(low_sv), &pos, 10);
+    if (pos != low_sv.size()) {
+      throw std::invalid_argument("UConstRange: invalid format");
+    }
+    pos = 0;
+    const std::uint64_t high = std::stoull(std::string(high_sv), &pos, 10);
+    if (pos != high_sv.size()) {
+      throw std::invalid_argument("UConstRange: invalid format");
+    }
+
+    const std::uint64_t max = APInt<BW>::getMaxValue().getZExtValue();
+    if (low > max || high > max) {
+      throw std::invalid_argument("UConstRange: value out of range");
+    }
+
+    return UConstRange({APInt<BW>(low), APInt<BW>(high)});
   }
 
   APInt<BW> sample_concrete(std::mt19937 &rng) const {

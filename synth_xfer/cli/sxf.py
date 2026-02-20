@@ -1,6 +1,6 @@
 from pathlib import Path
 from time import perf_counter
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.domain import AbstractDomain
@@ -14,7 +14,7 @@ from synth_xfer._util.mcmc_sampler import setup_mcmc
 from synth_xfer._util.one_iter import synthesize_one_iteration
 from synth_xfer._util.parse_mlir import HelperFuncs, get_helper_funcs, top_as_xfer
 from synth_xfer._util.random import Random, Sampler
-from synth_xfer._util.solution_set import UnsizedSolutionSet
+from synth_xfer._util.solution_set import EvalFn, UnsizedSolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
 from synth_xfer.cli.args import build_parser, get_sampler
 
@@ -23,14 +23,8 @@ if TYPE_CHECKING:
 
 
 def _eval_helper(
-    to_eval: dict[int, "ToEval"],
-    bws: list[int],
-    helper_funcs: HelperFuncs,
-    jit: Jit,
-) -> Callable[
-    [list[FunctionWithCondition], list[FunctionWithCondition]],
-    list[EvalResult],
-]:
+    to_eval: dict[int, "ToEval"], bws: list[int], helper_funcs: HelperFuncs
+) -> EvalFn:
     def helper(
         xfer: list[FunctionWithCondition],
         base: list[FunctionWithCondition],
@@ -49,16 +43,23 @@ def _eval_helper(
         xfer_names = {bw: [d[bw] for d in xfer_names] for bw in bws}
         base_names = {bw: [d[bw] for d in base_names] for bw in bws}
 
-        jit.add_mod(str(lowerer))
-        xfer_fns = {bw: [jit.get_fn_ptr(x) for x in xfer_names[bw]] for bw in xfer_names}
-        base_fns = {bw: [jit.get_fn_ptr(x) for x in base_names[bw]] for bw in base_names}
+        with Jit() as jit:
+            jit.add_mod(lowerer)
+            xfer_fns = {
+                bw: [jit.get_fn_ptr(x) for x in xfer_names[bw]] for bw in xfer_names
+            }
+            base_fns = {
+                bw: [jit.get_fn_ptr(x) for x in base_names[bw]] for bw in base_names
+            }
 
-        input = {
-            bw: (to_eval[bw], xfer_fns.get(bw, []), base_fns.get(bw, []))
-            for bw in to_eval
-        }
+            input = {
+                bw: (to_eval[bw], xfer_fns.get(bw, []), base_fns.get(bw, []))
+                for bw in to_eval
+            }
 
-        return eval_transfer_func(input)
+            results = eval_transfer_func(input)
+
+        return results
 
     return helper
 
@@ -96,7 +97,6 @@ def run(
     sampler: Sampler,
 ) -> EvalResult:
     logger = get_logger()
-    jit = Jit()
     dsl_ops: DslOpSet | None = load_dsl_ops(dsl_ops_path) if dsl_ops_path else None
 
     EvalResult.init_bw_settings(
@@ -111,22 +111,22 @@ def run(
         random.read_from_file(random_number_file)
 
     helper_funcs = get_helper_funcs(transformer_file, domain)
-
-    start_time = perf_counter()
-    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helper_funcs, jit, sampler)
-    run_time = perf_counter() - start_time
-    logger.perf(f"Enum engine took {run_time:.4f}s")
-
     all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
-    solution_eval_func = _eval_helper(to_eval, all_bws, helper_funcs, jit)
-    solution_set = UnsizedSolutionSet([], solution_eval_func, optimize=optimize)
 
     context = _setup_context(random, False, dsl_ops)
     context_weighted = _setup_context(random, False, dsl_ops)
     context_cond = _setup_context(random, True, dsl_ops)
 
     start_time = perf_counter()
-    init_cmp_res = solution_set.eval_improve([])[0]
+    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helper_funcs, sampler)
+    run_time = perf_counter() - start_time
+    logger.perf(f"Enum engine took {run_time:.4f}s")
+
+    eval_fn = _eval_helper(to_eval, all_bws, helper_funcs)
+    solution_set = UnsizedSolutionSet([], optimize=optimize)
+
+    start_time = perf_counter()
+    init_cmp_res = solution_set.eval_improve([], eval_fn)[0]
     run_time = perf_counter() - start_time
     logger.perf(f"Init Eval took {run_time:.4f}s")
 
@@ -150,7 +150,7 @@ def run(
         if weighted_dsl:
             assert isinstance(solution_set, UnsizedSolutionSet)
             context_weighted.weighted = True
-            solution_set.learn_weights(context_weighted)
+            solution_set.learn_weights(context_weighted, eval_fn)
 
         mcmc_samplers, prec_set, ranges = setup_mcmc(
             helper_funcs.transfer_func,
@@ -170,6 +170,7 @@ def run(
             random,
             solution_set,
             helper_funcs,
+            eval_fn,
             inv_temp,
             num_unsound_candidates,
             ranges,
@@ -183,7 +184,7 @@ def run(
             f"iter{ith_iter}.mlir", "\n".join(map(str, solution_set.solutions))
         )
 
-        final_cmp_res = solution_set.eval_improve([])[0]
+        final_cmp_res = solution_set.eval_improve([], eval_fn)[0]
         lbw_mbw_log = "\n".join(
             f"bw: {res.bitwidth}, dist: {res.dist:.2f}, exact%: {res.get_exact_prop() * 100:.4f}"
             for res in final_cmp_res.get_low_med_res()
@@ -217,10 +218,12 @@ def run(
     lowerer.add_fn(helper_funcs.meet_func)
     lowerer.add_fn(helper_funcs.get_top_func)
     lowerer.add_mod(solution_module, ["solution"])
-    jit.add_mod(str(lowerer))
-    sol_ptrs = {bw: jit.get_fn_ptr(f"solution_{bw}_shim") for bw in all_bws}
-    sol_to_eval = {bw: (to_eval[bw], [sol_ptrs[bw]], []) for bw in all_bws}
-    solution_result = eval_transfer_func(sol_to_eval)[0]
+
+    with Jit() as jit:
+        jit.add_mod(lowerer)
+        sol_ptrs = {bw: jit.get_fn_ptr(f"solution_{bw}_shim") for bw in all_bws}
+        sol_to_eval = {bw: (to_eval[bw], [sol_ptrs[bw]], []) for bw in all_bws}
+        solution_result = eval_transfer_func(sol_to_eval)[0]
 
     solution_exact = solution_result.get_exact_prop() * 100
     print(

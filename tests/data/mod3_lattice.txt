@@ -1,7 +1,7 @@
-eq to {0} mod 3
-eq to {1} mod 3
-eq to {0, 1} mod 3
-eq to {2} mod 3
-eq to {0, 2} mod 3
-eq to {1, 2} mod 3
-(top)
+{0} mod3
+{1} mod3
+{0,1} mod3
+{2} mod3
+{0,2} mod3
+{1,2} mod3
+{0,1,2} mod3

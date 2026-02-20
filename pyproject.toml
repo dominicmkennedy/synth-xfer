@@ -33,6 +33,7 @@ dev = [
 sxf = "synth_xfer.cli.sxf:main"
 benchmark = "synth_xfer.cli.benchmark:main"
 eval-final = "synth_xfer.cli.eval_final:main"
+run-xfer = "synth_xfer.cli.run_xfer:main"
 verify = "synth_xfer.cli.verify:main"
 lower-to-llvm = "synth_xfer.cli.lower_to_llvm:main"
 simplifier = "synth_xfer.cli.simplifier:main"

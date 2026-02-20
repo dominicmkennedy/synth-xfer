@@ -154,26 +154,26 @@ def run(
     top_xfer = lowerer.add_fn(top_mlir, shim=True)
     lowerer.add_mod(sol_module, [xfer_name])
 
-    jit = Jit()
-    jit.add_mod(str(lowerer))
-    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helpers, jit, sampler)
+    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helpers, sampler)
+    with Jit() as jit:
+        jit.add_mod(lowerer)
 
-    eval_input = {
-        bw: (
-            to_eval[bw],
-            [
-                jit.get_fn_ptr(top_xfer[bw].name),
-                jit.get_fn_ptr(f"{xfer_name}_{bw}_shim"),
-            ],
-            [],
-        )
-        for bw in all_bws
-    }
+        eval_input = {
+            bw: (
+                to_eval[bw],
+                [
+                    jit.get_fn_ptr(top_xfer[bw].name),
+                    jit.get_fn_ptr(f"{xfer_name}_{bw}_shim"),
+                ],
+                [],
+            )
+            for bw in all_bws
+        }
 
-    res = eval_transfer_func(eval_input)
-    assert len(res) == 2
+        res = eval_transfer_func(eval_input)
+        assert len(res) == 2
 
-    return (res[0], res[1])
+        return (res[0], res[1])
 
 
 @dataclass(frozen=True)

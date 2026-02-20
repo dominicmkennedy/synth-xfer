@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <ostream>
 #include <random>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -30,9 +31,6 @@ public:
 
     os << '[' << x.lower().getSExtValue() << ", " << x.upper().getSExtValue()
        << ']';
-
-    if (x.isTop())
-      os << " (top)";
 
     return os << "\n";
   }
@@ -97,6 +95,50 @@ public:
 
   static constexpr SConstRange fromConcrete(const APInt<BW> &x) noexcept {
     return SConstRange({x, x});
+  }
+
+  static SConstRange parse(std::string_view s) {
+    if (s == "(bottom)") {
+      return SConstRange::bottom();
+    }
+
+    if (s.size() < 6 || s.front() != '[' || s.back() != ']') {
+      throw std::invalid_argument("SConstRange: invalid format");
+    }
+
+    const std::size_t comma = s.find(", ");
+    if (comma == std::string_view::npos) {
+      throw std::invalid_argument("SConstRange: invalid format");
+    }
+
+    if (comma == 1 || comma + 2 >= s.size() - 1) {
+      throw std::invalid_argument("SConstRange: invalid format");
+    }
+
+    const std::string_view low_sv = s.substr(1, comma - 1);
+    const std::string_view high_sv =
+        s.substr(comma + 2, s.size() - (comma + 2) - 1);
+
+    std::size_t pos = 0;
+    const std::int64_t low = std::stoll(std::string(low_sv), &pos, 10);
+    if (pos != low_sv.size()) {
+      throw std::invalid_argument("SConstRange: invalid format");
+    }
+    pos = 0;
+    const std::int64_t high = std::stoll(std::string(high_sv), &pos, 10);
+    if (pos != high_sv.size()) {
+      throw std::invalid_argument("SConstRange: invalid format");
+    }
+
+    const std::int64_t minv = APInt<BW>::getSignedMinValue().getSExtValue();
+    const std::int64_t maxv = APInt<BW>::getSignedMaxValue().getSExtValue();
+
+    if (low < minv || low > maxv || high < minv || high > maxv) {
+      throw std::invalid_argument("SConstRange: value out of range");
+    }
+
+    return SConstRange({APInt<BW>(static_cast<std::uint64_t>(low)),
+                        APInt<BW>(static_cast<std::uint64_t>(high))});
   }
 
   APInt<BW> sample_concrete(std::mt19937 &rng) const {
