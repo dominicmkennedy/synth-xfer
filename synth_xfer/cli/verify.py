@@ -229,7 +229,7 @@ def main() -> None:
                 print(f"{bw:<2} bits | timeout | took {args.timeout}s")
             else:
                 print(
-                    f"Verifier TIMEOUT at {bw}-bits.\nTimeout was {args.timeout} second."
+                    f"Verifier TIMEOUT at {bw}-bits.\nTimeout was {args.timeout} seconds."
                 )
                 break
         elif is_sound:

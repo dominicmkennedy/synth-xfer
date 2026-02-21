@@ -93,7 +93,7 @@ def _lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
 def _add_poison_to_conc_fn(concrete_func: FuncOp) -> FuncOp:
     """
     Input: a concrete function with shape (trans.integer, trans.integer) -> trans.integer
-    Output: a new function with shape (tuple<trans.integer, bool>
+    Output: a new function with shape (tuple<trans.integer, bool>)
     """
     result_func = concrete_func.clone()
     block = result_func.body.block
@@ -109,7 +109,6 @@ def _add_poison_to_conc_fn(concrete_func: FuncOp) -> FuncOp:
     last_op = block.last_op
     assert last_op is not None
     poison_val = ConstantBoolOp(False)
-    poison_val.is_ancestor
     new_return_val = MakeOp([last_op.operands[0], poison_val.result])
     block.insert_ops_before([poison_val, new_return_val], last_op)
     last_op.operands[0] = new_return_val.result
