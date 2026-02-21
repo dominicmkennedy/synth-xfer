@@ -1,5 +1,12 @@
+from dataclasses import dataclass
 from io import StringIO
+import re
+from typing import Any, Iterator, Literal, cast
 
+from pysmt.environment import Environment
+from pysmt.exceptions import SolverReturnedUnknownResultError
+from pysmt.solvers.solver import Model as PySMTModel
+from pysmt.typing import BOOL, BVType
 from xdsl.context import Context
 from xdsl.dialects.builtin import FunctionType, IntegerType, ModuleOp
 from xdsl.dialects.func import FuncOp, ReturnOp
@@ -41,15 +48,162 @@ from xdsl_smt.utils.transfer_function_util import (
     SMTTransferFunction,
     TransferFunction,
 )
-from z3 import ModelRef, Solver, parse_smt2_string, sat, unknown
 
 # TODO do we still need this
 _TMP_MODULE: list[ModuleOp] = []
 
+_DECLARE_CONST_BV_RE = re.compile(
+    r"^\(declare-const\s+(\S+)\s+\(_\s+BitVec\s+(\d+)\s*\)\)\s*$"
+)
+_DECLARE_CONST_BOOL_RE = re.compile(r"^\(declare-const\s+(\S+)\s+Bool\)\s*$")
+_DECLARE_FUN_BV_RE = re.compile(
+    r"^\(declare-fun\s+(\S+)\s+\(\)\s+\(_\s+BitVec\s+(\d+)\s*\)\)\s*$"
+)
+_DECLARE_FUN_BOOL_RE = re.compile(r"^\(declare-fun\s+(\S+)\s+\(\)\s+Bool\)\s*$")
+SMTSolverName = Literal["z3", "cvc5"]
+
+
+@dataclass(frozen=True)
+class BVCounterexampleModel:
+    assignments: dict[str, int]
+
+    def __iter__(self) -> Iterator[tuple[str, int]]:
+        return iter(self.assignments.items())
+
+
+def _ensure_z3_api() -> None:
+    """
+    PySMT expects the z3 python package to export solver APIs at top-level.
+    Some environments expose them under z3.z3 only, so mirror those symbols.
+    """
+    import z3
+
+    if hasattr(z3, "set_param"):
+        return
+
+    import z3.z3 as z3_impl
+
+    for name in dir(z3_impl):
+        if not hasattr(z3, name):
+            setattr(z3, name, getattr(z3_impl, name))
+
+
+def _declare_smt_symbols(env: Environment, smtlib: str) -> None:
+    """
+    Register declared constants in the PySMT environment so that model symbols
+    round-trip to original names instead of anonymous backend names.
+    """
+    manager = env.formula_manager
+    declared: set[str] = set()
+    for raw_line in smtlib.splitlines():
+        line = raw_line.strip()
+
+        match = _DECLARE_CONST_BV_RE.match(line) or _DECLARE_FUN_BV_RE.match(line)
+        if match is not None:
+            name = match.group(1)
+            if name not in declared:
+                manager.Symbol(name, BVType(int(match.group(2))))
+                declared.add(name)
+            continue
+
+        match = _DECLARE_CONST_BOOL_RE.match(line) or _DECLARE_FUN_BOOL_RE.match(line)
+        if match is not None:
+            name = match.group(1)
+            if name not in declared:
+                manager.Symbol(name, BOOL)
+                declared.add(name)
+
+
+def _strip_check_sat(smtlib: str) -> str:
+    lines = [line for line in smtlib.splitlines() if line.strip() != "(check-sat)"]
+    return "\n".join(lines)
+
+
+def _ensure_set_logic(smtlib: str) -> str:
+    for line in smtlib.splitlines():
+        if line.strip().startswith("(set-logic "):
+            return smtlib
+    return "(set-logic ALL)\n" + smtlib
+
+
+def _extract_bv_assignments(model: PySMTModel) -> BVCounterexampleModel:
+    assignments: dict[str, int] = {}
+    for symbol, value in model:
+        if symbol.is_symbol() and value.is_bv_constant():
+            assignments[symbol.symbol_name()] = value.bv_unsigned_value()
+    return BVCounterexampleModel(assignments)
+
+
+def _verify_pattern_z3(smtlib: str, timeout: int) -> tuple[bool | None, BVCounterexampleModel | None]:
+    env = Environment()
+    _declare_smt_symbols(env, smtlib)
+    with env.factory.Solver(name="z3", solver_options={"timeout": timeout * 1000}) as s:
+        solver_impl = cast(Any, s)
+        solver_impl.z3.from_string(_strip_check_sat(smtlib))
+        try:
+            is_sat = s.solve()
+        except SolverReturnedUnknownResultError:
+            return None, None
+
+        if is_sat:
+            return False, _extract_bv_assignments(s.get_model())
+        return True, None
+
+
+def _verify_pattern_cvc5(
+    smtlib: str, timeout: int
+) -> tuple[bool | None, BVCounterexampleModel | None]:
+    try:
+        import cvc5 as cvc5_module
+    except ImportError as e:
+        raise RuntimeError("cvc5 python package is required for --solver cvc5") from e
+    cvc5 = cast(Any, cvc5_module)
+
+    solver = cvc5.Solver()
+    solver.setOption("produce-models", "true")
+    solver.setOption("tlimit-per", str(timeout * 1000))
+    parser = cvc5.InputParser(solver)
+    parser.setStringInput(
+        cvc5.InputLanguage.SMT_LIB_2_6, _ensure_set_logic(smtlib), "query.smt2"
+    )
+    symbol_manager = parser.getSymbolManager()
+    result: str | None = None
+    while not parser.done():
+        command = parser.nextCommand()
+        if command.isNull():
+            break
+        out = command.invoke(solver, symbol_manager)
+        if command.getCommandName() == "check-sat":
+            result = str(out).strip()
+
+    if result is None:
+        result_obj = solver.checkSat()
+        if result_obj.isSat():
+            result = "sat"
+        elif result_obj.isUnsat():
+            result = "unsat"
+        else:
+            result = "unknown"
+
+    if result.startswith("unknown"):
+        return None, None
+    if result.startswith("unsat"):
+        return True, None
+    if not result.startswith("sat"):
+        raise RuntimeError(f"Unexpected cvc5 check-sat result: {result}")
+
+    assignments: dict[str, int] = {}
+    for term in symbol_manager.getDeclaredTerms():
+        sort = term.getSort()
+        if sort.isBitVector():
+            value = solver.getValue(term)
+            assignments[str(term)] = int(value.getBitVectorValue(10))
+    return False, BVCounterexampleModel(assignments)
+
 
 def _verify_pattern(
-    ctx: Context, op: ModuleOp, timeout: int
-) -> tuple[bool | None, ModelRef | None]:
+    ctx: Context, op: ModuleOp, timeout: int, solver_name: SMTSolverName
+) -> tuple[bool | None, BVCounterexampleModel | None]:
     cloned_op = op.clone()
     LowerPairs().apply(ctx, cloned_op)
     CanonicalizePass().apply(ctx, cloned_op)
@@ -57,18 +211,13 @@ def _verify_pattern(
 
     stream = StringIO()
     print_to_smtlib(cloned_op, stream)
-
-    s = Solver()
-    s.set(timeout=timeout * 1000)
-    s.add(parse_smt2_string(stream.getvalue()))
-    r = s.check()
-
-    if r == unknown:
-        return None, None
-    elif r == sat:
-        return False, s.model()
-    else:
-        return True, None
+    smtlib = stream.getvalue()
+    _ensure_z3_api()
+    if solver_name == "z3":
+        return _verify_pattern_z3(smtlib, timeout)
+    if solver_name == "cvc5":
+        return _verify_pattern_cvc5(smtlib, timeout)
+    raise ValueError(f"Unsupported solver: {solver_name}")
 
 
 def _lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
@@ -143,7 +292,8 @@ def _soundness_check(
     int_attr: dict[int, int],
     ctx: Context,
     timeout: int,
-) -> tuple[bool | None, ModelRef | None]:
+    solver_name: SMTSolverName,
+) -> tuple[bool | None, BVCounterexampleModel | None]:
     query_module = ModuleOp([])
     if smt_transfer_function.is_forward:
         added_ops: list[Operation] = forward_soundness_check(
@@ -162,7 +312,7 @@ def _soundness_check(
     query_module.body.block.add_ops(added_ops)
     FunctionCallInline(True, {}).apply(ctx, query_module)
 
-    return _verify_pattern(ctx, query_module, timeout)
+    return _verify_pattern(ctx, query_module, timeout, solver_name)
 
 
 def _verify_smt_transfer_function(
@@ -171,7 +321,8 @@ def _verify_smt_transfer_function(
     instance_constraint: FunctionCollection,
     ctx: Context,
     timeout: int,
-) -> tuple[bool | None, ModelRef | None]:
+    solver_name: SMTSolverName,
+) -> tuple[bool | None, BVCounterexampleModel | None]:
     assert smt_transfer_function.concrete_function is not None
     assert smt_transfer_function.transfer_function is not None
 
@@ -183,6 +334,7 @@ def _verify_smt_transfer_function(
         int_attr,
         ctx,
         timeout,
+        solver_name,
     )
 
     return soundness_result
@@ -257,7 +409,8 @@ def verify_transfer_function(
     helper_funcs: list[FuncOp],
     width: int,
     timeout: int,
-) -> tuple[bool | None, ModelRef | None]:
+    solver_name: SMTSolverName = "z3",
+) -> tuple[bool | None, BVCounterexampleModel | None]:
     ctx = Context()
 
     (
@@ -319,4 +472,5 @@ def verify_transfer_function(
         instance_constraint,
         ctx,
         timeout,
+        solver_name,
     )

@@ -1,10 +1,10 @@
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 from time import perf_counter
+from typing import cast
 
 from xdsl.dialects.func import FuncOp
 from xdsl.parser import ModuleOp
-from z3 import BitVecNumRef, FuncDeclRef, ModelRef
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import run_concrete_fn
@@ -14,7 +14,11 @@ from synth_xfer._util.parse_mlir import (
     get_helper_funcs,
     parse_mlir_mod,
 )
-from synth_xfer._util.verifier import verify_transfer_function
+from synth_xfer._util.verifier import (
+    BVCounterexampleModel,
+    SMTSolverName,
+    verify_transfer_function,
+)
 from synth_xfer.cli.args import int_list
 from synth_xfer.cli.eval_final import resolve_xfer_name
 from synth_xfer.cli.run_xfer import run_xfer_fn
@@ -26,7 +30,8 @@ def verify_function(
     xfer_helpers: list[FuncOp | None],
     helper_funcs: HelperFuncs,
     timeout: int,
-) -> tuple[bool | None, ModelRef | None]:
+    solver_name: SMTSolverName = "z3",
+) -> tuple[bool | None, BVCounterexampleModel | None]:
     xfer_helpers += [
         helper_funcs.get_top_func,
         helper_funcs.instance_constraint_func,
@@ -36,7 +41,9 @@ def verify_function(
     ]
     helpers = [x for x in xfer_helpers if x is not None]
 
-    return verify_transfer_function(func, helper_funcs.crt_func, helpers, bw, timeout)
+    return verify_transfer_function(
+        func, helper_funcs.crt_func, helpers, bw, timeout, solver_name
+    )
 
 
 def _register_parser() -> Namespace:
@@ -61,7 +68,14 @@ def _register_parser() -> Namespace:
     p.add_argument("--op", type=Path, required=True, help="Concrete op")
     p.add_argument("--xfer-file", type=Path, required=True, help="Transformer file")
     p.add_argument("--xfer-name", type=str, help="Transformer to verify")
-    p.add_argument("--timeout", type=int, default=30, help="z3 timeout")
+    p.add_argument("--timeout", type=int, default=30, help="SMT solver timeout")
+    p.add_argument(
+        "--solver",
+        type=str,
+        choices=["z3", "cvc5"],
+        default="z3",
+        help="SMT backend to use",
+    )
     p.add_argument(
         "--continue-unsound",
         action="store_true",
@@ -78,21 +92,15 @@ def _register_parser() -> Namespace:
 
 
 def _parse_counter_example(
-    model: ModelRef, domain: AbstractDomain, bw: int
+    model: BVCounterexampleModel, domain: AbstractDomain, bw: int, func_arity: int
 ) -> tuple[list[int], list[str]]:
     # TODO doesn't support all domains yet.
     assert domain.vec_size == 2
-
-    func_arity = len(model) // 3
-    abst0_args: dict[int, BitVecNumRef] = {}
-    abst1_args: dict[int, BitVecNumRef] = {}
+    abst0_args: dict[int, int] = {}
+    abst1_args: dict[int, int] = {}
     conc_args: dict[int, int] = {}
 
-    for var_ref in model:
-        var_name = str(var_ref)
-        var_val = model[var_ref]
-        assert isinstance(var_ref, FuncDeclRef)
-        assert isinstance(var_val, BitVecNumRef)
+    for var_name, var_val in model:
 
         if var_name == "$const_first":
             abst0_args[0] = var_val
@@ -104,7 +112,7 @@ def _parse_counter_example(
 
             if number >= func_arity - 1:
                 arg_number = number - (func_arity - 1)
-                conc_args[arg_number] = var_val.as_long()
+                conc_args[arg_number] = var_val
             else:
                 arg_number = number + 1
                 abst0_args[arg_number] = var_val
@@ -112,7 +120,7 @@ def _parse_counter_example(
             number = int(var_name.split("$const_second_first_")[1])
             abst1_args[number + 1] = var_val
         else:
-            raise ValueError(f"Unexpected var name: {var_name}")
+            continue
 
     assert len(abst0_args) == func_arity
     assert len(abst1_args) == func_arity
@@ -140,11 +148,11 @@ def _format_concrete(x: int, domain: AbstractDomain, bw: int) -> str:
 
 
 def _bv_ref_to_abst_str(
-    domain: AbstractDomain, bw: int, abst_bv: tuple[BitVecNumRef, BitVecNumRef]
+    domain: AbstractDomain, bw: int, abst_bv: tuple[int, int]
 ) -> str:
     if domain == AbstractDomain.KnownBits:
-        known_zeros = bin(abst_bv[0].as_long())[2:].zfill(bw)
-        known_ones = bin(abst_bv[1].as_long())[2:].zfill(bw)
+        known_zeros = bin(abst_bv[0])[2:].zfill(bw)
+        known_ones = bin(abst_bv[1])[2:].zfill(bw)
         abst_val_str = ""
         for zero, one in zip(known_zeros, known_ones):
             if zero == "0" and one == "0":
@@ -157,18 +165,23 @@ def _bv_ref_to_abst_str(
                 abst_val_str = "(bottom)"
                 break
     elif domain == AbstractDomain.UConstRange:
-        abst_val_str = f"[{abst_bv[0].as_long()}, {abst_bv[1].as_long()}]"
+        abst_val_str = f"[{abst_bv[0]}, {abst_bv[1]}]"
     elif domain == AbstractDomain.SConstRange:
-        abst_val_str = f"[{abst_bv[0].as_signed_long()}, {abst_bv[1].as_signed_long()}]"
+        abst_val_str = f"[{_signed_from_bv(abst_bv[0], bw)}, {_signed_from_bv(abst_bv[1], bw)}]"
     else:
         raise ValueError(f"Unsupported domain: {domain}")
 
     return abst_val_str
 
 
+def _signed_from_bv(value: int, bw: int) -> int:
+    sign_bit = 1 << (bw - 1)
+    return value - (1 << bw) if value & sign_bit else value
+
+
 def _print_counterexample(
     op_name: str,
-    model: ModelRef,
+    model: BVCounterexampleModel,
     bw: int,
     domain: AbstractDomain,
     mlir_mod: ModuleOp,
@@ -176,8 +189,9 @@ def _print_counterexample(
     helper_funcs: HelperFuncs,
     no_exec: bool,
 ):
-    assert isinstance(model, ModelRef)
-    conc_args, abst_args = _parse_counter_example(model, domain, bw)
+    assert isinstance(model, BVCounterexampleModel)
+    func_arity = len(helper_funcs.crt_func.args)
+    conc_args, abst_args = _parse_counter_example(model, domain, bw, func_arity)
     conc_args_str = [_format_concrete(x, domain, bw) for x in conc_args]
     if no_exec:
         abst_output = None
@@ -208,6 +222,7 @@ def _print_counterexample(
 
 def main() -> None:
     args = _register_parser()
+    solver_name = cast(SMTSolverName, args.solver)
     domain = AbstractDomain[args.domain]
     mlir_mod = parse_mlir_mod(args.xfer_file)
     xfer_fns = get_fns(mlir_mod)
@@ -220,7 +235,12 @@ def main() -> None:
     for bw in args.bw:
         start_time = perf_counter()
         is_sound, model = verify_function(
-            bw, xfer_fn, list(xfer_fns.values()), helper_funcs, args.timeout
+            bw,
+            xfer_fn,
+            list(xfer_fns.values()),
+            helper_funcs,
+            args.timeout,
+            solver_name,
         )
         run_time = perf_counter() - start_time
 
@@ -239,7 +259,7 @@ def main() -> None:
             print(f"Verifier UNSOUND at {bw}-bits. Took {run_time:.4f}s.")
             print("Counterexample:")
 
-            assert isinstance(model, ModelRef)
+            assert isinstance(model, BVCounterexampleModel)
             _print_counterexample(
                 str(args.op.stem),
                 model,

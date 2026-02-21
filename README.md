@@ -117,7 +117,8 @@ sxf mlir/Operations/Add.mlir          \
 | `--bw <list[int]>`   | Bitwidth(s) to verify at (e.g. `-bw 4`, `-bw 4-64` or `-bw 4,8,16`).                                                                               |
 | `--domain <Name>`    | Abstract domain semantics to verify with (e.g., `KnownBits`, `UConstRange`, `SConstRange`).                                                        |
 | `--op <Path>`        | Path to the concrete operation (`.mlir` file), for the concrete semantics to verify with.                                                          |
-| `--timeout <int>`    | Timeout flag (in seconds) to pass to z3 (this is a per bit-width timeout).                                                                         |
+| `--timeout <int>`    | Timeout flag (in seconds) to pass to the SMT solver (this is a per bit-width timeout).                                                             |
+| `--solver <name>`    | SMT backend to use for verification (`z3` or `cvc5`; default: `z3`).                                                                                |
 
 For example:
 ```bash
