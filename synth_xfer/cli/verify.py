@@ -109,8 +109,6 @@ def _parse_counter_example(
         elif var_name.startswith("$const_second_first_"):
             number = int(var_name.split("$const_second_first_")[1])
             abst1_args[number + 1] = var_val
-        else:
-            raise ValueError(f"Unexpected var name: {var_name}")
 
     assert len(abst0_args) == func_arity
     assert len(abst1_args) == func_arity
@@ -182,7 +180,13 @@ def _print_counterexample(
         abst_output = None
         conc_output = None
     else:
-        abst_output = run_xfer_fn(domain, bw, [tuple(abst_args)], mlir_mod, xfer_name)[0]  # type: ignore
+        try:
+            abst_output = run_xfer_fn(
+                domain, bw, [tuple(abst_args)], mlir_mod, xfer_name
+            )[0]  # type: ignore
+        except ImportError as e:
+            abst_output = None
+            print(f"Warning: Could not execute due {e}")
         conc_output = run_concrete_fn(helper_funcs, bw, [tuple(conc_args)])[0]
         conc_output = (
             _format_concrete(conc_output, domain, bw)
