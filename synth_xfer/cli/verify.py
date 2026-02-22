@@ -78,12 +78,10 @@ def _register_parser() -> Namespace:
 
 
 def _parse_counter_example(
-    model: ModelRef, domain: AbstractDomain, bw: int
+    model: ModelRef, domain: AbstractDomain, bw: int, func_arity: int
 ) -> tuple[list[int], list[str]]:
     # TODO doesn't support all domains yet.
     assert domain.vec_size == 2
-
-    func_arity = len(model) // 3
     abst0_args: dict[int, BitVecNumRef] = {}
     abst1_args: dict[int, BitVecNumRef] = {}
     conc_args: dict[int, int] = {}
@@ -177,7 +175,8 @@ def _print_counterexample(
     no_exec: bool,
 ):
     assert isinstance(model, ModelRef)
-    conc_args, abst_args = _parse_counter_example(model, domain, bw)
+    func_arity = len(helper_funcs.crt_func.args)
+    conc_args, abst_args = _parse_counter_example(model, domain, bw, func_arity)
     conc_args_str = [_format_concrete(x, domain, bw) for x in conc_args]
     if no_exec:
         abst_output = None
