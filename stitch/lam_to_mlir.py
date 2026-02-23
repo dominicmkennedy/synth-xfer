@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""Convert stitch lambda calculus (.lam) back to MLIR.
+
+Usage:
+    python lam_to_mlir.py file.lam [file2.lam ...]
+    python lam_to_mlir.py file.lam -o out.mlir
+
+Each line of the input is treated as one lambda expression and is emitted as
+one func.func definition.  A single-function file is emitted bare; a
+multi-function file is wrapped in a builtin.module { ... } block.
+
+Encoding conventions (must match mlir_to_lam.py):
+  * Outer lambdas  →  function arguments (%arg0, %arg1, …)
+  * ((lam body) expr)  →  SSA let-binding; introduces a fresh %vN variable
+  * (prim $i $j …)  →  primitive application with de Bruijn variable references
+  * Attribute suffix: transfer.get_0 → "transfer.get"(...) {index = 0}
+                      transfer.cmp_6 → "transfer.cmp"(...) {predicate = 6 : i64}
+                      transfer.constant_1 → "transfer.constant"(...) {value = 1 : index}
+                      arith.constant_1   → "arith.constant"() {value = 1 : i1}
+"""
+
+import re
+import sys
+from pathlib import Path
+
+
+# ── MLIR types ────────────────────────────────────────────────────────────────
+
+INT  = "!transfer.integer"
+ABS  = "!transfer.abs_value<[!transfer.integer, !transfer.integer]>"
+BOOL = "i1"
+
+
+# ── Attribute suffix → MLIR attribute dict ────────────────────────────────────
+
+# Maps the base op name to (attribute_name, optional_type_qualifier).
+_ATTR_MAP: dict[str, tuple[str, str | None]] = {
+    "transfer.get":      ("index",     None),
+    "transfer.constant": ("value",     "index"),
+    "transfer.cmp":      ("predicate", "i64"),
+    "arith.constant":    ("value",     "i1"),
+}
+
+
+def _decode_op(encoded: str) -> tuple[str, str]:
+    """Split an encoded primitive into (mlir_op_name, attr_dict_string).
+
+    Examples:
+        'transfer.get_0'  -> ('transfer.get',  '{index = 0}')
+        'transfer.cmp_6'  -> ('transfer.cmp',  '{predicate = 6 : i64}')
+        'transfer.add'    -> ('transfer.add',  '')
+        'arith.constant_1'-> ('arith.constant','{value = 1 : i1}')
+    """
+    m = re.match(r'^(.+?)_(-?\d+)$', encoded)
+    if m:
+        base, val = m.group(1), m.group(2)
+        if base in _ATTR_MAP:
+            attr_name, attr_ty = _ATTR_MAP[base]
+            if attr_ty:
+                return base, f'{{{attr_name} = {val} : {attr_ty}}}'
+            else:
+                return base, f'{{{attr_name} = {val}}}'
+    return encoded, ''
+
+
+# ── Type inference ────────────────────────────────────────────────────────────
+
+def _result_type(op: str, operand_types: list[str]) -> str:
+    """Infer the MLIR result type of a decoded op."""
+    # Boolean-valued results
+    if op.startswith('transfer.cmp_'):
+        return BOOL
+    if op in {'arith.andi', 'arith.ori', 'arith.xori'}:
+        return BOOL
+    overflow_prefixes = (
+        'transfer.sadd_overflow', 'transfer.ssub_overflow',
+        'transfer.smul_overflow', 'transfer.uadd_overflow',
+        'transfer.usub_overflow', 'transfer.umul_overflow',
+        'transfer.sshl_overflow', 'transfer.ushl_overflow',
+    )
+    if any(op.startswith(p) for p in overflow_prefixes):
+        return BOOL
+
+    # Abstract-value results
+    if op == 'transfer.make':
+        return ABS
+
+    # Select: result type mirrors the value operands (positions 1 and 2)
+    if op == 'transfer.select' and len(operand_types) >= 2:
+        return operand_types[1]
+
+    # Default: integer bit-vector
+    return INT
+
+
+def _expected_arg_type(op: str, arg_idx: int) -> str | None:
+    """What type does op expect at operand position arg_idx?  None = unknown."""
+    # transfer.get_N (digit suffix) extracts from an abstract value
+    if re.match(r'^transfer\.get_\d+$', op):
+        return ABS
+    if op == 'transfer.make':
+        return INT
+    if op in {'arith.andi', 'arith.ori', 'arith.xori'}:
+        return BOOL
+    if op == 'transfer.select' and arg_idx == 0:
+        return BOOL
+    if op.startswith('transfer.') or op.startswith('arith.'):
+        return INT
+    return None  # function calls and unknown primitives
+
+
+# ── AST ───────────────────────────────────────────────────────────────────────
+
+class _Lam:
+    __slots__ = ('body',)
+    def __init__(self, body): self.body = body
+
+class _App:
+    __slots__ = ('func', 'arg')
+    def __init__(self, func, arg): self.func = func; self.arg = arg
+
+class _Var:
+    __slots__ = ('index',)
+    def __init__(self, index): self.index = index
+
+class _Prim:
+    __slots__ = ('name',)
+    def __init__(self, name): self.name = name
+
+
+# ── Parser ────────────────────────────────────────────────────────────────────
+
+def _tokenize(s: str) -> list[str]:
+    return re.findall(r'\(|\)|\$\d+|[^\s()]+', s)
+
+
+def _as_expr(item):
+    """Convert a raw stack item (str keyword or AST node) to an AST node."""
+    return _Prim(item) if isinstance(item, str) else item
+
+
+def parse_lam(s: str):
+    """Parse a stitch lambda calculus expression iteratively (no recursion limit)."""
+    tokens = _tokenize(s.strip())
+    if not tokens:
+        raise ValueError("Empty expression")
+
+    # stack: list of in-progress groups, each group is a list of items
+    # (strings for unresolved keywords/primitives, or AST nodes).
+    stack: list[list] = []
+    result = None
+
+    for tok in tokens:
+        if tok == '(':
+            stack.append([])
+
+        elif tok == ')':
+            if not stack:
+                raise ValueError("Unexpected ')'")
+            group = stack.pop()
+            if not group:
+                raise ValueError("Empty group '()'")
+
+            first = group[0]
+            rest  = group[1:]
+
+            if first in ('lam', 'lambda'):
+                if len(rest) != 1:
+                    raise ValueError(f"lam expects 1 body, got {len(rest)}")
+                expr = _Lam(_as_expr(rest[0]))
+            elif first == 'app':
+                if len(rest) != 2:
+                    raise ValueError(f"app expects 2 args, got {len(rest)}")
+                expr = _App(_as_expr(rest[0]), _as_expr(rest[1]))
+            else:
+                # (f a b …) — left-associative curried application
+                expr = _as_expr(first)
+                for item in rest:
+                    expr = _App(expr, _as_expr(item))
+
+            if stack:
+                stack[-1].append(expr)
+            else:
+                result = expr
+
+        elif tok.startswith('$'):
+            var = _Var(int(tok[1:]))
+            if stack:
+                stack[-1].append(var)
+            else:
+                result = var
+
+        else:
+            # Primitive name — keep as str so 'lam'/'app' are recognized later
+            if stack:
+                stack[-1].append(tok)
+            else:
+                result = _Prim(tok)
+
+    if stack:
+        raise ValueError(f"Unclosed '(': {len(stack)} groups still open")
+    if result is None:
+        raise ValueError("No expression found")
+    return result
+
+
+# ── SSA decoding ──────────────────────────────────────────────────────────────
+
+def _collect_app(expr) -> tuple:
+    """Flatten a left-associative App chain into (head, [arg1, arg2, …])."""
+    args: list = []
+    while isinstance(expr, _App):
+        args.insert(0, expr.arg)
+        expr = expr.func
+    return expr, args
+
+
+def _extract_op(expr, scope: list[str]) -> tuple[str, list[str]]:
+    """Extract (op_name, [operand_var_names]) from a primitive application."""
+    head, args = _collect_app(expr)
+
+    if isinstance(head, _Prim):
+        op_name = head.name
+    elif isinstance(head, _Var):
+        op_name = scope[head.index]
+    else:
+        raise ValueError(f"Cannot extract op from {type(head).__name__}")
+
+    operands: list[str] = []
+    for a in args:
+        if isinstance(a, _Var):
+            operands.append(scope[a.index])
+        elif isinstance(a, _Prim):
+            # Bare primitive used as a value (e.g. a nullary constant)
+            operands.append(a.name)
+        else:
+            raise ValueError(f"Non-trivial operand: {type(a).__name__}")
+
+    return op_name, operands
+
+
+def decode_function(lam_expr) -> tuple[list[str], list[tuple], str]:
+    """Decode a full lambda expression into SSA components.
+
+    Returns:
+        arg_names   – ['%arg0', '%arg1', ...]
+        assignments – [('%vN', 'mlir.op', ['%x', '%y', ...]), ...]
+        ret_var     – variable name returned by the function
+    """
+    # Peel outer Lam nodes → function arguments.
+    arg_names: list[str] = []
+    body = lam_expr
+    while isinstance(body, _Lam):
+        arg_names.append(f'%arg{len(arg_names)}')
+        body = body.body
+
+    # After peeling n args, the innermost lambda bound arg[n-1] as $0.
+    scope: list[str] = list(reversed(arg_names))
+    assignments: list[tuple] = []
+    counter = 0
+
+    # Iterative decoding: walk the let-binding chain without recursion.
+    # Each step is: body = App(Lam(inner), val_expr)  →  process val_expr,
+    # bind result, continue with inner.
+    expr = body
+    while True:
+        if isinstance(expr, _Var):
+            ret_var = scope[expr.index]
+            break
+
+        if isinstance(expr, _App) and isinstance(expr.func, _Lam):
+            # Let-binding: ((lam inner) val_expr)
+            rv = f'%v{counter}'
+            counter += 1
+            op, ops = _extract_op(expr.arg, scope)
+            assignments.append((rv, op, ops))
+            scope = [rv] + scope
+            expr = expr.func.body  # continue with inner body
+            continue
+
+        # Non-let application or bare primitive at the innermost position:
+        # emit one final assignment and use that as the return value.
+        rv = f'%v{counter}'
+        counter += 1
+        op, ops = _extract_op(expr, scope)
+        assignments.append((rv, op, ops))
+        ret_var = rv
+        break
+
+    return arg_names, assignments, ret_var
+
+
+# ── MLIR generation ───────────────────────────────────────────────────────────
+
+def function_to_mlir(func_name: str,
+                     arg_names: list[str],
+                     assignments: list[tuple],
+                     ret_var: str) -> str:
+    """Generate a func.func MLIR definition."""
+
+    type_env: dict[str, str] = {}
+
+    # ── Infer argument types from their first usage ──────────────────────────
+    arg_set = set(arg_names)
+    for _rv, op, operand_vars in assignments:
+        for idx, var in enumerate(operand_vars):
+            if var in arg_set and var not in type_env:
+                exp = _expected_arg_type(op, idx)
+                if exp is not None:
+                    type_env[var] = exp
+
+    # Default unresolved args to ABS (most common case in this corpus).
+    for a in arg_names:
+        type_env.setdefault(a, ABS)
+
+    # ── Forward-propagate result types; emit MLIR lines ──────────────────────
+    body_lines: list[str] = []
+
+    for result_var, op_name, operand_vars in assignments:
+        op_types = [type_env.get(v, INT) for v in operand_vars]
+        res_ty = _result_type(op_name, op_types)
+        type_env[result_var] = res_ty
+
+        mlir_op, attr_str = _decode_op(op_name)
+        ops_str   = ', '.join(operand_vars)
+        types_str = ', '.join(op_types)
+
+        # Ops with a '.' in their name are dialect ops → quoted generic form.
+        # Names without '.' came from func.call → emit as func.call.
+        if '.' in mlir_op:
+            op_expr = f'"{mlir_op}"({ops_str})'
+        else:
+            op_expr = f'func.call @{mlir_op}({ops_str})'
+
+        if attr_str:
+            line = f'  {result_var} = {op_expr} {attr_str} : ({types_str}) -> {res_ty}'
+        else:
+            line = f'  {result_var} = {op_expr} : ({types_str}) -> {res_ty}'
+
+        body_lines.append(line)
+
+    ret_ty = type_env.get(ret_var, ABS)
+    body_lines.append(f'  func.return {ret_var} : {ret_ty}')
+
+    # ── Function header ───────────────────────────────────────────────────────
+    arg_sig = ', '.join(f'{a} : {type_env[a]}' for a in arg_names)
+
+    return '\n'.join([
+        f'func.func @{func_name}({arg_sig}) -> {ret_ty} {{',
+        *body_lines,
+        '}',
+    ])
+
+
+# ── File processing ───────────────────────────────────────────────────────────
+
+def lam_file_to_mlir(path: Path) -> str:
+    """Convert a .lam file to MLIR text."""
+    stem = path.stem
+    lam_lines = [ln.strip() for ln in path.read_text().splitlines() if ln.strip()]
+    if not lam_lines:
+        return ''
+
+    funcs: list[str] = []
+    for i, line in enumerate(lam_lines):
+        func_name = stem if len(lam_lines) == 1 else f'{stem}_{i}'
+        try:
+            expr = parse_lam(line)
+            arg_names, assignments, ret_var = decode_function(expr)
+            funcs.append(function_to_mlir(func_name, arg_names, assignments, ret_var))
+        except Exception as exc:
+            print(f'Warning [{path.name}:{i + 1}]: {exc}', file=sys.stderr)
+
+    if not funcs:
+        return ''
+
+    if len(funcs) == 1:
+        return funcs[0] + '\n'
+    else:
+        # Multiple functions: wrap in a module.
+        indented = '\n'.join(
+            '\n'.join(f'  {ln}' for ln in fn.splitlines())
+            for fn in funcs
+        )
+        return f'builtin.module {{\n{indented}\n}}\n'
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print(f'Usage: {sys.argv[0]} <file.lam> [file2.lam ...] [-o out.mlir]',
+              file=sys.stderr)
+        sys.exit(1)
+
+    args = sys.argv[1:]
+    out_path: Path | None = None
+
+    if '-o' in args:
+        idx = args.index('-o')
+        out_path = Path(args[idx + 1])
+        args = args[:idx] + args[idx + 2:]
+
+    output = ''.join(lam_file_to_mlir(Path(p)) for p in args)
+
+    if out_path is not None:
+        out_path.write_text(output)
+    else:
+        sys.stdout.write(output)
+
+
+if __name__ == '__main__':
+    main()
