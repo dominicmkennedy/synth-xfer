@@ -19,7 +19,7 @@ dependencies = [
   "pandas==2.3.3",
   "egglog>=1.0.0",
   "cloudpickle",
-  "openai>=1.0.0",
+  "openai-agents",
 ]
 
 [project.optional-dependencies]
@@ -61,6 +61,6 @@ force-sort-within-sections = true
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "standard"
-include = ["synth_xfer", "tests"]
+include = ["synth_xfer", "tests", "agent"]
 reportMissingImports = "error"
 reportUnnecessaryTypeIgnoreComment = "warning"
