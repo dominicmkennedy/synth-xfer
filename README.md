@@ -32,15 +32,16 @@ pytest -vv
 
 ## Usage
 
-The project provides six executables,
-these executables depend on paths in the repo the should be run from the project root.
+The project provides seven executables;
+run them from the project root.
 
 | Executable      | Description                                                                                           |
 |-----------------|-------------------------------------------------------------------------------------------------------|
 | `sxf`           | Given an abstract domain and a concrete function, synthesizes an abstract transformer (the main tool) |
+| `agent-synth`   | LLM-based synthesis of transfer functions (direct prompt or agent with eval tool)                      |
 | `benchmark`     | Runs multiple synthesis experiments in parallel across available CPU cores                            |
-| `eval-final`    | Measures the precision of a previously synthesized transformer                                        |
-| `verify`        | Checks the soundness of a previously synthesized transformer                                          |
+| `eval-final`    | Measures the precision of a previously synthesized transformer                                         |
+| `verify`        | Checks the soundness of a previously synthesized transformer                                           |
 | `lower-to-llvm` | Lowers a synthesized transformer from MLIR to LLVM IR                                                 |
 | `simplifier`    | Applies a peephole optimizer to simplify synthesized transformer code                                 |
 
@@ -171,14 +172,25 @@ Norm bw:  (64, 5000, 5000)
 
 ## Agent Synthesis
 
-To run agent synthesis, first set your OpenAI API key in the `.env` file, then
-```bash
-source .env
-```
-(or set your API key in the environment variable `OPENAI_API_KEY`)
+LLM-based synthesis of transfer functions. Two modes: **direct_llm** (single prompt + response) and **agent_sdk** (OpenAI Agent API with an eval tool; the agent can iterate until the transformer passes eval).
 
-Then you can run the agent synthesis with:
+**Setup:** Set your OpenAI API key in the `.env` file, then run `source .env` (or set `OPENAI_API_KEY` in the environment).
+
+**Run** (make sure you re-run pip install)
 ```bash
-python agent/main.py mlir/Operations/Add.mlir -o outputs/agent --model gpt-5.1-codex-mini
+agent-synth mlir/Operations/Add.mlir -o outputs/ag --model gpt-5.1-codex-mini --method agent_sdk --dump-agent-run
 ```
-or any model given here: https://developers.openai.com/api/docs/pricing
+You can omit `--method agent_sdk` to use direct_llm, and omit `--dump-agent-run` if you don't need the full run dump.
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `op_file` | Operation MLIR file (e.g. `mlir/Operations/Add.mlir`). |
+| `-o, --output` | Output directory (default: `outputs/agent`). |
+| `--model` | OpenAI model (default: `gpt-4`). See [OpenAI pricing](https://developers.openai.com/api/docs/pricing). |
+| `--method` | `direct_llm` or `agent_sdk` (default: `direct_llm`). |
+| `--skip-eval` | Skip running eval-final after synthesis. |
+| `--dump-agent-run` | Write a full dump of the agent run (messages, tool calls, token usage) to the output dir (agent_sdk only). |
+
+Each run prints the **model** in use and **token usage** (input/output/reasoning and total). The agent is prompted to reason about the operation and KnownBits before writing MLIR and to use multiple turns to improve quality rather than stopping at the first candidate that passes eval.
