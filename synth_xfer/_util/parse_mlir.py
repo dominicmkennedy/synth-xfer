@@ -28,14 +28,14 @@ class _Readable(Protocol):
     def read_text(self) -> str: ...
 
 
-def parse_mlir(p: _Readable) -> Operation:
+def parse_mlir(p: str | _Readable) -> Operation:
     func_str = p if isinstance(p, str) else p.read_text()
     func_name = "<text>" if isinstance(p, str) else p.name
 
     return Parser(_ctx, func_str, func_name).parse_op()
 
 
-def parse_mlir_func(p: _Readable) -> FuncOp:
+def parse_mlir_func(p: str | _Readable) -> FuncOp:
     func_name = "<text>" if isinstance(p, str) else p.name
     mod = parse_mlir(p)
 
@@ -45,7 +45,7 @@ def parse_mlir_func(p: _Readable) -> FuncOp:
         raise ValueError(f"mlir in '{func_name}' is not a FuncOp")
 
 
-def parse_mlir_mod(p: _Readable, inline: bool = False) -> ModuleOp:
+def parse_mlir_mod(p: str | _Readable, inline: bool = False) -> ModuleOp:
     func_name = "<text>" if isinstance(p, str) else p.name
     mod = parse_mlir(p)
 

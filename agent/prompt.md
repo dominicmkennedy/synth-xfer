@@ -11,6 +11,12 @@ Implement or improve a KnownBits transfer function for operation `<OP>` in this 
 - The important tools are `verify` and `eval-final`.
 - The width list below is a suggestion only; choose widths freely to maximize useful signal.
 
+## Reasoning (before implementing)
+
+- Reason about the operation semantics and how KnownBits (known-zero, known-one) should be updated for each output before writing MLIR.
+- Aim for **sound** and **precise** transfers; prefer a well-reasoned design over the first implementation that passes eval.
+- If a candidate gets low metrics or errors, analyze why (e.g. wrong propagation, missing cases) and improve the design, not only fix syntax.
+
 ## Requirements
 
 1. Implement `kb_<op>.mlir` in the same MLIR style as the examples I provided to you.
@@ -31,7 +37,7 @@ Implement or improve a KnownBits transfer function for operation `<OP>` in this 
 
 6. Use existing primitive (`transfer.and`,  `transfer.add`, `transfer.sub`, `transfer.shl`, `transfer.lshr`, `transfer.constant`, `transfer.get_all_ones`, etc.) included in `ops.md`, which aligned with the LLVM APInt semantics.
 
-7. The program should be in SSA (Single Static Assigment) form. **Each line only has 1 operation** in `ops.md`.
+7. The program should be in SSA (Single Static Assigment) form. **Each line only has 1 operation** from `ops.md`. Do not write `%x = %y` (that is invalid MLIR); every definition must be an operation call; use SSA values directly in the next operation or in `transfer.make`.
 
 <!-- ## Testing Guidance
 
