@@ -27,16 +27,18 @@ def verify_function(
     helper_funcs: HelperFuncs,
     timeout: int,
 ) -> tuple[bool | None, ModelRef | None]:
-    xfer_helpers += [
-        helper_funcs.get_top_func,
-        helper_funcs.instance_constraint_func,
-        helper_funcs.domain_constraint_func,
-        helper_funcs.op_constraint_func,
-        helper_funcs.meet_func,
-    ]
+    xfer_helpers += [helper_funcs.op_constraint_func] + helper_funcs.all_helper_funcs()
     helpers = [x for x in xfer_helpers if x is not None]
 
     return verify_transfer_function(func, helper_funcs.crt_func, helpers, bw, timeout)
+
+
+def _parse_domains(s: str) -> list[AbstractDomain]:
+    parts = [p.strip() for p in s.split(",") if p.strip()]
+    if not parts:
+        raise ValueError("Expected at least one domain name.")
+
+    return sorted(set([AbstractDomain[p] for p in parts]), key=lambda x: x.name)
 
 
 def _register_parser() -> Namespace:
@@ -52,10 +54,9 @@ def _register_parser() -> Namespace:
     p.add_argument(
         "-d",
         "--domain",
-        type=str,
-        choices=[str(x) for x in AbstractDomain],
+        type=_parse_domains,
         required=True,
-        help="Abstract Domain to evaluate",
+        help="Abstract Domain(s) to evaluate, comma-separated (e.g. KnownBits,UConstRange)",
     )
 
     p.add_argument("--op", type=Path, required=True, help="Concrete op")
@@ -186,7 +187,7 @@ def _print_counterexample(
             )[0]  # type: ignore
         except ImportError as e:
             abst_output = None
-            print(f"Warning: Could not execute due {e}")
+            print(f"Warning: Could not execute due to {e}")
         conc_output = run_concrete_fn(helper_funcs, bw, [tuple(conc_args)])[0]
         conc_output = (
             _format_concrete(conc_output, domain, bw)
@@ -211,14 +212,13 @@ def _print_counterexample(
 
 def main() -> None:
     args = _register_parser()
-    domain = AbstractDomain[args.domain]
     mlir_mod = parse_mlir_mod(args.xfer_file)
     xfer_fns = get_fns(mlir_mod)
     xfer_name = resolve_xfer_name(xfer_fns, args.xfer_name)
 
     xfer_fn = xfer_fns[xfer_name]
     del xfer_fns[xfer_name]
-    helper_funcs = get_helper_funcs(args.op, domain)
+    helper_funcs = get_helper_funcs(args.op, args.domain)
 
     for bw in args.bw:
         start_time = perf_counter()
@@ -240,19 +240,23 @@ def main() -> None:
         else:
             print("-----------------------------------------------------")
             print(f"Verifier UNSOUND at {bw}-bits. Took {run_time:.4f}s.")
-            print("Counterexample:")
-
-            assert isinstance(model, ModelRef)
-            _print_counterexample(
-                str(args.op.stem),
-                model,
-                bw,
-                domain,
-                mlir_mod,
-                xfer_name,
-                helper_funcs,
-                args.no_exec,
-            )
+            if len(args.domain) == 1:
+                print("Counterexample:")
+                assert isinstance(model, ModelRef)
+                _print_counterexample(
+                    str(args.op.stem),
+                    model,
+                    bw,
+                    args.domain[0],
+                    mlir_mod,
+                    xfer_name,
+                    helper_funcs,
+                    args.no_exec,
+                )
+            else:
+                print(
+                    "Warning: Counterexample formatting not supported for multi-domain yet."
+                )
 
             if not args.continue_unsound:
                 break

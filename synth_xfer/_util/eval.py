@@ -88,7 +88,7 @@ def setup_eval(
         return bw if isinstance(x, TransIntegerType) else x.width.data
 
     def get_enum_f(level: str, bw: int) -> Callable:
-        domain_str = str(helper_funcs.domain).lower()
+        domain_str = helper_funcs.domain_str().lower()
         ret_bw = get_bw(helper_funcs.conc_ret_ty, bw)
         arg_bws = [str(get_bw(x, bw)) for x in helper_funcs.conc_arg_ty]
         arg_str = "_".join(arg_bws)

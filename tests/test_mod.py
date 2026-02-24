@@ -13,7 +13,7 @@ def test_mod3_lowering():
 
     lowerer = LowerToLLVM([16, 64])
     helpers = get_helper_funcs(conc_nop_f, AbstractDomain.Mod3)
-    lowerer.add_fn(helpers.get_top_func, shim=True)
+    lowerer.add_fn(helpers.top_func, shim=True)
     lowerer.add_fn(helpers.meet_func, shim=True)
     lowerer.add_fn(helpers.transfer_func, shim=True)
 
@@ -25,7 +25,7 @@ def test_mod5_lowering():
 
     lowerer = LowerToLLVM([16, 64])
     helpers = get_helper_funcs(conc_nop_f, AbstractDomain.Mod5)
-    lowerer.add_fn(helpers.get_top_func, shim=True)
+    lowerer.add_fn(helpers.top_func, shim=True)
     lowerer.add_fn(helpers.meet_func, shim=True)
     lowerer.add_fn(helpers.transfer_func, shim=True)
 
@@ -37,7 +37,7 @@ def test_mod7_lowering():
 
     lowerer = LowerToLLVM([16, 64])
     helpers = get_helper_funcs(conc_nop_f, AbstractDomain.Mod7)
-    lowerer.add_fn(helpers.get_top_func, shim=True)
+    lowerer.add_fn(helpers.top_func, shim=True)
     lowerer.add_fn(helpers.meet_func, shim=True)
     lowerer.add_fn(helpers.transfer_func, shim=True)
 
@@ -49,7 +49,7 @@ def test_mod11_lowering():
 
     lowerer = LowerToLLVM([16, 64])
     helpers = get_helper_funcs(conc_nop_f, AbstractDomain.Mod11)
-    lowerer.add_fn(helpers.get_top_func, shim=True)
+    lowerer.add_fn(helpers.top_func, shim=True)
     lowerer.add_fn(helpers.meet_func, shim=True)
     lowerer.add_fn(helpers.transfer_func, shim=True)
 
@@ -61,7 +61,7 @@ def test_mod13_lowering():
 
     lowerer = LowerToLLVM([16, 64])
     helpers = get_helper_funcs(conc_nop_f, AbstractDomain.Mod13)
-    lowerer.add_fn(helpers.get_top_func, shim=True)
+    lowerer.add_fn(helpers.top_func, shim=True)
     lowerer.add_fn(helpers.meet_func, shim=True)
     lowerer.add_fn(helpers.transfer_func, shim=True)
 

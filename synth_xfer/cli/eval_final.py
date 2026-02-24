@@ -150,7 +150,7 @@ def run(
     lowerer = LowerToLLVM(all_bws)
     top_mlir = top_as_xfer(helpers.transfer_func)
     lowerer.add_fn(helpers.meet_func)
-    lowerer.add_fn(helpers.get_top_func)
+    lowerer.add_fn(helpers.top_func)
     top_xfer = lowerer.add_fn(top_mlir, shim=True)
     lowerer.add_mod(sol_module, [xfer_name])
 

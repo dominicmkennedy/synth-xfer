@@ -30,7 +30,7 @@ def _eval_helper(
         base: list[FunctionWithCondition],
     ) -> list[EvalResult]:
         lowerer = LowerToLLVM(bws)
-        lowerer.add_fn(helper_funcs.get_top_func)
+        lowerer.add_fn(helper_funcs.top_func)
 
         if not xfer:
             ret_top_func = FunctionWithCondition(top_as_xfer(helper_funcs.transfer_func))
@@ -216,7 +216,7 @@ def run(
 
     lowerer = LowerToLLVM(all_bws)
     lowerer.add_fn(helper_funcs.meet_func)
-    lowerer.add_fn(helper_funcs.get_top_func)
+    lowerer.add_fn(helper_funcs.top_func)
     lowerer.add_mod(solution_module, ["solution"])
 
     with Jit() as jit:
