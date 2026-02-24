@@ -133,9 +133,10 @@ def main():
     transformer_file = save_transformer(clean_llm_output(llm_output), output_dir, op_name)
     print(f"Transformer: {transformer_file}")
 
-    # Evaluate if requested
-    result = run_eval(args.op_file, transformer_file, op_name)
-    print(f"Eval result:\n{result}")
+    # Evaluate unless skipped
+    if not args.skip_eval:
+        result = run_eval(args.op_file, transformer_file, op_name)
+        print(f"Eval result:\n{result}")
 
     return 0
 
