@@ -21,7 +21,7 @@ Publication: [Nice to Meet You: Synthesizing Practical MLIR Abstract Transformer
 python3 -m venv .venv
 source .venv/bin/activate
 ```
-2. Install in editable mode with dev dependencies: 
+2. Install in editable mode with dev dependencies:
 ```bash
 pip install -e ".[dev]"
 ```

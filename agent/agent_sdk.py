@@ -12,14 +12,16 @@ from agents.items import (
 )
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer.cli.eval_final import eval_transformer
+
+from .util import eval_transformer
 
 # System Instructions
 AGENT_INSTRUCTIONS = """You synthesize KnownBits transfer functions in MLIR. You have an eval tool that evaluates your transformer.
 - Before writing any MLIR: reason step-by-step about the operation semantics and how each output bit should update known-zero and known-one. Aim for a sound and precise transfer, not just the first candidate that passes eval.
 - You must call the eval tool with your MLIR before returning. If it returns an error (e.g. parse error), fix the MLIR and call again.
-- If eval returns low metrics or you had to fix errors: reason about why (e.g. missing cases, wrong bit propagation) and try a better design before submitting the next candidate; do not only make minimal syntax fixes.
-- Only when the tool returns metrics (Exact %, Norm) that you are satisfied with, return that MLIR as your final answer. Prefer a well-reasoned, precise implementation over stopping at the first passing candidate.
+- If eval returns unsound (Sound %% < 100), you had to fix the soundness and should not return yet.
+- If eval returns sound but low precison (Sound %% = 100 and Exact %% is low), reason about why (e.g. missing cases, wrong bit propagation) and try a better design before submitting the next candidate; do not only make minimal syntax fixes.
+- Only when the tool returns sound (Sound %% = 100) and you are satisfied with the precision (Exact %% is high), return that MLIR as your final answer. Prefer a well-reasoned, precise implementation over stopping at the first passing candidate.
 - In your final message return only the MLIR code, no explanation.
 - Each line of MLIR must be exactly one operation from the allowed ops; do not write %x = %y (use the value directly in the next op or in transfer.make)."""
 
@@ -30,8 +32,8 @@ Follow this workflow:
 2. Output a candidate MLIR based on that reasoning.
 3. Call the eval tool with that MLIR (pass the raw MLIR string as the argument).
 4. If the tool returns an error, fix the MLIR and go back to step 3.
-5. If the tool returns metrics but they are low or you had to fix errors: briefly reason about what went wrong and how to improve (e.g. precision, missing cases); then go to step 2 with a revised design.
-6. When the tool returns good metrics and you are satisfied, return that MLIR as your final answer (MLIR only, no explanation).
+5. Otherwise the tool returns metrics (Sound %% and Exact %%). If Sound %% is not 100, you should fix the soundness of your transfer function. If Exact %% is low, reason about which cases can be improved and try again.
+6. When the tool returns sound (Sound %% = 100) and you are satisfied with the precision (Exact %% is high), return that MLIR as your final answer (MLIR only, no explanation).
 """
 
 
@@ -41,7 +43,9 @@ def format_agent_run_dump(result) -> str:
     lines: list[str] = ["=== Agent run dump ===", ""]
 
     for i, item in enumerate(result.new_items):
-        lines.append(f"--- Item {i + 1}: {getattr(item, 'type', type(item).__name__)} ---")
+        lines.append(
+            f"--- Item {i + 1}: {getattr(item, 'type', type(item).__name__)} ---"
+        )
         if isinstance(item, MessageOutputItem):
             text = ItemHelpers.text_message_output(item)
             lines.append(text.strip() or "(empty message)")
@@ -53,8 +57,12 @@ def format_agent_run_dump(result) -> str:
                 lines.append(str(raw)[:2000] if raw is not None else "(no reasoning)")
         elif isinstance(item, ToolCallItem):
             raw = getattr(item, "raw_item", None)
-            name = getattr(raw, "name", None) or (raw.get("name") if isinstance(raw, dict) else None)
-            args = getattr(raw, "arguments", None) or (raw.get("arguments") if isinstance(raw, dict) else None)
+            name = getattr(raw, "name", None) or (
+                raw.get("name") if isinstance(raw, dict) else None
+            )
+            args = getattr(raw, "arguments", None) or (
+                raw.get("arguments") if isinstance(raw, dict) else None
+            )
             lines.append(f"Tool call: {name}")
             if args is not None:
                 args_str = str(args) if not isinstance(args, str) else args
@@ -80,12 +88,18 @@ def run_agent_synthesis(
     op_name: str,
     api_key: str,
     model: str = "gpt-4",
+    max_turns: int = 20,
 ) -> tuple[str, object]:
     """Run agent to synthesize transformer. Returns (final_output, run_result)."""
 
     @function_tool
     def run_eval_tool(transformer_mlir: str) -> str:
-        """Evaluate the generated transformer MLIR for the current operation (e.g. kb_<op>). Pass the raw MLIR code as a string. Returns a short summary (Exact %, Norm) or an error message."""
+        """Evaluate the generated transformer MLIR for the current operation (e.g. kb_<op>). Pass the raw MLIR code as a string. Evaluate on a low bitwidth (default: 4), and a high bitwidth (default: 64). Returns a short summary:
+        - Sound %: the percentage of inputs for which the output abstract value is sound
+        - Exact %: the percentage of inputs for which the output abstract value is exactly the same the optimal transfer function (perfect precision)
+        - Norm: ignore for now
+        """
+        # Xuanyu: let agent understand simple metrics first for now. Use Norm later.
         return eval_transformer(
             solution_path=transformer_mlir,
             op_path=Path(op_file),
@@ -104,11 +118,8 @@ def run_agent_synthesis(
 
     # Full task as user message + explicit workflow
     # to encourage tool use and reasoning
-    user_message = prompt + WORKFLOW_INSTRUCTION
-    result = Runner.run_sync(agent, user_message, max_turns=20)
+    MAX_TURN_MESSAGE = f"You have a maximum of {max_turns} iterations to complete this task.  Do not exceed this limit."
+    user_message = prompt + WORKFLOW_INSTRUCTION + "\n" + MAX_TURN_MESSAGE
+    result = Runner.run_sync(agent, user_message, max_turns=max_turns)
 
     return (result.final_output, result)
-
-
-def process_tool_call(tool_name: str, tool_input: dict) -> str:
-    raise NotImplementedError(f"TODO: Implement handler for tool: {tool_name}")

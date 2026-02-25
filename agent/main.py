@@ -10,7 +10,6 @@ from pathlib import Path
 import sys
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer.cli.eval_final import eval_transformer
 
 from .agent_sdk import format_agent_run_dump, run_agent_synthesis
 from .direct_llm import call_llm
@@ -23,6 +22,7 @@ from .shared import (
     save_instantiated_prompt,
     save_transformer,
 )
+from .util import eval_transformer
 
 
 def run_eval(op_file_path: str, transformer_file: Path, op_name: str) -> str:
@@ -74,6 +74,12 @@ def main():
         action="store_true",
         help="Dump full agent run (messages, tool calls, outputs) to output dir (agent_sdk only)",
     )
+    parser.add_argument(
+        "--max-turns",
+        type=int,
+        default=20,
+        help="Max iterations for agent (default: 20, use 2-3 for fast dev)",
+    )
 
     args = parser.parse_args()
     api_key = get_api_key()
@@ -105,7 +111,7 @@ def main():
         print(f"Tokens: {token_str} ({total:,} total)")
     else:  # agent_sdk
         llm_output, run_result = run_agent_synthesis(
-            prompt, args.op_file, op_name, api_key, args.model
+            prompt, args.op_file, op_name, api_key, args.model, args.max_turns
         )
         # Token usage (aggregate across all turns)
         inp = out = reason = 0
