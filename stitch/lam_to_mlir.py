@@ -215,12 +215,21 @@ def _collect_app(expr) -> tuple:
     return expr, args
 
 
-def _extract_op(expr, scope: list[str]) -> tuple[str, list[str]]:
-    """Extract (op_name, [operand_var_names]) from a primitive application."""
+def _extract_op(expr, scope: list[str],
+                assignments: list | None = None,
+                counter: list[int] | None = None,
+                free_vars: dict[str, str] | None = None) -> tuple[str, list[str]]:
+    """Extract (op_name, [operand_var_names]) from a primitive application.
+
+    When *assignments* and *counter* are supplied, non-trivial (_App) sub-
+    expressions are recursively flattened into intermediate SSA bindings so
+    they can be used as simple variable operands.
+    """
     head, args = _collect_app(expr)
 
     if isinstance(head, _Prim):
-        op_name = head.name
+        raw = head.name
+        op_name = (free_vars or {}).get(raw, raw)
     elif isinstance(head, _Var):
         op_name = scope[head.index]
     else:
@@ -231,33 +240,52 @@ def _extract_op(expr, scope: list[str]) -> tuple[str, list[str]]:
         if isinstance(a, _Var):
             operands.append(scope[a.index])
         elif isinstance(a, _Prim):
-            # Bare primitive used as a value (e.g. a nullary constant)
-            operands.append(a.name)
+            raw = a.name
+            operands.append((free_vars or {}).get(raw, raw))
+        elif isinstance(a, _App) and assignments is not None and counter is not None:
+            # Non-trivial sub-expression: flatten into an intermediate binding.
+            rv = f'%v{counter[0]}'
+            counter[0] += 1
+            sub_op, sub_ops = _extract_op(a, scope, assignments, counter, free_vars)
+            assignments.append((rv, sub_op, sub_ops))
+            operands.append(rv)
         else:
             raise ValueError(f"Non-trivial operand: {type(a).__name__}")
 
     return op_name, operands
 
 
-def decode_function(lam_expr) -> tuple[list[str], list[tuple], str]:
+def decode_function(lam_expr,
+                    free_vars: dict[str, str] | None = None,
+                    ) -> tuple[list[str], list[tuple], str]:
     """Decode a full lambda expression into SSA components.
 
+    Args:
+        lam_expr  – parsed AST
+        free_vars – mapping of Stitch free-variable names to MLIR names,
+                    e.g. {'#0': '%h0', '#1': '%h1'}.  These are added as
+                    leading function arguments in the output.
+
     Returns:
-        arg_names   – ['%arg0', '%arg1', ...]
+        arg_names   – ['%h0', ..., '%arg0', '%arg1', ...]  (free vars first)
         assignments – [('%vN', 'mlir.op', ['%x', '%y', ...]), ...]
         ret_var     – variable name returned by the function
     """
     # Peel outer Lam nodes → function arguments.
-    arg_names: list[str] = []
+    lam_arg_names: list[str] = []
     body = lam_expr
     while isinstance(body, _Lam):
-        arg_names.append(f'%arg{len(arg_names)}')
+        lam_arg_names.append(f'%arg{len(lam_arg_names)}')
         body = body.body
 
+    # Free-var names precede lambda args in the final signature.
+    fv_names: list[str] = list((free_vars or {}).values())
+    arg_names = fv_names + lam_arg_names
+
     # After peeling n args, the innermost lambda bound arg[n-1] as $0.
-    scope: list[str] = list(reversed(arg_names))
+    scope: list[str] = list(reversed(lam_arg_names))
     assignments: list[tuple] = []
-    counter = 0
+    counter = [0]  # mutable so _extract_op sub-calls can share it
 
     # Iterative decoding: walk the let-binding chain without recursion.
     # Each step is: body = App(Lam(inner), val_expr)  →  process val_expr,
@@ -270,9 +298,9 @@ def decode_function(lam_expr) -> tuple[list[str], list[tuple], str]:
 
         if isinstance(expr, _App) and isinstance(expr.func, _Lam):
             # Let-binding: ((lam inner) val_expr)
-            rv = f'%v{counter}'
-            counter += 1
-            op, ops = _extract_op(expr.arg, scope)
+            rv = f'%v{counter[0]}'
+            counter[0] += 1
+            op, ops = _extract_op(expr.arg, scope, assignments, counter, free_vars)
             assignments.append((rv, op, ops))
             scope = [rv] + scope
             expr = expr.func.body  # continue with inner body
@@ -280,9 +308,9 @@ def decode_function(lam_expr) -> tuple[list[str], list[tuple], str]:
 
         # Non-let application or bare primitive at the innermost position:
         # emit one final assignment and use that as the return value.
-        rv = f'%v{counter}'
-        counter += 1
-        op, ops = _extract_op(expr, scope)
+        rv = f'%v{counter[0]}'
+        counter[0] += 1
+        op, ops = _extract_op(expr, scope, assignments, counter, free_vars)
         assignments.append((rv, op, ops))
         ret_var = rv
         break
@@ -352,6 +380,22 @@ def function_to_mlir(func_name: str,
     ])
 
 
+# ── Stitch abstraction header ─────────────────────────────────────────────────
+
+def _parse_stitch_header(line: str) -> tuple[dict[str, str], str]:
+    """Parse a Stitch abstraction header, if present.
+
+    'fn_0(#0,#1,#2) := body'  →  ({'#0':'%h0','#1':'%h1','#2':'%h2'}, 'body')
+    Any other line             →  ({}, line)
+    """
+    m = re.match(r'^fn_\d+\(([^)]*)\)\s*:=\s*(.+)$', line, re.DOTALL)
+    if not m:
+        return {}, line
+    params = [p.strip() for p in m.group(1).split(',') if p.strip()]
+    free_vars = {p: f'%h{p[1:]}' for p in params}   # '#0' → '%h0'
+    return free_vars, m.group(2).strip()
+
+
 # ── File processing ───────────────────────────────────────────────────────────
 
 def lam_file_to_mlir(path: Path) -> str:
@@ -365,8 +409,9 @@ def lam_file_to_mlir(path: Path) -> str:
     for i, line in enumerate(lam_lines):
         func_name = stem if len(lam_lines) == 1 else f'{stem}_{i}'
         try:
-            expr = parse_lam(line)
-            arg_names, assignments, ret_var = decode_function(expr)
+            free_vars, body_str = _parse_stitch_header(line)
+            expr = parse_lam(body_str)
+            arg_names, assignments, ret_var = decode_function(expr, free_vars or None)
             funcs.append(function_to_mlir(func_name, arg_names, assignments, ret_var))
         except Exception as exc:
             print(f'Warning [{path.name}:{i + 1}]: {exc}', file=sys.stderr)
