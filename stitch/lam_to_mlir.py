@@ -396,6 +396,113 @@ def _parse_stitch_header(line: str) -> tuple[dict[str, str], str]:
     return free_vars, m.group(2).strip()
 
 
+# ── Beta reduction / fn-N inlining ───────────────────────────────────────────
+
+def _shift(expr, amount: int, cutoff: int = 0):
+    """Increase all free de Bruijn indices >= cutoff by amount."""
+    if isinstance(expr, _Var):
+        return _Var(expr.index + amount) if expr.index >= cutoff else expr
+    if isinstance(expr, _Lam):
+        return _Lam(_shift(expr.body, amount, cutoff + 1))
+    if isinstance(expr, _App):
+        return _App(_shift(expr.func, amount, cutoff),
+                    _shift(expr.arg,  amount, cutoff))
+    return expr  # _Prim — no de Bruijn vars
+
+
+def _subst_db(body, val, depth: int = 0):
+    """Beta step: replace _Var(depth) with val inside body, removing that binder."""
+    if isinstance(body, _Var):
+        if body.index == depth:
+            return _shift(val, depth)
+        if body.index > depth:
+            return _Var(body.index - 1)
+        return body
+    if isinstance(body, _Lam):
+        return _Lam(_subst_db(body.body, val, depth + 1))
+    if isinstance(body, _App):
+        return _App(_subst_db(body.func, val, depth),
+                    _subst_db(body.arg,  val, depth))
+    return body  # _Prim
+
+
+def _beta_step(expr):
+    """One structural pass of beta-reduction; returns (new_expr, did_reduce)."""
+    if isinstance(expr, _App):
+        if isinstance(expr.func, _Lam):
+            return _subst_db(expr.func.body, expr.arg), True
+        f2, cf = _beta_step(expr.func)
+        a2, ca = _beta_step(expr.arg)
+        return _App(f2, a2), cf or ca
+    if isinstance(expr, _Lam):
+        b2, cb = _beta_step(expr.body)
+        return _Lam(b2), cb
+    return expr, False
+
+
+def _beta_reduce(expr):
+    """Fully beta-reduce expr (iterate until no redexes remain)."""
+    changed = True
+    while changed:
+        expr, changed = _beta_step(expr)
+    return expr
+
+
+def _subst_prims(expr, mapping: dict, depth: int = 0):
+    """Replace _Prim nodes by name from mapping, shifting free de Bruijn vars by depth.
+
+    depth tracks how many binders we are currently under inside the target
+    expression, so that variables free in the substituted value are lifted by
+    the same amount before being placed under those binders.
+    """
+    if isinstance(expr, _Prim):
+        if expr.name in mapping:
+            return _shift(mapping[expr.name], depth)
+        return expr
+    if isinstance(expr, _Var):
+        return expr
+    if isinstance(expr, _Lam):
+        return _Lam(_subst_prims(expr.body, mapping, depth + 1))
+    if isinstance(expr, _App):
+        return _App(_subst_prims(expr.func, mapping, depth),
+                    _subst_prims(expr.arg,  mapping, depth))
+    return expr
+
+
+def _inline_step(expr, fn_defs: dict):
+    """Single inlining pass; returns (new_expr, did_change)."""
+    if isinstance(expr, _Lam):
+        b2, c = _inline_step(expr.body, fn_defs)
+        return _Lam(b2), c
+    if isinstance(expr, _App):
+        f2, cf = _inline_step(expr.func, fn_defs)
+        a2, ca = _inline_step(expr.arg, fn_defs)
+        app = _App(f2, a2)
+        # Check whether this is a fully-applied fn_N call.
+        head, args = _collect_app(app)
+        if isinstance(head, _Prim) and head.name in fn_defs:
+            fv_names, body = fn_defs[head.name]
+            if len(args) >= len(fv_names):
+                mapping = dict(zip(fv_names, args[:len(fv_names)]))
+                inlined = _subst_prims(body, mapping)
+                for arg in args[len(fv_names):]:
+                    inlined = _App(inlined, arg)
+                return _beta_reduce(inlined), True
+        # Opportunistic beta-reduction at this node.
+        if isinstance(f2, _Lam):
+            return _subst_db(f2.body, a2), True
+        return app, cf or ca
+    return expr, False
+
+
+def _inline_fn_calls(expr, fn_defs: dict):
+    """Iteratively inline stitch fn_N calls and beta-reduce until stable."""
+    changed = True
+    while changed:
+        expr, changed = _inline_step(expr, fn_defs)
+    return expr
+
+
 # ── File processing ───────────────────────────────────────────────────────────
 
 def lam_file_to_mlir(path: Path) -> str:
@@ -405,12 +512,25 @@ def lam_file_to_mlir(path: Path) -> str:
     if not lam_lines:
         return ''
 
+    # First pass: collect fn_N definitions so we can inline them later.
+    fn_defs: dict[str, tuple[list[str], object]] = {}
+    for line in lam_lines:
+        m = re.match(r'^(fn_\d+)\(([^)]*)\)\s*:=\s*(.+)$', line, re.DOTALL)
+        if m:
+            params = [p.strip() for p in m.group(2).split(',') if p.strip()]
+            try:
+                fn_defs[m.group(1)] = (params, parse_lam(m.group(3).strip()))
+            except Exception:
+                pass
+
     funcs: list[str] = []
     for i, line in enumerate(lam_lines):
         func_name = stem if len(lam_lines) == 1 else f'{stem}_{i}'
         try:
             free_vars, body_str = _parse_stitch_header(line)
             expr = parse_lam(body_str)
+            if fn_defs:
+                expr = _inline_fn_calls(expr, fn_defs)
             arg_names, assignments, ret_var = decode_function(expr, free_vars or None)
             funcs.append(function_to_mlir(func_name, arg_names, assignments, ret_var))
         except Exception as exc:
