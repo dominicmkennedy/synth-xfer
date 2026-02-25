@@ -105,8 +105,6 @@ def run_agent_synthesis(
             op_path=Path(op_file),
             domain=AbstractDomain.KnownBits,
             xfer_name=f"kb_{op_name.lower()}",
-            exact_bw=(4,),
-            norm_bw=(64, 2500, 50000),
         )
 
     agent = Agent(

@@ -13,7 +13,7 @@ def eval_transformer(
     domain: AbstractDomain,
     xfer_name: str,
     *,
-    exact_bw: tuple[int, ...] = (4,),
+    exact_bw: tuple[int, ...] = (8,),
     norm_bw: tuple[int, ...] = (64, 2500, 50000),
     random_seed: int | None = None,
 ) -> str:

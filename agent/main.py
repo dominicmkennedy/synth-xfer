@@ -33,8 +33,6 @@ def run_eval(op_file_path: str, transformer_file: Path, op_name: str) -> str:
         op_path=Path(op_file_path),
         domain=AbstractDomain.KnownBits,
         xfer_name=f"kb_{op_name.lower()}",
-        exact_bw=(4,),
-        norm_bw=(64, 2500, 50000),
     )
 
 
@@ -143,6 +141,9 @@ def main():
     if not args.skip_eval:
         result = run_eval(args.op_file, transformer_file, op_name)
         print(f"Eval result:\n{result}")
+        eval_file = output_dir / f"eval_{op_name.lower()}.txt"
+        eval_file.write_text(result)
+        print(f"Eval result saved: {eval_file}")
 
     return 0
 
