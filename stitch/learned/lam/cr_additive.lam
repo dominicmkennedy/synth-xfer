@@ -1,0 +1,3 @@
+fn_0(#0,#1,#2) := (lam ((lam ((lam $0) (transfer.make $1 $0))) (transfer.select #2 #1 #0)))
+fn_1(#0,#1) := (lam ((lam (#1 (arith.andi $1 $0))) #0))
+fn_2(#0,#1,#2) := (lam (#2 (transfer.select $0 #1 #0)))
