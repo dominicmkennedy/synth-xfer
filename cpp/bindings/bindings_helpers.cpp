@@ -98,13 +98,3 @@ void bind_eval_func(py::module_ &m, const std::string &fn_name,
 void bind_run_func(py::module_ &m, const std::string &fn_name, RunThunk run) {
   m.def(fn_name.c_str(), run, py::arg("to_run"), py::arg("xfer_addr"));
 }
-
-void bind_sequence_protocol(py::object cls, LenThunk len, GetItemThunk getitem,
-                            IterThunk iter) {
-  cls.attr("__len__") = py::cpp_function(
-      [len](py::handle self) { return len(self); });
-  cls.attr("__getitem__") = py::cpp_function(
-      [getitem](py::handle self, std::size_t i) { return getitem(self, i); });
-  cls.attr("__iter__") = py::cpp_function(
-      [iter](py::handle self) { return iter(self); }, py::keep_alive<0, 1>());
-}

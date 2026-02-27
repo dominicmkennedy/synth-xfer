@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <optional>
 #include <sstream>
@@ -67,8 +66,16 @@ void bind_enum_funcs(py::module_ &m, const std::string &fn_name,
                      EnumLowThunk low, EnumMidThunk mid, EnumHighThunk high);
 void bind_eval_func(py::module_ &m, const std::string &fn_name, EvalThunk eval);
 void bind_run_func(py::module_ &m, const std::string &fn_name, RunThunk run);
-void bind_sequence_protocol(py::object cls, LenThunk len, GetItemThunk getitem,
-                            IterThunk iter);
+template <typename PyClass>
+void bind_sequence_protocol(PyClass &cls, LenThunk len, GetItemThunk getitem,
+                            IterThunk iter) {
+  cls.def("__len__", [len](py::handle self) { return len(self); });
+  cls.def("__getitem__", [getitem](py::handle self, std::size_t i) {
+    return getitem(self, i);
+  });
+  cls.def("__iter__", [iter](py::handle self) { return iter(self); },
+          py::keep_alive<0, 1>());
+}
 
 template <template <std::size_t> class D, std::size_t BW>
   requires Domain<D, BW>
@@ -152,31 +159,38 @@ void register_enum_domain(py::module_ &m) {
       m, fn_name,
       +[](std::uintptr_t crtOpAddr,
           std::optional<std::uintptr_t> opConFnAddr) -> py::object {
-        py::gil_scoped_release release;
-        EnumT ed{crtOpAddr, opConFnAddr};
-        return py::cast(std::make_unique<EvalVec>(ed.genLows()),
-                        py::return_value_policy::take_ownership);
+        auto out = std::make_unique<EvalVec>();
+        {
+          py::gil_scoped_release release;
+          EnumT ed{crtOpAddr, opConFnAddr};
+          *out = ed.genLows();
+        }
+        return py::cast(std::move(out), py::return_value_policy::take_ownership);
       },
       +[](std::uintptr_t crtOpAddr, std::optional<std::uintptr_t> opConFnAddr,
           unsigned int num_lat_samples, unsigned int seed,
           std::shared_ptr<rngdist::Sampler> sampler) -> py::object {
-        py::gil_scoped_release release;
-        std::mt19937 rng(seed);
-        EnumT ed{crtOpAddr, opConFnAddr};
-        return py::cast(std::make_unique<EvalVec>(
-                            ed.genMids(num_lat_samples, rng, *sampler)),
-                        py::return_value_policy::take_ownership);
+        auto out = std::make_unique<EvalVec>();
+        {
+          py::gil_scoped_release release;
+          std::mt19937 rng(seed);
+          EnumT ed{crtOpAddr, opConFnAddr};
+          *out = ed.genMids(num_lat_samples, rng, *sampler);
+        }
+        return py::cast(std::move(out), py::return_value_policy::take_ownership);
       },
       +[](std::uintptr_t crtOpAddr, std::optional<std::uintptr_t> opConFnAddr,
           unsigned int num_lat_samples, unsigned int num_conc_samples,
           unsigned int seed,
           std::shared_ptr<rngdist::Sampler> sampler) -> py::object {
-        py::gil_scoped_release release;
-        std::mt19937 rng(seed);
-        EnumT ed{crtOpAddr, opConFnAddr};
-        return py::cast(std::make_unique<EvalVec>(ed.genHighs(
-                            num_lat_samples, num_conc_samples, rng, *sampler)),
-                        py::return_value_policy::take_ownership);
+        auto out = std::make_unique<EvalVec>();
+        {
+          py::gil_scoped_release release;
+          std::mt19937 rng(seed);
+          EnumT ed{crtOpAddr, opConFnAddr};
+          *out = ed.genHighs(num_lat_samples, num_conc_samples, rng, *sampler);
+        }
+        return py::cast(std::move(out), py::return_value_policy::take_ownership);
       });
 }
 
@@ -263,8 +277,12 @@ void register_run_domain(py::module_ &m) {
       m, fn_name,
       +[](py::handle to_run, std::uintptr_t xfer_addr) -> py::object {
         const RunVec &v = py::cast<const RunVec &>(to_run);
-        py::gil_scoped_release release;
-        return py::cast(run_transformer<Dom, ResBw, BWs...>(xfer_addr, v));
+        decltype(run_transformer<Dom, ResBw, BWs...>(xfer_addr, v)) out;
+        {
+          py::gil_scoped_release release;
+          out = run_transformer<Dom, ResBw, BWs...>(xfer_addr, v);
+        }
+        return py::cast(std::move(out));
       });
 }
 
@@ -284,11 +302,7 @@ template <template <std::size_t> class Dom, std::size_t BW>
   requires Domain<Dom, BW>
 void register_domain(py::module_ &m) {
   register_domain_class<Dom, BW>(m);
-
-  register_uniform_arity<Dom, BW, 1>(m);
-  register_uniform_arity<Dom, BW, 2>(m);
-  register_uniform_arity<Dom, BW, 3>(m);
-  register_uniform_arity<Dom, BW, 4>(m);
+#include "build_matrix_arities.inc"
 }
 
 template <template <std::size_t> class Dom, std::size_t... BWs>

@@ -1,6 +1,6 @@
 [build-system]
 requires = [
-  "scikit-build-core>=0.9",
+  "scikit-build-core>=0.11",
   "pybind11>=3.0",
   "setuptools_scm[toml]>=8",
 ]
@@ -39,12 +39,36 @@ lower-to-llvm = "synth_xfer.cli.lower_to_llvm:main"
 simplifier = "synth_xfer.cli.simplifier:main"
 
 [tool.scikit-build]
-minimum-version = "0.9"
+minimum-version = "0.11"
 build-dir = "build/"
 wheel.expand-macos-universal-tags = true
 wheel.packages = ["synth_xfer"]
-cmake.define = { CMAKE_EXPORT_COMPILE_COMMANDS = true }
-cmake.args = ["-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++"]
+
+[tool.scikit-build.cmake.define]
+CMAKE_EXPORT_COMPILE_COMMANDS = true
+CMAKE_C_COMPILER = "clang"
+CMAKE_CXX_COMPILER = "clang++"
+SYNTH_XFER_DOMAINS = [
+  "knownbits",
+  "uconst_range",
+  "sconst_range",
+  "mod3",
+  "mod5",
+  "mod7",
+  "mod11",
+  "mod13",
+]
+SYNTH_XFER_ARITIES = ["1", "2", "3", "4"]
+SYNTH_XFER_WIDTHS = [
+  "4", "8", "16", "32", "64",
+  # "1", "2", "3", "4", "5", "6", "7", "8", "9",
+  # "10", "11", "12", "13", "14", "15", "16", "17", "18", "19",
+  # "20", "21", "22", "23", "24", "25", "26", "27", "28", "29",
+  # "30", "31", "32", "33", "34", "35", "36", "37", "38", "39",
+  # "40", "41", "42", "43", "44", "45", "46", "47", "48", "49",
+  # "50", "51", "52", "53", "54", "55", "56", "57", "58", "59",
+  # "60", "61", "62", "63", "64"
+]
 
 [tool.ruff]
 line-length = 90
