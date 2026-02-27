@@ -505,10 +505,8 @@ def _inline_fn_calls(expr, fn_defs: dict):
 
 # ── File processing ───────────────────────────────────────────────────────────
 
-def lam_file_to_mlir(path: Path) -> str:
-    """Convert a .lam file to MLIR text."""
-    stem = path.stem
-    lam_lines = [ln.strip() for ln in path.read_text().splitlines() if ln.strip()]
+def lamstr_to_mlir(text: str) -> str:
+    lam_lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if not lam_lines:
         return ''
 
@@ -525,7 +523,7 @@ def lam_file_to_mlir(path: Path) -> str:
 
     funcs: list[str] = []
     for i, line in enumerate(lam_lines):
-        func_name = stem if len(lam_lines) == 1 else f'{stem}_{i}'
+        func_name = f'func{i}'
         try:
             free_vars, body_str = _parse_stitch_header(line)
             expr = parse_lam(body_str)
@@ -534,7 +532,7 @@ def lam_file_to_mlir(path: Path) -> str:
             arg_names, assignments, ret_var = decode_function(expr, free_vars or None)
             funcs.append(function_to_mlir(func_name, arg_names, assignments, ret_var))
         except Exception as exc:
-            print(f'Warning [{path.name}:{i + 1}]: {exc}', file=sys.stderr)
+            print(f'Warning [{func_name}:{i + 1}]: {exc}', file=sys.stderr)
 
     if not funcs:
         return ''
@@ -549,6 +547,9 @@ def lam_file_to_mlir(path: Path) -> str:
         )
         return f'builtin.module {{\n{indented}\n}}\n'
 
+def lam_file_to_mlir(path: Path) -> str:
+    """Convert a .lam file to MLIR text."""
+    return lamstr_to_mlir(path.read_text())
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 

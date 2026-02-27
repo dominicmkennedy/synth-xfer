@@ -274,10 +274,8 @@ def _parse_standard_file(text: str) -> list[_FuncRecord]:
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def mlir_file_to_lam(path: Path) -> list[str]:
-    """Parse an MLIR file and return a list of lambda calculus strings."""
-    text = path.read_text()
-
+def mlir_to_lam(text: str) -> list[str]:
+    """Convert an MLIR string and return a list of lambda calculus strings"""
     if '"func.func"' in text:
         funcs = _parse_generic_file(text)
     else:
@@ -292,6 +290,10 @@ def mlir_file_to_lam(path: Path) -> list[str]:
 
     return expressions
 
+def mlir_file_to_lam(path: Path) -> list[str]:
+    """Parse an MLIR file and return a list of lambda calculus strings."""
+    text = path.read_text()
+    return mlir_to_lam(text)
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
 
