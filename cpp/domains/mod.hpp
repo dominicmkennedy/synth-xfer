@@ -25,7 +25,9 @@ template <std::size_t X_> struct ModT {
     // ctor
     constexpr Mod() : v{} {}
     constexpr Mod(const std::array<BV, arity> &x) : v{x} {}
-    constexpr Mod(const std::array<APInt<BW>, arity> &x) : v{} {
+    constexpr Mod(const std::array<APInt<BW>, arity> &x)
+      requires(BW != X)
+        : v{} {
       v[0] = APInt<X>{x[0].getZExtValue()};
     }
 

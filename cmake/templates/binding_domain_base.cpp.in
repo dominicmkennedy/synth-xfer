@@ -1,0 +1,5 @@
+#include "bindings_common.hpp"
+
+@_tpl_decl_lines@
+void @_tpl_register_fn@(py::module_ &m) {
+@_tpl_call_lines@}

@@ -127,7 +127,7 @@ public:
   }
 
   // increments/decrements
-  constexpr const APInt operator++(int) const noexcept {
+  constexpr const APInt operator++(int) noexcept {
     APInt<N> t(*this);
     ++(*this);
     return t;
@@ -136,7 +136,7 @@ public:
     ++VAL;
     return clearUnusedBits();
   }
-  constexpr const APInt operator--(int) const noexcept {
+  constexpr const APInt operator--(int) noexcept {
     APInt<N> t(*this);
     --(*this);
     return t;
@@ -519,23 +519,23 @@ public:
   sadd_sat(const APInt &RHS) const noexcept {
     bool ov;
     APInt<N> r = sadd_ov(RHS, ov);
-    return ov ? (isNegative() ? APInt<N>::getSignedMinValue(N)
-                              : APInt<N>::getSignedMaxValue(N))
+    return ov ? (isNegative() ? APInt<N>::getSignedMinValue()
+                              : APInt<N>::getSignedMaxValue())
               : r;
   }
   [[nodiscard]] const constexpr APInt
   uadd_sat(const APInt &RHS) const noexcept {
     bool ov;
     APInt<N> r = uadd_ov(RHS, ov);
-    return ov ? APInt<N>::getMaxValue(N) : r;
+    return ov ? APInt<N>::getMaxValue() : r;
   }
   [[nodiscard]] const constexpr APInt
   ssub_sat(const APInt &RHS) const noexcept {
 
     bool ov;
     APInt<N> r = ssub_ov(RHS, ov);
-    return ov ? (isNegative() ? APInt<N>::getSignedMinValue(N)
-                              : APInt<N>::getSignedMaxValue(N))
+    return ov ? (isNegative() ? APInt<N>::getSignedMinValue()
+                              : APInt<N>::getSignedMaxValue())
               : r;
   }
   [[nodiscard]] const constexpr APInt
@@ -551,14 +551,14 @@ public:
     if (!ov)
       return r;
     bool neg = isNegative() ^ RHS.isNegative();
-    return neg ? APInt<N>::getSignedMinValue(N)
-               : APInt<N>::getSignedMaxValue(N);
+    return neg ? APInt<N>::getSignedMinValue()
+               : APInt<N>::getSignedMaxValue();
   }
   [[nodiscard]] const constexpr APInt
   umul_sat(const APInt &RHS) const noexcept {
     bool ov;
     APInt<N> r = umul_ov(RHS, ov);
-    return ov ? APInt<N>::getMaxValue(N) : r;
+    return ov ? APInt<N>::getMaxValue() : r;
   }
   [[nodiscard]] const constexpr APInt
   sshl_sat(const APInt &RHS) const noexcept {
@@ -567,8 +567,8 @@ public:
   [[nodiscard]] const constexpr APInt sshl_sat(unsigned RHS) const noexcept {
     bool ov;
     APInt<N> r = sshl_ov(RHS, ov);
-    return ov ? (isNegative() ? APInt<N>::getSignedMinValue(N)
-                              : APInt<N>::getSignedMaxValue(N))
+    return ov ? (isNegative() ? APInt<N>::getSignedMinValue()
+                              : APInt<N>::getSignedMaxValue())
               : r;
   }
   [[nodiscard]] const constexpr APInt
@@ -578,7 +578,7 @@ public:
   [[nodiscard]] const constexpr APInt ushl_sat(unsigned RHS) const noexcept {
     bool ov;
     APInt<N> r = ushl_ov(RHS, ov);
-    return ov ? APInt<N>::getMaxValue(N) : r;
+    return ov ? APInt<N>::getMaxValue() : r;
   }
 
   // bit access
@@ -690,11 +690,11 @@ public:
   }
   constexpr void clearSignBit() noexcept { clearBit(N - 1); }
   constexpr void clearLowBits(unsigned loBits) noexcept {
-    APInt<N> Keep = getHighBitsSet(N, N - loBits);
+    APInt<N> Keep = getHighBitsSet(N - loBits);
     *this &= Keep;
   }
   constexpr void clearHighBits(unsigned hiBits) noexcept {
-    APInt<N> Keep = getLowBitsSet(N, N - hiBits);
+    APInt<N> Keep = getLowBitsSet(N - hiBits);
     *this &= Keep;
   }
   constexpr void flipAllBits() noexcept {
@@ -1029,3 +1029,68 @@ template <unsigned int N>
   return (C1 | C2) - (C1 ^ C2).lshr(1);
 }
 } // namespace APIntOps
+
+extern template class APInt<1>;
+extern template class APInt<2>;
+extern template class APInt<3>;
+extern template class APInt<4>;
+extern template class APInt<5>;
+extern template class APInt<6>;
+extern template class APInt<7>;
+extern template class APInt<8>;
+extern template class APInt<9>;
+extern template class APInt<10>;
+extern template class APInt<11>;
+extern template class APInt<12>;
+extern template class APInt<13>;
+extern template class APInt<14>;
+extern template class APInt<15>;
+extern template class APInt<16>;
+extern template class APInt<17>;
+extern template class APInt<18>;
+extern template class APInt<19>;
+extern template class APInt<20>;
+extern template class APInt<21>;
+extern template class APInt<22>;
+extern template class APInt<23>;
+extern template class APInt<24>;
+extern template class APInt<25>;
+extern template class APInt<26>;
+extern template class APInt<27>;
+extern template class APInt<28>;
+extern template class APInt<29>;
+extern template class APInt<30>;
+extern template class APInt<31>;
+extern template class APInt<32>;
+extern template class APInt<33>;
+extern template class APInt<34>;
+extern template class APInt<35>;
+extern template class APInt<36>;
+extern template class APInt<37>;
+extern template class APInt<38>;
+extern template class APInt<39>;
+extern template class APInt<40>;
+extern template class APInt<41>;
+extern template class APInt<42>;
+extern template class APInt<43>;
+extern template class APInt<44>;
+extern template class APInt<45>;
+extern template class APInt<46>;
+extern template class APInt<47>;
+extern template class APInt<48>;
+extern template class APInt<49>;
+extern template class APInt<50>;
+extern template class APInt<51>;
+extern template class APInt<52>;
+extern template class APInt<53>;
+extern template class APInt<54>;
+extern template class APInt<55>;
+extern template class APInt<56>;
+extern template class APInt<57>;
+extern template class APInt<58>;
+extern template class APInt<59>;
+extern template class APInt<60>;
+extern template class APInt<61>;
+extern template class APInt<62>;
+extern template class APInt<63>;
+extern template class APInt<64>;

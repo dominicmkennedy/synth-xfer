@@ -1,0 +1,7 @@
+#include "bindings_common.hpp"
+#include "@_tpl_domain_header@"
+
+@_tpl_opaque_lines@
+void @_tpl_shard_fn@(py::module_ &m) {
+  register_domain_widths<@_tpl_domain_type@, @_tpl_width_csv@>(m);
+}
