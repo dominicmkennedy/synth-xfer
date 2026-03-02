@@ -50,6 +50,7 @@ cmake.args = ["-DCMAKE_C_COMPILER=clang", "-DCMAKE_CXX_COMPILER=clang++"]
 [tool.ruff]
 line-length = 90
 target-version = "py313"
+exclude = ["results/"]
 lint.extend-select = ["I"]
 lint.ignore = ["E731"]
 
