@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING
 from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.dsl_operators import DslOpSet, load_dsl_ops
-from synth_xfer._util.eval import eval_transfer_func, setup_eval
+from synth_xfer._util.eval import enum, eval_transfer_func
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.log import get_logger, init_logging, write_log_file
@@ -118,7 +118,7 @@ def run(
     context_cond = _setup_context(random, True, dsl_ops)
 
     start_time = perf_counter()
-    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helper_funcs, sampler)
+    to_eval = enum(lbw, mbw, hbw, random_seed, helper_funcs, sampler)
     run_time = perf_counter() - start_time
     logger.perf(f"Enum engine took {run_time:.4f}s")
 

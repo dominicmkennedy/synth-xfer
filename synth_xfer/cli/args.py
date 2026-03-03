@@ -80,28 +80,30 @@ def int_list(s: str) -> list[int]:
 def make_sampler_parser(p: ArgumentParser):
     mx = p.add_mutually_exclusive_group(required=False)
     mx.add_argument(
-        "-uniform", action="store_true", help="Use uniform sampling (default)"
+        "--uniform", action="store_true", help="Use uniform sampling (default)"
     )
-    mx.add_argument("-normal", action="store_true", help="Use normal sampling")
+    mx.add_argument("--normal", action="store_true", help="Use normal sampling")
     mx.add_argument(
-        "-skew-left", action="store_true", help="Use skew-normal left sampling"
-    )
-    mx.add_argument(
-        "-skew-right", action="store_true", help="Use skew-normal right sampling"
+        "--skew-left", action="store_true", help="Use skew-normal left sampling"
     )
     mx.add_argument(
-        "-bimodal", action="store_true", help="Use bimodal symmetric sampling"
+        "--skew-right", action="store_true", help="Use skew-normal right sampling"
+    )
+    mx.add_argument(
+        "--bimodal", action="store_true", help="Use bimodal symmetric sampling"
     )
 
     g_normal = p.add_argument_group("normal options")
-    g_normal.add_argument("-sigma", type=float, default=0.15, help="Stddev in unit space")
+    g_normal.add_argument(
+        "--sigma", type=float, default=0.15, help="Stddev in unit space"
+    )
 
     g_skew = p.add_argument_group("skew options")
-    g_skew.add_argument("-alpha", type=float, default=5.0, help="Skew magnitude (>0)")
+    g_skew.add_argument("--alpha", type=float, default=5.0, help="Skew magnitude (>0)")
 
     g_bimodal = p.add_argument_group("bimodal options")
     g_bimodal.add_argument(
-        "-separation", type=float, default=0.22, help="Peak separation in [0, 0.49]"
+        "--separation", type=float, default=0.22, help="Peak separation in [0, 0.49]"
     )
 
     return p

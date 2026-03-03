@@ -48,8 +48,8 @@ std::string to_lower_ascii(std::string s);
 using EnumLowThunk = py::object (*)(std::uintptr_t,
                                     std::optional<std::uintptr_t>);
 using EnumMidThunk = py::object (*)(std::uintptr_t,
-                                    std::optional<std::uintptr_t>,
-                                    unsigned int, unsigned int,
+                                    std::optional<std::uintptr_t>, unsigned int,
+                                    unsigned int,
                                     std::shared_ptr<rngdist::Sampler>);
 using EnumHighThunk = py::object (*)(std::uintptr_t,
                                      std::optional<std::uintptr_t>,
@@ -73,8 +73,9 @@ void bind_sequence_protocol(PyClass &cls, LenThunk len, GetItemThunk getitem,
   cls.def("__getitem__", [getitem](py::handle self, std::size_t i) {
     return getitem(self, i);
   });
-  cls.def("__iter__", [iter](py::handle self) { return iter(self); },
-          py::keep_alive<0, 1>());
+  cls.def(
+      "__iter__", [iter](py::handle self) { return iter(self); },
+      py::keep_alive<0, 1>());
 }
 
 template <template <std::size_t> class D, std::size_t BW>
@@ -89,6 +90,14 @@ void register_domain_class(py::module_ &m) {
   cls.def_static("bottom", []() { return D<BW>::bottom(); });
   cls.def(py::init([](const std::string &s) { return D<BW>::parse(s); }));
   cls.def("size", [](const D<BW> &self) { return self.size(); });
+  cls.def(
+      "distance",
+      [](const D<BW> &self, const D<BW> &rhs) { return self.distance(rhs); },
+      py::arg("rhs"));
+  cls.def("__eq__",
+          [](const D<BW> &self, const D<BW> &rhs) { return self == rhs; });
+  cls.def("__ne__",
+          [](const D<BW> &self, const D<BW> &rhs) { return self != rhs; });
   cls.def("__str__", [](const D<BW> &self) {
     std::ostringstream oss;
     oss << self;
@@ -116,22 +125,21 @@ void register_enum_domain(py::module_ &m) {
 
   auto cls = py::class_<EvalVec>(m, cls_name.c_str());
   cls.def(py::init([](py::sequence rows) {
-        const auto parsed = parse_enum_rows(rows, Arity);
-        auto v = std::make_unique<EvalVec>();
-        v->reserve(parsed.size());
+    const auto parsed = parse_enum_rows(rows, Arity);
+    auto v = std::make_unique<EvalVec>();
+    v->reserve(parsed.size());
 
-        for (const auto &row : parsed) {
-          auto tup = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            ArgsTuple args_tuple{
-                Dom<BWs>::parse(row.args[Is])...};
-            return Row{std::move(args_tuple), Dom<ResBw>::parse(row.ret)};
-          }(std::make_index_sequence<Arity>{});
+    for (const auto &row : parsed) {
+      auto tup = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        ArgsTuple args_tuple{Dom<BWs>::parse(row.args[Is])...};
+        return Row{std::move(args_tuple), Dom<ResBw>::parse(row.ret)};
+      }(std::make_index_sequence<Arity>{});
 
-          v->emplace_back(std::move(tup));
-        }
+      v->emplace_back(std::move(tup));
+    }
 
-        return v;
-      }));
+    return v;
+  }));
 
   bind_sequence_protocol(
       cls,
@@ -143,7 +151,8 @@ void register_enum_domain(py::module_ &m) {
         if (i >= v.size()) {
           throw py::index_error();
         }
-        return py::cast(v[i], py::return_value_policy::reference_internal, self);
+        return py::cast(v[i], py::return_value_policy::reference_internal,
+                        self);
       },
       +[](py::handle self) -> py::object {
         const EvalVec &v = py::cast<const EvalVec &>(self);
@@ -165,7 +174,8 @@ void register_enum_domain(py::module_ &m) {
           EnumT ed{crtOpAddr, opConFnAddr};
           *out = ed.genLows();
         }
-        return py::cast(std::move(out), py::return_value_policy::take_ownership);
+        return py::cast(std::move(out),
+                        py::return_value_policy::take_ownership);
       },
       +[](std::uintptr_t crtOpAddr, std::optional<std::uintptr_t> opConFnAddr,
           unsigned int num_lat_samples, unsigned int seed,
@@ -177,7 +187,8 @@ void register_enum_domain(py::module_ &m) {
           EnumT ed{crtOpAddr, opConFnAddr};
           *out = ed.genMids(num_lat_samples, rng, *sampler);
         }
-        return py::cast(std::move(out), py::return_value_policy::take_ownership);
+        return py::cast(std::move(out),
+                        py::return_value_policy::take_ownership);
       },
       +[](std::uintptr_t crtOpAddr, std::optional<std::uintptr_t> opConFnAddr,
           unsigned int num_lat_samples, unsigned int num_conc_samples,
@@ -190,7 +201,8 @@ void register_enum_domain(py::module_ &m) {
           EnumT ed{crtOpAddr, opConFnAddr};
           *out = ed.genHighs(num_lat_samples, num_conc_samples, rng, *sampler);
         }
-        return py::cast(std::move(out), py::return_value_policy::take_ownership);
+        return py::cast(std::move(out),
+                        py::return_value_policy::take_ownership);
       });
 }
 
@@ -231,23 +243,23 @@ void register_run_domain(py::module_ &m) {
 
   auto cls = py::class_<RunVec>(m, cls_name.c_str());
   cls.def(py::init([](py::sequence rows) {
-        const auto parsed = parse_run_rows(rows, Arity);
-        auto v = std::make_unique<RunVec>();
-        v->reserve(parsed.size());
+    const auto parsed = parse_run_rows(rows, Arity);
+    auto v = std::make_unique<RunVec>();
+    v->reserve(parsed.size());
 
-        for (const auto &row : parsed) {
-          auto tup = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-            return std::tuple<Dom<BWs>...>{
-                (py::isinstance<py::str>(row[Is])
-                     ? Dom<BWs>::parse(py::cast<std::string>(row[Is]))
-                     : py::cast<Dom<BWs>>(row[Is]))...};
-          }(std::make_index_sequence<Arity>{});
+    for (const auto &row : parsed) {
+      auto tup = [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        return std::tuple<Dom<BWs>...>{
+            (py::isinstance<py::str>(row[Is])
+                 ? Dom<BWs>::parse(py::cast<std::string>(row[Is]))
+                 : py::cast<Dom<BWs>>(row[Is]))...};
+      }(std::make_index_sequence<Arity>{});
 
-          v->emplace_back(std::move(tup));
-        }
+      v->emplace_back(std::move(tup));
+    }
 
-        return v;
-      }));
+    return v;
+  }));
 
   bind_sequence_protocol(
       cls,
@@ -259,7 +271,8 @@ void register_run_domain(py::module_ &m) {
         if (i >= v.size()) {
           throw py::index_error();
         }
-        return py::cast(v[i], py::return_value_policy::reference_internal, self);
+        return py::cast(v[i], py::return_value_policy::reference_internal,
+                        self);
       },
       +[](py::handle self) -> py::object {
         const RunVec &v = py::cast<const RunVec &>(self);

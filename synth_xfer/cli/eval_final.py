@@ -12,7 +12,7 @@ import pandas as pd
 from xdsl.dialects.func import FuncOp
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval import eval_transfer_func, setup_eval
+from synth_xfer._util.eval import enum, eval_transfer_func
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
@@ -154,7 +154,7 @@ def run(
     top_xfer = lowerer.add_fn(top_mlir, shim=True)
     lowerer.add_mod(sol_module, [xfer_name])
 
-    to_eval = setup_eval(lbw, mbw, hbw, random_seed, helpers, sampler)
+    to_eval = enum(lbw, mbw, hbw, random_seed, helpers, sampler)
     with Jit() as jit:
         jit.add_mod(lowerer)
 
