@@ -16,7 +16,7 @@
     %cge0 = "transfer.cmp"(%c, %const0) {predicate=5}: (!transfer.integer, !transfer.integer) -> i1
     %dge0 = "transfer.cmp"(%d, %const0) {predicate=5}: (!transfer.integer, !transfer.integer) -> i1
     %bgec = "transfer.cmp"(%b, %c) {predicate=5}: (!transfer.integer, !transfer.integer) -> i1
-    
+
     %aandb = "arith.andi"(%age0, %bge0) : (i1, i1) -> i1
     %abandc = "arith.andi"(%aandb, %cge0) : (i1, i1) -> i1
     %abcandd = "arith.andi"(%abandc, %dge0) : (i1, i1) -> i1

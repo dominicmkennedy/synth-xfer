@@ -1,13 +1,16 @@
-# Available Operations
+### Constructor and Deconstructor
 
-## Boolean Operations (i1)
+- transfer.get : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
+- transfer.make : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
+
+### Boolean Operations (i1)
 
 - transfer.cmp: (!transfer.integer, !transfer.integer) -> i1
 - arith.andi: (i1, i1) -> i1
 - arith.ori: (i1, i1) -> i1
 - arith.xori: (i1, i1) -> i1
 
-## Integer Operations
+### Integer Operations
 
 - transfer.neg: (!transfer.integer) -> !transfer.integer
 - transfer.and: (!transfer.integer, !transfer.integer) -> !transfer.integer

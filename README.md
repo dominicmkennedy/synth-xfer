@@ -172,15 +172,15 @@ Norm bw:  (64, 5000, 5000)
 
 ## Agent Synthesis
 
-LLM-based synthesis of transfer functions. Two modes: **direct_llm** (single prompt + response) and **agent_sdk** (OpenAI Agent API with an eval tool; the agent can iterate until the transformer passes eval).
+LLM-based synthesis of transfer functions using the **OpenAI Agent API** with an eval tool; the agent can iterate until the transformer passes eval.
 
 **Setup:** Set your OpenAI API key in the `.env` file, then run `source .env` (or set `OPENAI_API_KEY` in the environment).
 
 **Run** (make sure you re-run pip install)
 ```bash
-agent-synth mlir/Operations/Add.mlir -o outputs/ag --model gpt-5.1-codex-mini --method agent_sdk --dump-agent-run
+agent-synth mlir/Operations/Add.mlir -o outputs/ag --model gpt-5.1-codex-mini --dump-agent-run
 ```
-You can omit `--method agent_sdk` to use direct_llm, and omit `--dump-agent-run` if you don't need the full run dump.
+You can omit `--dump-agent-run` if you don't need the full run dump.
 
 **Options:**
 
@@ -189,8 +189,7 @@ You can omit `--method agent_sdk` to use direct_llm, and omit `--dump-agent-run`
 | `op_file` | Operation MLIR file (e.g. `mlir/Operations/Add.mlir`). |
 | `-o, --output` | Output directory (default: `outputs/agent`). |
 | `--model` | OpenAI model (default: `gpt-4`). See [OpenAI pricing](https://developers.openai.com/api/docs/pricing). |
-| `--method` | `direct_llm` or `agent_sdk` (default: `direct_llm`). |
 | `--skip-eval` | Skip running eval-final after synthesis. |
-| `--dump-agent-run` | Write a full dump of the agent run (messages, tool calls, token usage) to the output dir (agent_sdk only). |
+| `--dump-agent-run` | Write a full dump of the agent run (messages, tool calls, token usage) to the output dir. |
 
 Each run prints the **model** in use and **token usage** (input/output/reasoning and total). The agent is prompted to reason about the operation and KnownBits before writing MLIR and to use multiple turns to improve quality rather than stopping at the first candidate that passes eval.
