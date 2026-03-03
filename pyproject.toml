@@ -43,7 +43,6 @@ simplifier = "synth_xfer.cli.simplifier:main"
 enum = "synth_xfer.cli.enum:main"
 max-precise = "synth_xfer.cli.max_precise:main"
 agent-synth = "agent.main:main"
-llm-learn = "stitch.llmain:main"
 stitch-learn = "stitch.main:main"
 
 [tool.scikit-build]
