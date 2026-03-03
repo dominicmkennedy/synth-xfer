@@ -16,6 +16,22 @@ if TYPE_CHECKING:
     from synth_xfer._eval_engine import ArgsVec, Results, ToEval
 
 
+def _get_ee_fn_dyn(fn_name: str) -> Callable:
+    try:
+        ee_fn = getattr(_eval_engine, fn_name)
+    except AttributeError as e:
+        raise ImportError(
+            f"class/function: {fn_name!r} not compiled into eval engine.\n"
+            "Add BW, Arity, Domain combination to pyproject.toml and recompile."
+        ) from e
+    if not callable(ee_fn):
+        raise TypeError(
+            f"{ee_fn} exists but is not callable (got {type(ee_fn).__name__})"
+        )
+
+    return ee_fn
+
+
 def get_per_bit(a: "Results") -> list[PerBitRes]:
     x = str(a).split("\n")
 
@@ -67,7 +83,7 @@ def get_per_bit(a: "Results") -> list[PerBitRes]:
     ]
 
 
-def setup_eval(
+def enum(
     lbw: list[int],
     mbw: list[tuple[int, int]],
     hbw: list[tuple[int, int, int]],
@@ -94,19 +110,7 @@ def setup_eval(
         arg_str = "_".join(arg_bws)
         func_name = f"enum_{level}_{domain_str}_{ret_bw}_{arg_str}"
 
-        try:
-            enum_fn = getattr(_eval_engine, func_name)
-        except AttributeError as e:
-            raise ImportError(
-                f"Function {func_name!r} not compiled into enum engine.\n"
-                "Add function to bindings.cpp and recompile the enum engine."
-            ) from e
-        if not callable(enum_fn):
-            raise TypeError(
-                f"{func_name} exists but is not callable (got {type(enum_fn).__name__})"
-            )
-
-        return enum_fn
+        return _get_ee_fn_dyn(func_name)
 
     with Jit() as jit:
         jit.add_mod(lowerer)
@@ -160,18 +164,7 @@ def eval_transfer_func(
         suffix = x.__class__.__name__.lower()[6:]
         func_name = f"eval_{suffix}"
 
-        try:
-            eval_fn = getattr(_eval_engine, func_name)
-        except AttributeError as e:
-            raise ImportError(
-                f"Function {func_name!r} not compiled into eval engine.\n"
-                "Add function to bindings.cpp and recompile the eval engine."
-            ) from e
-        if not callable(eval_fn):
-            raise TypeError(
-                f"{func_name} exists but is not callable (got {type(eval_fn).__name__})"
-            )
-        return eval_fn
+        return _get_ee_fn_dyn(func_name)
 
     per_bits = []
     for to_eval, xs, bs in x.values():
@@ -189,62 +182,44 @@ def parse_to_run_inputs(
     for _ in range(arity):
         cls_name += f"_{bw}"
 
-    try:
-        args_cls = getattr(_eval_engine, cls_name)
-    except AttributeError as e:
-        raise ImportError(
-            f"Args class: {cls_name!r} not compiled into eval engine.\n"
-            "Add Args to bindings.cpp and recompile the eval engine."
-        ) from e
-    if not callable(args_cls):
-        raise TypeError(
-            f"{cls_name} exists but is not callable (got {type(args_cls).__name__})"
-        )
+    to_run_cls = _get_ee_fn_dyn(cls_name)
 
-    return args_cls(inputs)
+    return to_run_cls(inputs)
 
 
-def eval_to_run(
-    domain: AbstractDomain, bw: int, arity: int, inputs: "ArgsVec", fn_ptr: FnPtr
-):
-    fn_name = f"run_transformer_{str(domain).lower()}"
+def parse_to_eval_inputs(
+    domain: AbstractDomain, bw: int, arity: int, inputs: list[tuple[tuple[str, ...], str]]
+) -> "ToEval":
+    cls_name = f"ToEval{domain}"
     for _ in range(arity + 1):
-        fn_name += f"_{bw}"
+        cls_name += f"_{bw}"
 
-    try:
-        run_fn = getattr(_eval_engine, fn_name)
-    except AttributeError as e:
-        raise ImportError(
-            f"run function: {fn_name!r} not compiled into eval engine.\n"
-            "Add run function to bindings.cpp and recompile the eval engine."
-        ) from e
-    if not callable(run_fn):
-        raise TypeError(
-            f"{run_fn} exists but is not callable (got {type(run_fn).__name__})"
-        )
+    to_eval_cls = _get_ee_fn_dyn(cls_name)
 
-    return run_fn(inputs, fn_ptr.addr)
+    return to_eval_cls(inputs)
 
 
 def run_xfer_fn(
     domain: AbstractDomain,
     bw: int,
-    input: list[tuple[str, ...]],
+    input_args: "ArgsVec",
     mlir_mod: ModuleOp,
     xfer_name: str,
 ):
-    arity = len(input[0])
-    input_args = parse_to_run_inputs(domain, bw, arity, input)
-
     lowerer = LowerToLLVM([bw])
     lowerer.add_mod(mlir_mod, [xfer_name])
+
+    fn_name = f"run_transformer_{str(domain).lower()}"
+    for _ in range(len(input_args[0]) + 1):
+        fn_name += f"_{bw}"
+
+    run_fn = _get_ee_fn_dyn(fn_name)
 
     with Jit() as jit:
         jit.add_mod(lowerer)
         fn_ptr = jit.get_fn_ptr(f"{xfer_name}_{bw}_shim")
-        outputs = eval_to_run(domain, bw, arity, input_args, fn_ptr)
 
-    return outputs
+        return run_fn(input_args, fn_ptr.addr)
 
 
 def run_concrete_fn(
