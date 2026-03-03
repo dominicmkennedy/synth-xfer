@@ -154,7 +154,7 @@ def run_library_learn(
 ) -> LibraryState:
     version = previous_library.version + 1
 
-    print(f"Learning library version {version}")
+    print(f"\nLearning library version {version}")
 
     # Read all files
     prompt_template_raw = args.library_prompt.read_text()
@@ -174,7 +174,7 @@ def run_library_learn(
 
     output_dir = Path(args.output)
     print(
-        f"Prompt saved to: {save_instantiated_prompt(prompt, output_dir, f"libraryV{version}")}"
+        f"Prompt saved to: {save_instantiated_prompt(prompt, output_dir, f"library{version}")}"
     )
 
     print(f"Using model: {args.model}")
@@ -190,7 +190,7 @@ def run_library_learn(
         dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
         print(f"Agent run dump: {dump_path}")
 
-    (output_dir / f"learn_output_{version}.txt").write_text(llm_output)
+    (output_dir / f"library_output_{version}.txt").write_text(llm_output)
     lib_text = clean_llm_output(llm_output)
     library_file = save_library(
         lib_text, output_dir, version
