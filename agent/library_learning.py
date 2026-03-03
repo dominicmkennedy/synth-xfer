@@ -48,10 +48,7 @@ def synth_phase(
     library: LibraryState,
     run_single_task,
 ) -> list[SynthesisResult]:
-    """Run synthesis agent over tasks using current library.
-
-    TODO: Add batching, retries, scheduling, and richer telemetry.
-    """
+    """Run synthesis agent over tasks using current library."""
     results: list[SynthesisResult] = []
     for task in tasks:
         result = run_single_task(task, library)

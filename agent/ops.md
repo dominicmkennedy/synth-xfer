@@ -1,3 +1,8 @@
+### Constructor and Deconstructor
+
+- transfer.get : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
+- transfer.make : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
+
 ### Boolean Operations (i1)
 
 - transfer.cmp: (!transfer.integer, !transfer.integer) -> i1

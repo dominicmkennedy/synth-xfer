@@ -1,53 +1,66 @@
-<!-- Comments
-Comments -->
+## Task: Synthesize KnownBits transfer for `<OP>`
 
-## Task
+Implement a sound and high-precision KnownBits transfer function for operation `<OP>` in this repository.
 
-Implement a KnownBits transfer function for operation `<OP>` in this repo
+You will write **one MLIR file**: `kb_<op>.mlir`, defining a function with symbol name `kb_<op>`.
 
-## Reasoning (before implementing)
+## Context: What KnownBits means here
 
-- Reason about the operation semantics and how KnownBits (known-zero, known-one) should be updated for each output before writing MLIR.
-- Aim for **sound** and **precise** transfers; prefer a well-reasoned design over the first implementation that passes eval.
-- If a candidate gets low metrics or errors, analyze why (e.g. wrong propagation, missing cases) and improve the design, not only fix syntax.
+KnownBits is represented as a 2-element container for each value:
 
-## Requirements
+- element **0**: known-zero mask
+- element **1**: known-one mask
 
-1. Implement `kb_<op>.mlir` in the same MLIR style as the examples I provided to you.
-2. Function has symbol name `kb_<op>`.
-3. KnownBits encoding:
-   - index 0 = known-zero mask
-   - index 1 = known-one mask
-4. Use existing primitive included in the following Avaliable Operators section, which aligned with the LLVM APInt semantics.
-5. The program should be in SSA (Single Static Assigment) form. **Each line only has 1 operation**. Do not write `%x = %y` (that is invalid MLIR); every definition must be an operation call; use SSA values directly in the next operation or in `transfer.make`.
+A bit set in known-zero means that bit is definitely 0; a bit set in known-one means that bit is definitely 1. Your transfer must maintain **soundness** (never claim a bit is known if it might not be).
 
-## Workflow Instructions
+## Concrete semantics of `<OP>`
 
-Follow this workflow:
+Use this as the semantics of the concrete operator:
+
+<CONCRETE_OPERATION>
+
+## Constraints: MLIR form and allowed building blocks
+
+1. **Style match:** Follow the same MLIR style as the provided templates/examples.
+2. **SSA only:** The program must be in SSA form.
+3. **One op per line:** Every line must be exactly one allowed MLIR operation. Do **not** write `%x = %y`; instead, thread SSA values directly into subsequent ops or into `transfer.make`.
+4. **Use only allowed ops:** Use only primitives from the “Available Operators” section (aligned with LLVM APInt semantics), plus any listed library helpers. Use a library function through `func.call`
+```mlir
+%res = func.call @f(%arg0, %arg1) : (arg0_type, arg1_type) -> res_type
+```
+5. **Include the library function:** Include the used library functions in the output module.
+
+### Available primitives
+
+<PRIMITIVE_OPERATORS>
+
+### Available library helpers
+
+```mlir
+<LIBRARY_FUNCTIONS>
+```
+
+## Templates and reference implementations
+
+### Output templates
+
+Your output must fit one of these templates:
+
+```mlir
+<PROGRAM_TEMPLATES>
+```
+
+### Examples
+
+Those are example transformers for other concrete operations:
+
+<TRANSFORMER_EXAMPLES>
+
+## Required workflow (must follow)
+
 1. Reason first: For this operation, what do known-zero and known-one mean for each output? Which cases or sub-expressions do you need to handle? Plan the transfer structure before writing code.
 2. Output a candidate MLIR based on that reasoning.
 3. Call the eval tool with that MLIR (pass the raw MLIR string as the argument).
 4. If the tool returns an error, fix the MLIR and go back to step 3.
 5. Otherwise the tool returns metrics (Sound %% and Exact %%). If Sound %% is not 100, you should fix the soundness of your transfer function. If Exact %% is low, reason about which cases can be improved and try again.
 6. When the tool returns sound (Sound %% = 100) and you are satisfied with the precision (Exact %% is high), return that MLIR as your final answer (MLIR only, no explanation).
-
-## Concrete Operation
-
-The semantics of concrete operator you need to synthesize abstract transfer function for:
-<CONCRETE_OPERATION>
-
-## Output Template and Examples
-
-The output MLIR programs should fit in the following templates:
-<PROGRAM_TEMPLATES>
-
-These and some examples of transfer functions:
-<TRANSFORMER_EXAMPLES>
-
-## Available Operators
-
-<PRIMITIVE_OPERATORS>
-
-## Available Library Functions
-
-<LIBRARY_FUNCTIONS>

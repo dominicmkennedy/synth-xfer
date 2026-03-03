@@ -82,14 +82,14 @@ def run_single_synthesis_task(
     print(f"Synthesizing: {task.op_name}")
 
     # Read all files
-    prompt_template_raw = args.prompt_template.read_text()
+    prompt_template_raw = args.prompt.read_text()
     prompt_template = re.sub(
         r"<!--.*?-->", "", prompt_template_raw, flags=re.DOTALL
     ).strip()
 
     op_content = read_op_file(task.op_file)
-    template_mlir = args.template_mlir.read_text()
-    ops_md = args.ops_md.read_text()
+    template_mlir = args.template.read_text()
+    ops_md = args.ops.read_text()
 
     examples = [
         f"Example from {f.name}:\n```mlir\n{f.read_text()}```"
@@ -171,7 +171,7 @@ def main():
         help="Max iterations for agent (default: 20, use 2-3 for fast dev)",
     )
     parser.add_argument(
-        "--prompt-template",
+        "--prompt",
         type=Path,
         default=Path(__file__).parent / "prompt.md",
         help="Path to prompt template (default: agent/prompt.md)",
@@ -183,19 +183,19 @@ def main():
         help="Path to examples directory (default: agent/examples)",
     )
     parser.add_argument(
-        "--ops-md",
+        "--ops",
         type=Path,
         default=Path(__file__).parent / "ops.md",
         help="Path to ops.md file (default: agent/ops.md)",
     )
     parser.add_argument(
-        "--template-mlir",
+        "--template",
         type=Path,
         default=Path(__file__).parent / "template.mlir",
         help="Path to template.mlir file (default: agent/template.mlir)",
     )
     parser.add_argument(
-        "--library-file",
+        "--library",
         type=Path,
         default=None,
         help="Optional initial library file for library-learning workflow",
@@ -214,7 +214,7 @@ def main():
         SynthesisTask(op_file=op_file, op_name=extract_op_name(op_file))
         for op_file in args.op_file
     ]
-    initial_library = load_initial_library(args.library_file)
+    initial_library = load_initial_library(args.library)
 
     def _run_task(task: SynthesisTask, library: LibraryState) -> SynthesisResult:
         return run_single_synthesis_task(
