@@ -1,3 +1,4 @@
+builtin.module {
 func.func @kb_xor(%lhs : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %rhs : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
     %lhs0 = "transfer.get"(%lhs) {index = 0} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %lhs1 = "transfer.get"(%lhs) {index = 1} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
@@ -12,3 +13,4 @@ func.func @kb_xor(%lhs : !transfer.abs_value<[!transfer.integer, !transfer.integ
     %r = "transfer.make"(%res0, %res1) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
     func.return %r : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
   }
+}

@@ -3,7 +3,7 @@ builtin.module {
     // This is a simple function that shifts an integer left by 1.
     %one = "transfer.constant"(%0) {value = 1} : () -> !transfer.integer
     %res = "transfer.shl"(%0, %one) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    func.return %res : !transfer.integer      
+    func.return %res : !transfer.integer
   }
 
   func.func @get_max_value(%0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer {
