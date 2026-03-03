@@ -20,7 +20,10 @@ template <std::size_t X_> struct ModT {
   public:
     using BV = APInt<X>;
     static constexpr std::size_t arity = 1;
-    static constexpr std::string name = "Mod" + ct::to_string<X>();
+    inline static constexpr auto name_arr =
+        ct::concat_fixed("Mod", ct::to_fixed_string<X>());
+    inline static constexpr std::string_view name{name_arr.data(),
+                                                  name_arr.size() - 1};
 
     // ctor
     constexpr Mod() : v{} {}
