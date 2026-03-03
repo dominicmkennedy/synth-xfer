@@ -25,6 +25,7 @@ from .util import (
     read_op_file,
     save_instantiated_prompt,
     save_transformer,
+    save_library,
 )
 
 
@@ -184,6 +185,22 @@ def run_library_learn(
     
     print_token_usage(run_result)
 
+    if args.dump_agent_run:
+        dump_path = output_dir / f"library_run_{version}.txt"
+        dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
+        print(f"Agent run dump: {dump_path}")
+
+    (output_dir / f"learn_output_{version}.txt").write_text(llm_output)
+    lib_text = clean_llm_output(llm_output)
+    library_file = save_library(
+        lib_text, output_dir, version
+    )
+    print(f"Library: {library_file}")
+
+    return LibraryState(
+        version,
+        lib_text,
+    )
 
 def main():
     """Synthesize transformer using selected method."""
