@@ -25,17 +25,6 @@ AGENT_INSTRUCTIONS = """You synthesize KnownBits transfer functions in MLIR. You
 - In your final message return only the MLIR code, no explanation.
 - Each line of MLIR must be exactly one operation from the allowed ops; do not write %x = %y (use the value directly in the next op or in transfer.make)."""
 
-WORKFLOW_INSTRUCTION = """
----
-Follow this workflow:
-1. Reason first: For this operation, what do known-zero and known-one mean for each output? Which cases or sub-expressions do you need to handle? Plan the transfer structure before writing code.
-2. Output a candidate MLIR based on that reasoning.
-3. Call the eval tool with that MLIR (pass the raw MLIR string as the argument).
-4. If the tool returns an error, fix the MLIR and go back to step 3.
-5. Otherwise the tool returns metrics (Sound %% and Exact %%). If Sound %% is not 100, you should fix the soundness of your transfer function. If Exact %% is low, reason about which cases can be improved and try again.
-6. When the tool returns sound (Sound %% = 100) and you are satisfied with the precision (Exact %% is high), return that MLIR as your final answer (MLIR only, no explanation).
-"""
-
 
 # Helper stuff for debugging
 def format_agent_run_dump(result) -> str:
@@ -114,10 +103,9 @@ def run_agent_synthesis(
         model=model,
     )
 
-    # Full task as user message + explicit workflow
-    # to encourage tool use and reasoning
+    # Full task as user message
     MAX_TURN_MESSAGE = f"You have a maximum of {max_turns} iterations to complete this task.  Do not exceed this limit."
-    user_message = prompt + WORKFLOW_INSTRUCTION + "\n" + MAX_TURN_MESSAGE
+    user_message = prompt + "\n" + MAX_TURN_MESSAGE
     result = Runner.run_sync(agent, user_message, max_turns=max_turns)
 
     return (result.final_output, result)

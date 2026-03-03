@@ -4,21 +4,21 @@
 import argparse
 import os
 from pathlib import Path
+import re
 import sys
 
 from synth_xfer._util.domain import AbstractDomain
 
 from .agent_sdk import format_agent_run_dump, run_agent_synthesis
-from .shared import (
+from .shared import build_prompt
+from .util import (
     clean_llm_output,
+    eval_transformer,
     extract_op_name,
-    instantiate_prompt,
     read_op_file,
-    read_prompt_template,
     save_instantiated_prompt,
     save_transformer,
 )
-from .util import eval_transformer
 
 
 def run_eval(op_file_path: str, transformer_file: Path, op_name: str) -> str:
@@ -87,6 +87,30 @@ def main():
         default=20,
         help="Max iterations for agent (default: 20, use 2-3 for fast dev)",
     )
+    parser.add_argument(
+        "--prompt-template",
+        type=Path,
+        default=Path(__file__).parent / "prompt.md",
+        help="Path to prompt template (default: agent/prompt.md)",
+    )
+    parser.add_argument(
+        "--examples-dir",
+        type=Path,
+        default=Path(__file__).parent / "examples",
+        help="Path to examples directory (default: agent/examples)",
+    )
+    parser.add_argument(
+        "--ops-md",
+        type=Path,
+        default=Path(__file__).parent / "ops.md",
+        help="Path to ops.md file (default: agent/ops.md)",
+    )
+    parser.add_argument(
+        "--template-mlir",
+        type=Path,
+        default=Path(__file__).parent / "template.mlir",
+        help="Path to template.mlir file (default: agent/template.mlir)",
+    )
 
     args = parser.parse_args()
     api_key = get_api_key()
@@ -94,8 +118,31 @@ def main():
     op_name = extract_op_name(args.op_file)
     print(f"Synthesizing: {op_name}")
 
-    prompt = instantiate_prompt(
-        read_prompt_template(), op_name, read_op_file(args.op_file)
+    # Read all files
+    prompt_template_raw = args.prompt_template.read_text()
+    # Remove HTML comments like the original read_prompt_template
+    prompt_template = re.sub(
+        r"<!--.*?-->", "", prompt_template_raw, flags=re.DOTALL
+    ).strip()
+
+    op_content = read_op_file(args.op_file)
+    template_mlir = args.template_mlir.read_text()
+    ops_md = args.ops_md.read_text()
+
+    # Read examples
+    examples = [
+        f"Example from {f.name}:\n```mlir\n{f.read_text()}```"
+        for f in sorted(args.examples_dir.glob("*.mlir"))
+    ]
+    examples_str = "\n\n".join(examples)
+
+    prompt = build_prompt(
+        prompt_template=prompt_template,
+        op_name=op_name,
+        op_content=op_content,
+        template_mlir=template_mlir,
+        examples=examples_str,
+        ops_md=ops_md,
     )
 
     output_dir = Path(args.output)
