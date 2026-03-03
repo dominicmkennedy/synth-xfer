@@ -1,8 +1,5 @@
 #!/usr/bin/env python3
-"""Agent for synthesizing transfer functions using LLM.
-
-Supports direct_llm (direct prompting) and agent_sdk (OpenAI Agent API).
-"""
+"""Agent for synthesizing transfer functions using LLM via OpenAI Agent API."""
 
 import argparse
 import os
@@ -12,7 +9,6 @@ import sys
 from synth_xfer._util.domain import AbstractDomain
 
 from .agent_sdk import format_agent_run_dump, run_agent_synthesis
-from .direct_llm import call_llm
 from .shared import (
     clean_llm_output,
     extract_op_name,
@@ -50,6 +46,25 @@ def get_api_key() -> str:
     return api_key
 
 
+def print_token_usage(run_result) -> None:
+    """Print aggregated token usage from agent run."""
+    inp = out = reason = 0
+    for resp in getattr(run_result, "raw_responses", []):
+        u = getattr(resp, "usage", None)
+        if u is None:
+            continue
+        inp += getattr(u, "input_tokens", 0) or 0
+        out += getattr(u, "output_tokens", 0) or 0
+        od = getattr(u, "output_tokens_details", None)
+        if od is not None:
+            reason += getattr(od, "reasoning_tokens", 0) or 0
+    total = inp + out + reason
+    token_str = f"{inp:,} input, {out:,} output" + (
+        f", {reason:,} reasoning" if reason else ""
+    )
+    print(f"Tokens: {token_str} ({total:,} total)")
+
+
 def main():
     """Synthesize transformer using selected method."""
     parser = argparse.ArgumentParser(description="Synthesize transfer functions")
@@ -62,15 +77,9 @@ def main():
     parser.add_argument("--skip-eval", action="store_true", help="Skip eval-final")
     parser.add_argument("--model", default="gpt-4", help="OpenAI model")
     parser.add_argument(
-        "--method",
-        choices=["direct_llm", "agent_sdk"],
-        default="direct_llm",
-        help="Synthesis method (direct_llm or agent_sdk)",
-    )
-    parser.add_argument(
         "--dump-agent-run",
         action="store_true",
-        help="Dump full agent run (messages, tool calls, outputs) to output dir (agent_sdk only)",
+        help="Dump full agent run (messages, tool calls, outputs) to output dir",
     )
     parser.add_argument(
         "--max-turns",
@@ -83,7 +92,7 @@ def main():
     api_key = get_api_key()
 
     op_name = extract_op_name(args.op_file)
-    print(f"Synthesizing: {op_name} (method: {args.method})")
+    print(f"Synthesizing: {op_name}")
 
     prompt = instantiate_prompt(
         read_prompt_template(), op_name, read_op_file(args.op_file)
@@ -94,43 +103,16 @@ def main():
 
     # Run synthesis
     print(f"Using model: {args.model}")
-    if args.method == "direct_llm":
-        llm_output, usage = call_llm(prompt, api_key, args.model)
-        # Print token usage
-        inp, out, reason = (
-            usage["input_tokens"],
-            usage["output_tokens"],
-            usage.get("reasoning_tokens", 0),
-        )
-        total = inp + out + reason
-        token_str = f"{inp:,} input, {out:,} output" + (
-            f", {reason:,} reasoning" if reason else ""
-        )
-        print(f"Tokens: {token_str} ({total:,} total)")
-    else:  # agent_sdk
-        llm_output, run_result = run_agent_synthesis(
-            prompt, args.op_file, op_name, api_key, args.model, args.max_turns
-        )
-        # Token usage (aggregate across all turns)
-        inp = out = reason = 0
-        for resp in getattr(run_result, "raw_responses", []):
-            u = getattr(resp, "usage", None)
-            if u is None:
-                continue
-            inp += getattr(u, "input_tokens", 0) or 0
-            out += getattr(u, "output_tokens", 0) or 0
-            od = getattr(u, "output_tokens_details", None)
-            if od is not None:
-                reason += getattr(od, "reasoning_tokens", 0) or 0
-        total = inp + out + reason
-        token_str = f"{inp:,} input, {out:,} output" + (
-            f", {reason:,} reasoning" if reason else ""
-        )
-        print(f"Tokens: {token_str} ({total:,} total)")
-        if getattr(args, "dump_agent_run", False):
-            dump_path = output_dir / f"agent_run_{op_name.lower()}.txt"
-            dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
-            print(f"Agent run dump: {dump_path}")
+    llm_output, run_result = run_agent_synthesis(
+        prompt, args.op_file, op_name, api_key, args.model, args.max_turns
+    )
+
+    print_token_usage(run_result)
+
+    if args.dump_agent_run:
+        dump_path = output_dir / f"agent_run_{op_name.lower()}.txt"
+        dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
+        print(f"Agent run dump: {dump_path}")
 
     # Save outputs
     (output_dir / f"llm_output_{op_name.lower()}.txt").write_text(llm_output)

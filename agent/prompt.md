@@ -3,7 +3,7 @@ Comments -->
 
 ## Task
 
-Implement or improve a KnownBits transfer function for operation `<OP>` in this repo
+Implement a KnownBits transfer function for operation `<OP>` in this repo
 
 ## Key Clarification
 
@@ -30,23 +30,11 @@ Implement or improve a KnownBits transfer function for operation `<OP>` in this 
    - index 0 = known-zero mask
    - index 1 = known-one mask
 
-4. Transfer must be **sound** and as **precise** as possible.
+4. Transfer must be sound and as precise as possible.
 
 5. Keep code bitwidth-agnostic:
    - no special cases for specific bitwidths (e.g., no "if bw==…" logic).
 
-6. Use existing primitive (`transfer.and`,  `transfer.add`, `transfer.sub`, `transfer.shl`, `transfer.lshr`, `transfer.constant`, `transfer.get_all_ones`, etc.) included in `ops.md`, which aligned with the LLVM APInt semantics.
+6. Use existing primitive included in `ops.md`, which aligned with the LLVM APInt semantics.
 
 7. The program should be in SSA (Single Static Assigment) form. **Each line only has 1 operation** from `ops.md`. Do not write `%x = %y` (that is invalid MLIR); every definition must be an operation call; use SSA values directly in the next operation or in `transfer.make`.
-
-<!-- ## Testing Guidance
-
-- Use `verify` as the soundness oracle.
-- Use `eval-final` as the precision/quality metric.
-- You may choose any widths (examples: 4,8,16,24,32,40,48). The list is not mandatory.
-- Prefer testing widths separately (and in parallel if convenient) so one slow width does not block all results.
-
-## Commands Template
-
-- `verify --xfer-file tests/data/kb_<op>.mlir --bw <chosen-widths> --timeout 60 --domain KnownBits --op mlir/Operations/<Op>.mlir`
-- `eval-final tests/data/kb_<op>.mlir --domain KnownBits --op mlir/Operations/<Op>.mlir` -->
