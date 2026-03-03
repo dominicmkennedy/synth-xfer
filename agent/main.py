@@ -10,6 +10,13 @@ import sys
 from synth_xfer._util.domain import AbstractDomain
 
 from .agent_sdk import format_agent_run_dump, run_agent_synthesis
+from .library_learning import (
+    LibraryState,
+    SynthesisResult,
+    SynthesisTask,
+    load_initial_library,
+    run_library_learning_loop,
+)
 from .shared import build_prompt
 from .util import (
     clean_llm_output,
@@ -65,11 +72,87 @@ def print_token_usage(run_result) -> None:
     print(f"Tokens: {token_str} ({total:,} total)")
 
 
+def run_single_synthesis_task(
+    task: SynthesisTask,
+    library: LibraryState,
+    args,
+    api_key: str,
+) -> SynthesisResult:
+    """Run one synthesis task with current library context."""
+    print(f"Synthesizing: {task.op_name}")
+
+    # Read all files
+    prompt_template_raw = args.prompt_template.read_text()
+    prompt_template = re.sub(
+        r"<!--.*?-->", "", prompt_template_raw, flags=re.DOTALL
+    ).strip()
+
+    op_content = read_op_file(task.op_file)
+    template_mlir = args.template_mlir.read_text()
+    ops_md = args.ops_md.read_text()
+
+    examples = [
+        f"Example from {f.name}:\n```mlir\n{f.read_text()}```"
+        for f in sorted(args.examples_dir.glob("*.mlir"))
+    ]
+    examples_str = "\n\n".join(examples)
+
+    prompt = build_prompt(
+        prompt_template=prompt_template,
+        op_name=task.op_name,
+        op_content=op_content,
+        template_mlir=template_mlir,
+        examples=examples_str,
+        ops_md=ops_md,
+        library_functions=library.functions_text,
+    )
+
+    output_dir = Path(args.output)
+    print(
+        f"Prompt saved to: {save_instantiated_prompt(prompt, output_dir, task.op_name)}"
+    )
+
+    print(f"Using model: {args.model}")
+    llm_output, run_result = run_agent_synthesis(
+        prompt, task.op_file, task.op_name, api_key, args.model, args.max_turns
+    )
+
+    print_token_usage(run_result)
+
+    if args.dump_agent_run:
+        dump_path = output_dir / f"agent_run_{task.op_name.lower()}.txt"
+        dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
+        print(f"Agent run dump: {dump_path}")
+
+    (output_dir / f"llm_output_{task.op_name.lower()}.txt").write_text(llm_output)
+    transformer_file = save_transformer(
+        clean_llm_output(llm_output), output_dir, task.op_name
+    )
+    print(f"Transformer: {transformer_file}")
+
+    eval_summary: str | None = None
+    if not args.skip_eval:
+        eval_summary = run_eval(task.op_file, transformer_file, task.op_name)
+        print(f"Eval result:\n{eval_summary}")
+        eval_file = output_dir / f"eval_{task.op_name.lower()}.txt"
+        eval_file.write_text(eval_summary)
+        print(f"Eval result saved: {eval_file}")
+
+    return SynthesisResult(
+        task=task,
+        solution_text=llm_output,
+        transformer_path=transformer_file,
+        eval_summary=eval_summary,
+    )
+
+
 def main():
     """Synthesize transformer using selected method."""
     parser = argparse.ArgumentParser(description="Synthesize transfer functions")
     parser.add_argument(
-        "op_file", help="Operation MLIR file (e.g., mlir/Operations/Add.mlir)"
+        "op_file",
+        nargs="+",
+        help="Operation MLIR file(s) (e.g., mlir/Operations/Add.mlir)",
     )
     parser.add_argument(
         "-o", "--output", default="outputs/agent", help="Output directory"
@@ -111,68 +194,46 @@ def main():
         default=Path(__file__).parent / "template.mlir",
         help="Path to template.mlir file (default: agent/template.mlir)",
     )
+    parser.add_argument(
+        "--library-file",
+        type=Path,
+        default=None,
+        help="Optional initial library file for library-learning workflow",
+    )
+    parser.add_argument(
+        "--rounds",
+        type=int,
+        default=0,
+        help="Number of library-update rounds; 0 = synthesis-only pass (default: 2)",
+    )
 
     args = parser.parse_args()
     api_key = get_api_key()
 
-    op_name = extract_op_name(args.op_file)
-    print(f"Synthesizing: {op_name}")
-
-    # Read all files
-    prompt_template_raw = args.prompt_template.read_text()
-    # Remove HTML comments like the original read_prompt_template
-    prompt_template = re.sub(
-        r"<!--.*?-->", "", prompt_template_raw, flags=re.DOTALL
-    ).strip()
-
-    op_content = read_op_file(args.op_file)
-    template_mlir = args.template_mlir.read_text()
-    ops_md = args.ops_md.read_text()
-
-    # Read examples
-    examples = [
-        f"Example from {f.name}:\n```mlir\n{f.read_text()}```"
-        for f in sorted(args.examples_dir.glob("*.mlir"))
+    tasks = [
+        SynthesisTask(op_file=op_file, op_name=extract_op_name(op_file))
+        for op_file in args.op_file
     ]
-    examples_str = "\n\n".join(examples)
+    initial_library = load_initial_library(args.library_file)
 
-    prompt = build_prompt(
-        prompt_template=prompt_template,
-        op_name=op_name,
-        op_content=op_content,
-        template_mlir=template_mlir,
-        examples=examples_str,
-        ops_md=ops_md,
+    def _run_task(task: SynthesisTask, library: LibraryState) -> SynthesisResult:
+        return run_single_synthesis_task(
+            task=task,
+            library=library,
+            args=args,
+            api_key=api_key,
+        )
+
+    final_library, latest_results = run_library_learning_loop(
+        tasks=tasks,
+        num_rounds=args.rounds,
+        initial_library=initial_library,
+        run_single_task=_run_task,
     )
-
-    output_dir = Path(args.output)
-    print(f"Prompt saved to: {save_instantiated_prompt(prompt, output_dir, op_name)}")
-
-    # Run synthesis
-    print(f"Using model: {args.model}")
-    llm_output, run_result = run_agent_synthesis(
-        prompt, args.op_file, op_name, api_key, args.model, args.max_turns
+    print(
+        f"Library learning complete: version={final_library.version}, "
+        f"latest_results={len(latest_results)}"
     )
-
-    print_token_usage(run_result)
-
-    if args.dump_agent_run:
-        dump_path = output_dir / f"agent_run_{op_name.lower()}.txt"
-        dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
-        print(f"Agent run dump: {dump_path}")
-
-    # Save outputs
-    (output_dir / f"llm_output_{op_name.lower()}.txt").write_text(llm_output)
-    transformer_file = save_transformer(clean_llm_output(llm_output), output_dir, op_name)
-    print(f"Transformer: {transformer_file}")
-
-    # Evaluate unless skipped
-    if not args.skip_eval:
-        result = run_eval(args.op_file, transformer_file, op_name)
-        print(f"Eval result:\n{result}")
-        eval_file = output_dir / f"eval_{op_name.lower()}.txt"
-        eval_file.write_text(result)
-        print(f"Eval result saved: {eval_file}")
 
     return 0
 
