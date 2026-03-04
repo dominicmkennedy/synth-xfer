@@ -60,7 +60,8 @@ TIMEOUT = 2
 def get_concrete_func(op: ModuleOp) -> DefineFunOp:
     for func in op.ops:
         if isinstance(func, DefineFunOp):
-            if func.fun_name.data == CONCRETE_FUNCTION_NAME:
+            func_name = func.fun_name
+            if func_name is not None and func_name == CONCRETE_FUNCTION_NAME:
                 return func
     assert False
 
@@ -68,7 +69,8 @@ def get_concrete_func(op: ModuleOp) -> DefineFunOp:
 def get_instance_constraint(module: ModuleOp) -> DefineFunOp:
     for func in module.ops:
         if isinstance(func, DefineFunOp):
-            if func.fun_name.data == GET_INSTANCE_CONSTRAINT:
+            func_name = func.fun_name
+            if func_name is not None and func_name == GET_INSTANCE_CONSTRAINT:
                 return func
     assert False
 
@@ -76,9 +78,10 @@ def get_instance_constraint(module: ModuleOp) -> DefineFunOp:
 def get_op_constraint(module: ModuleOp) -> DefineFunOp | None:
     for func in module.ops:
         if isinstance(func, DefineFunOp):
-            if func.fun_name.data == OP_CONSTRAINT:
+            func_name = func.fun_name
+            if func_name is not None and func_name == OP_CONSTRAINT:
                 return func
-    return None
+    assert False
 
 
 def parse_single_arg_knownbits(arg: str) -> list[int]:
@@ -167,7 +170,7 @@ def get_abstract_input_constraint(
     abstract_inputs: list[DeclareConstOp],
     abstract_domains: list[list[int]],
     bitwidth: int,
-) -> list[DeclareConstOp]:
+) -> list[Operation]:
     result: list[Operation] = []
     for abstract_domain, abstract_input in zip(abstract_domains, abstract_inputs):
         constant_ops = to_constant_ops(abstract_domain, bitwidth)
@@ -186,7 +189,7 @@ def get_input_op_constraint(
     pair_op = PairOp(constant_i1.res, constant_bool.result)
     pair_res_op = PairOp(pair_op.res, constant_bool.result)
     call_op = CallOp(op_constraint.ret, inputs + [constant_bool.result])
-    eq_op = EqOp(pair_res_op.res, call_op.res)
+    eq_op = EqOp(pair_res_op.res, call_op.res[0])
     assert_op = AssertOp(eq_op.res)
     return [constant_i1, constant_bool, pair_op, pair_res_op, call_op, eq_op, assert_op]
 
@@ -206,7 +209,7 @@ def get_input_constraint(
             instance_constraint.ret,
             [abstract_input, concrete_input, constant_bool.result],
         )
-        eq_op = EqOp(pair_res_op.res, call_op.res)
+        eq_op = EqOp(pair_res_op.res, call_op.res[0])
         assert_op = AssertOp(eq_op.res)
 
         result += [call_op, eq_op, assert_op]
@@ -233,11 +236,11 @@ def query_ith_bit(ctx: Context, module: ModuleOp, ith_bit: int, bit_val: int) ->
     concrete_res = block.last_op
     assert isinstance(concrete_res, CallOp)
     first_op = FirstOp(concrete_res.res[0])
-    ith_bit = ExtractOp(first_op.res, ith_bit, ith_bit)
+    ith_bit_op = ExtractOp(first_op.res, ith_bit, ith_bit)
     const_bv_op = ConstantOp.from_int_value(bit_val, 1)
     eq_op = EqOp(ith_bit.res, const_bv_op.res)
     assert_op = AssertOp(eq_op.res)
-    block.add_ops([first_op, ith_bit, const_bv_op, eq_op, assert_op])
+    block.add_ops([first_op, ith_bit_op, const_bv_op, eq_op, assert_op])
     return check_sat(ctx, module)
 
 
@@ -250,7 +253,6 @@ def check_ith_knownbit(ctx: Context, verify_module: ModuleOp, ith: int) -> str:
         return "?"
     elif (not could_be_zero) and (not could_be_one):
         assert False and "found conflicts"
-        return ""
     elif not could_be_zero:
         return "1"
     elif not could_be_one:
@@ -281,7 +283,12 @@ def main() -> None:
     instance_constraint = get_instance_constraint(module)
     op_constraint = get_op_constraint(module)
 
-    input_arguments = get_argument_instances_with_effect(concrete_op, {})
+    input_arguments = [
+        arg
+        for arg in get_argument_instances_with_effect(concrete_op, {})
+        if isinstance(arg, DeclareConstOp)
+    ]
+    assert len(input_arguments) == len(concrete_op.func_type.inputs)
     abstract_input_arguments = get_abstract_input_arguments(input_arguments)
     const_false = ConstantBoolOp(False)
     abstract_input_constraints = get_abstract_input_constraint(
@@ -292,7 +299,7 @@ def main() -> None:
     )
     input_op_constraint = []
     if op_constraint is not None:
-        input_op_constraint = get_input_op_constraint()
+        input_op_constraint = get_input_op_constraint(op_constraint, input_arguments)
     concrete_result = CallOp(concrete_op.ret, input_arguments)
 
     verify_module = ModuleOp(
