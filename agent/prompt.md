@@ -1,52 +1,66 @@
-<!-- Comments
-Comments -->
+## Task: Synthesize KnownBits transfer for `<OP>`
 
-## Task
+Implement a sound and high-precision KnownBits transfer function for operation `<OP>` in this repository.
 
-Implement or improve a KnownBits transfer function for operation `<OP>` in this repo
+You will write **one MLIR file**: `kb_<op>.mlir`, defining a function with symbol name `kb_<op>`.
 
-## Key Clarification
+## Context: What KnownBits means here
 
-- CI integration is NOT required for this task.
-- The important tools are `verify` and `eval-final`.
-- The width list below is a suggestion only; choose widths freely to maximize useful signal.
+KnownBits is represented as a 2-element container for each value:
 
-## Reasoning (before implementing)
+- element **0**: known-zero mask
+- element **1**: known-one mask
 
-- Reason about the operation semantics and how KnownBits (known-zero, known-one) should be updated for each output before writing MLIR.
-- Aim for **sound** and **precise** transfers; prefer a well-reasoned design over the first implementation that passes eval.
-- If a candidate gets low metrics or errors, analyze why (e.g. wrong propagation, missing cases) and improve the design, not only fix syntax.
+A bit set in known-zero means that bit is definitely 0; a bit set in known-one means that bit is definitely 1. Your transfer must maintain **soundness** (never claim a bit is known if it might not be).
 
-## Requirements
+## Concrete semantics of `<OP>`
 
-1. Implement `kb_<op>.mlir` in the same MLIR style as the examples I provided to you.
-2. Function signature must be:
-   ```
-   (!transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
-   ```
-   with symbol name `kb_<op>`.
+Use this as the semantics of the concrete operator:
 
-3. KnownBits encoding:
-   - index 0 = known-zero mask
-   - index 1 = known-one mask
+<CONCRETE_OPERATION>
 
-4. Transfer must be **sound** and as **precise** as possible.
+## Constraints: MLIR form and allowed building blocks
 
-5. Keep code bitwidth-agnostic:
-   - no special cases for specific bitwidths (e.g., no "if bw==…" logic).
+1. **Style match:** Follow the same MLIR style as the provided templates/examples.
+2. **SSA only:** The program must be in SSA form.
+3. **One op per line:** Every line must be exactly one allowed MLIR operation. Do **not** write `%x = %y`; instead, thread SSA values directly into subsequent ops or into `transfer.make`.
+4. **Use only allowed ops:** Use only primitives from the “Available Operators” section (aligned with LLVM APInt semantics), plus any listed library helpers. Use a library function through `func.call`
+```mlir
+%res = func.call @f(%arg0, %arg1) : (arg0_type, arg1_type) -> res_type
+```
+5. **Include the library function:** Include the used library functions in the output module.
 
-6. Use existing primitive (`transfer.and`,  `transfer.add`, `transfer.sub`, `transfer.shl`, `transfer.lshr`, `transfer.constant`, `transfer.get_all_ones`, etc.) included in `ops.md`, which aligned with the LLVM APInt semantics.
+### Available primitives
 
-7. The program should be in SSA (Single Static Assigment) form. **Each line only has 1 operation** from `ops.md`. Do not write `%x = %y` (that is invalid MLIR); every definition must be an operation call; use SSA values directly in the next operation or in `transfer.make`.
+<PRIMITIVE_OPERATORS>
 
-<!-- ## Testing Guidance
+### Available library helpers
 
-- Use `verify` as the soundness oracle.
-- Use `eval-final` as the precision/quality metric.
-- You may choose any widths (examples: 4,8,16,24,32,40,48). The list is not mandatory.
-- Prefer testing widths separately (and in parallel if convenient) so one slow width does not block all results.
+```mlir
+<LIBRARY_FUNCTIONS>
+```
 
-## Commands Template
+## Templates and reference implementations
 
-- `verify --xfer-file tests/data/kb_<op>.mlir --bw <chosen-widths> --timeout 60 --domain KnownBits --op mlir/Operations/<Op>.mlir`
-- `eval-final tests/data/kb_<op>.mlir --domain KnownBits --op mlir/Operations/<Op>.mlir` -->
+### Output templates
+
+Your output must fit one of these templates:
+
+```mlir
+<PROGRAM_TEMPLATES>
+```
+
+### Examples
+
+Those are example transformers for other concrete operations:
+
+<TRANSFORMER_EXAMPLES>
+
+## Required workflow (must follow)
+
+1. Reason first: For this operation, what do known-zero and known-one mean for each output? Which cases or sub-expressions do you need to handle? Plan the transfer structure before writing code.
+2. Output a candidate MLIR based on that reasoning.
+3. Call the eval tool with that MLIR (pass the raw MLIR string as the argument).
+4. If the tool returns an error, fix the MLIR and go back to step 3.
+5. Otherwise the tool returns metrics (Sound %% and Exact %%). If Sound %% is not 100, you should fix the soundness of your transfer function. If Exact %% is low, reason about which cases can be improved and try again.
+6. When the tool returns sound (Sound %% = 100) and you are satisfied with the precision (Exact %% is high), return that MLIR as your final answer (MLIR only, no explanation).
