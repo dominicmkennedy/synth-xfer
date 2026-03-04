@@ -243,7 +243,7 @@ def query_ith_bit(ctx: Context, module: ModuleOp, ith_bit: int, bit_val: int) ->
     return check_sat(ctx, module)
 
 
-def check_ith_knownbit(ctx: Context, verify_module: ModuleOp, ith: int) -> str:
+def check_ith_knownbit(ctx: Context, verify_module: ModuleOp, ith: int) -> str | None:
     query_zero_module = verify_module.clone()
     query_one_module = verify_module.clone()
     could_be_zero = query_ith_bit(ctx, query_zero_module, ith, 0)
@@ -252,7 +252,6 @@ def check_ith_knownbit(ctx: Context, verify_module: ModuleOp, ith: int) -> str:
         return "?"
     elif (not could_be_zero) and (not could_be_one):
         assert False and "found conflicts"
-        return ""
     elif not could_be_zero:
         return "1"
     elif not could_be_one:
@@ -314,7 +313,9 @@ def main() -> None:
 
     result = ""
     for i in range(bitwidth):
-        result = check_ith_knownbit(ctx, verify_module, i) + result
+        ith_result = check_ith_knownbit(ctx, verify_module, i)
+        assert ith_result is not None
+        result = ith_result + result
     print(result)
 
 
