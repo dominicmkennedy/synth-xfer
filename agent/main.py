@@ -3,42 +3,27 @@
 
 import argparse
 import os
-from pathlib import Path
 import re
 import sys
+from pathlib import Path
+from dataclasses import dataclass
 
-from synth_xfer._util.domain import AbstractDomain
-
-from .agent_sdk import format_agent_run_dump, run_agent_synthesis, run_agent_learn
-from .library_learning import (
-    LibraryState,
-    SynthesisResult,
-    SynthesisTask,
-    load_initial_library,
-    run_library_learning_loop,
-)
-from .shared import build_prompt, build_library_learn_prompt
+from .agent_sdk import format_agent_run_dump, run_agent_learn
+from .shared import build_library_learn_prompt
 from .util import (
     clean_llm_output,
-    eval_transformer,
     extract_op_name,
-    read_op_file,
     save_instantiated_prompt,
     merge_library_text,
-    save_transformer,
     save_library,
 )
 
+@dataclass
+class LibraryState:
+    """Current learned library state passed to synthesis prompts."""
 
-def run_eval(op_file_path: str, transformer_file: Path, op_name: str) -> str:
-    """Evaluate the transformer via eval_transformer (no subprocess)."""
-    print("\nRunning eval (Python)...")
-    return eval_transformer(
-        solution_path=transformer_file,
-        op_path=Path(op_file_path),
-        domain=AbstractDomain.KnownBits,
-        xfer_name=f"kb_{op_name.lower()}",
-    )
+    version: int
+    functions_text: str
 
 
 def get_api_key() -> str:
@@ -74,82 +59,9 @@ def print_token_usage(run_result) -> None:
     print(f"Tokens: {token_str} ({total:,} total)")
 
 
-def run_single_synthesis_task(
-    task: SynthesisTask,
-    library: LibraryState,
-    args,
-    api_key: str,
-) -> SynthesisResult:
-    """Run one synthesis task with current library context."""
-    print(f"Synthesizing: {task.op_name}")
-
-    # Read all files
-    prompt_template_raw = args.synth_prompt.read_text()
-    prompt_template = re.sub(
-        r"<!--.*?-->", "", prompt_template_raw, flags=re.DOTALL
-    ).strip()
-
-    op_content = read_op_file(task.op_file)
-    template_mlir = args.template.read_text()
-    ops_md = args.ops.read_text()
-
-    examples = [
-        f"Example from {f.name}:\n```mlir\n{f.read_text()}```"
-        for f in sorted(args.examples_dir.glob("*.mlir"))
-    ]
-    examples_str = "\n\n".join(examples)
-
-    prompt = build_prompt(
-        prompt_template=prompt_template,
-        op_name=task.op_name,
-        op_content=op_content,
-        template_mlir=template_mlir,
-        examples=examples_str,
-        ops_md=ops_md,
-        library_functions=library.functions_text,
-    )
-
-    output_dir = Path(args.output)
-    print(
-        f"Prompt saved to: {save_instantiated_prompt(prompt, output_dir, task.op_name)}"
-    )
-
-    print(f"Using model: {args.model}")
-    llm_output, run_result = run_agent_synthesis(
-        prompt, task.op_file, task.op_name, api_key, args.model, args.max_turns
-    )
-
-    print_token_usage(run_result)
-
-    if args.dump_agent_run:
-        dump_path = output_dir / f"agent_run_{task.op_name.lower()}.txt"
-        dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
-        print(f"Agent run dump: {dump_path}")
-
-    (output_dir / f"llm_output_{task.op_name.lower()}.txt").write_text(llm_output)
-    transformer_file = save_transformer(
-        clean_llm_output(llm_output), output_dir, task.op_name
-    )
-    print(f"Transformer: {transformer_file}")
-
-    eval_summary: str | None = None
-    if not args.skip_eval:
-        eval_summary = run_eval(task.op_file, transformer_file, task.op_name)
-        print(f"Eval result:\n{eval_summary}")
-        eval_file = output_dir / f"eval_{task.op_name.lower()}.txt"
-        eval_file.write_text(eval_summary)
-        print(f"Eval result saved: {eval_file}")
-
-    return SynthesisResult(
-        task=task,
-        solution_text=llm_output,
-        transformer_path=transformer_file,
-        eval_summary=eval_summary,
-    )
-
 def run_library_learn(
     previous_library: LibraryState,
-    synthesis_results: list[SynthesisResult],
+    corpus: str,
     args,
     api_key: str,
 ) -> LibraryState:
@@ -164,11 +76,10 @@ def run_library_learn(
     ).strip()
 
     ops_md = args.ops.read_text()
-    synthesized_functions = [sr.solution_text for sr in synthesis_results]
 
     prompt = build_library_learn_prompt(
         prompt_template=prompt_template,
-        synth_functions="\n".join(synthesized_functions),
+        synth_functions=corpus,
         existing_lib=previous_library.functions_text,
         ops_md=ops_md,
     )
@@ -206,35 +117,26 @@ def run_library_learn(
         lib_text,
     )
 
+
 def main():
-    """Synthesize transformer using selected method."""
-    parser = argparse.ArgumentParser(description="Synthesize transfer functions")
+    """Perform library learning over MLIR files"""
+    parser = argparse.ArgumentParser(description="Learn library functions")
     parser.add_argument(
-        "op_file",
+        "input_files",
         nargs="+",
-        help="Operation MLIR file(s) (e.g., mlir/Operations/Add.mlir)",
+        help="one or more MLIR files to learn from (e.g., mlir/Add.mlir mlir/Sub.mlir)",
     )
     parser.add_argument(
-        "-o", "--output", default="outputs/agent", help="Output directory"
+        "-o",
+        "--output",
+        default="agent/output/",
+        help="output directory"
     )
-    parser.add_argument("--skip-eval", action="store_true", help="Skip eval-final")
     parser.add_argument("--model", default="gpt-4", help="OpenAI model")
     parser.add_argument(
         "--dump-agent-run",
         action="store_true",
         help="Dump full agent run (messages, tool calls, outputs) to output dir",
-    )
-    parser.add_argument(
-        "--max-turns",
-        type=int,
-        default=20,
-        help="Max iterations for agent (default: 20, use 2-3 for fast dev)",
-    )
-    parser.add_argument(
-        "--synth-prompt",
-        type=Path,
-        default=Path(__file__).parent / "prompt.md",
-        help="Path to synthesis prompt template (default: agent/prompt.md)",
     )
     parser.add_argument(
         "--library-prompt",
@@ -243,28 +145,10 @@ def main():
         help="Path to library learning prompt template (default: agent/library_prompt.md",
     )
     parser.add_argument(
-        "--examples-dir",
-        type=Path,
-        default=Path(__file__).parent / "examples",
-        help="Path to examples directory (default: agent/examples)",
-    )
-    parser.add_argument(
         "--ops",
         type=Path,
         default=Path(__file__).parent / "ops.md",
         help="Path to ops.md file (default: agent/ops.md)",
-    )
-    parser.add_argument(
-        "--template",
-        type=Path,
-        default=Path(__file__).parent / "template.mlir",
-        help="Path to template.mlir file (default: agent/template.mlir)",
-    )
-    parser.add_argument(
-        "--library",
-        type=Path,
-        default=None,
-        help="Optional initial library file for library-learning workflow",
     )
     parser.add_argument(
         "--rounds",
@@ -276,42 +160,18 @@ def main():
     args = parser.parse_args()
     api_key = get_api_key()
 
-    tasks = [
-        SynthesisTask(op_file=op_file, op_name=extract_op_name(op_file))
-        for op_file in args.op_file
-    ]
-    initial_library = load_initial_library(args.library)
+    corpus = ""
+    for file in args.input_files:
+        corpus += "\n" + Path(file).read_text()
 
-    def _run_task(task: SynthesisTask, library: LibraryState) -> SynthesisResult:
-        return run_single_synthesis_task(
-            task=task,
-            library=library,
+    lib_state = LibraryState(version=0, functions_text="builtin.module {}")
+    for i in range(args.rounds):
+        lib_state = run_library_learn(
+            previous_library=lib_state,
+            corpus=corpus,
             args=args,
-            api_key=api_key,
+            api_key=api_key, 
         )
-
-    def _library_learn(
-            previous_library: LibraryState,
-            synthesis_results: list[SynthesisResult],
-    ) -> LibraryState:
-        return run_library_learn(
-            previous_library=previous_library,
-            synthesis_results=synthesis_results,
-            args=args,
-            api_key=api_key
-        )
-
-    final_library, latest_results = run_library_learning_loop(
-        tasks=tasks,
-        num_rounds=args.rounds,
-        initial_library=initial_library,
-        run_single_task=_run_task,
-        run_library_learn=_library_learn,
-    )
-    print(
-        f"Library learning complete: version={final_library.version}, "
-        f"latest_results={len(latest_results)}"
-    )
 
     return 0
 
