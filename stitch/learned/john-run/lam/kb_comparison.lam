@@ -1,3 +1,0 @@
-fn_0(#0,#1,#2) := (lam ((lam ((lam (#2 (transfer.shl #1 $0))) (transfer.sub #0 $0))) (transfer.countl_zero $0)))
-fn_1(#0,#1) := (lam (#1 (transfer.and $0 #0)))
-fn_2(#0,#1) := (lam ((lam (#1 (transfer.shl #0 $0))) (transfer.sub $0 #0)))

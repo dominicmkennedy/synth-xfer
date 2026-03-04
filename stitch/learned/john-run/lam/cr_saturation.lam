@@ -1,3 +1,0 @@
-fn_0(#0,#1,#2) := (lam ((lam ((lam (#2 (transfer.sub $2 $0))) (transfer.ashr $0 #1))) #0))
-fn_1(#0,#1) := (fn_0 (transfer.xor #1 #0))
-fn_2(#0) := (lam ((lam $0) (transfer.make #0 $0)))

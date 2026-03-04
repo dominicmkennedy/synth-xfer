@@ -1,5 +1,0 @@
-fn_0(#0,#1,#2,#3) := ((lam (#3 (transfer.or #2 $0))) (transfer.shl #1 #0))
-fn_1(#0,#1,#2) := (lam ((lam (#2 (#1 $1 $0))) #0))
-fn_2(#0,#1,#2,#3) := (lam ((lam (fn_1 (#2 #3 $0) transfer.make (lam $0) (#2 #1 $1))) #0))
-fn_3(#0,#1) := (lam (#1 (transfer.cmp_0 $0 #0)))
-fn_4(#0,#1,#2) := (lam (#2 (transfer.select #1 #0 $0)))

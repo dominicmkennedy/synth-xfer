@@ -1,1 +1,0 @@
-(lam (lam ((lam ((lam ((lam ((lam ((lam ((lam ((lam $0) (transfer.make $1 $0))) (transfer.or $3 $1))) (transfer.and $3 $1))) (transfer.get_1 $3))) (transfer.get_0 $2))) (transfer.get_1 $2))) (transfer.get_0 $1))))

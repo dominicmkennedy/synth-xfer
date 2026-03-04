@@ -1,1 +1,0 @@
-(lam (lam ((lam ((lam ((lam ((lam ((lam ((lam ((lam ((lam ((lam ((lam ((lam $0) (transfer.make $1 $0))) (transfer.and $7 $5))) (transfer.or $7 $5))) (transfer.get_bit_width $6))) (transfer.get_all_ones $5))) (transfer.constant_1 $4))) (transfer.constant_0 $3))) (transfer.get_1 $3))) (transfer.get_0 $2))) (transfer.get_1 $2))) (transfer.get_0 $1))))

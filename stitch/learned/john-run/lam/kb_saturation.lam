@@ -1,3 +1,0 @@
-fn_0(#0,#1,#2) := (lam ((lam (#2 (transfer.select $0 #1 $1))) #0))
-fn_1(#0,#1,#2) := (lam ((lam (#2 (transfer.and $1 $0))) (transfer.and #1 #0)))
-fn_2(#0,#1,#2) := (lam ((lam (#2 (transfer.or $0 #1))) (transfer.or $0 #0)))
