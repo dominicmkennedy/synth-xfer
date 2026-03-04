@@ -20,9 +20,6 @@ module {
     %10 = arith.andi %9, %6 : i1
     return %10 : i1
   }
-  func.func @patternImpl(%arg0: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1: !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> attributes {CPPCLASS = ["non_cpp_class"], applied_to = ["llvm_pattern"], is_forward = true} {
-    return %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
-  }
   func.func @shifting_amount_less_bitwidth(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
     %1 = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer
@@ -50,4 +47,3 @@ module {
     return %7 : i1
   }
 }
-

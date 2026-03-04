@@ -12,9 +12,6 @@ module {
     %3 = arith.andi %true, %1 : i1
     return %3 : i1
   }
-  func.func @patternImpl(%arg0: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1: !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> attributes {CPPCLASS = ["non_cpp_class"], applied_to = ["llvm_pattern"], is_forward = true} {
-    return %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
-  }
   func.func @rhs_neq_zero(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
     %1 = "transfer.cmp"(%0, %arg1) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
@@ -23,4 +20,3 @@ module {
     return %2 : i1
   }
 }
-

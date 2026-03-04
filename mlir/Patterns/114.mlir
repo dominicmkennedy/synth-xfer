@@ -14,9 +14,6 @@ module {
     %5 = arith.andi %4, %3 : i1
     return %5 : i1
   }
-  func.func @patternImpl(%arg0: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg2: !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> attributes {CPPCLASS = ["non_cpp_class"], applied_to = ["llvm_pattern"], is_forward = true} {
-    return %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
-  }
   func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.umul_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
     %true = arith.constant true
@@ -32,4 +29,3 @@ module {
     return %4 : i1
   }
 }
-

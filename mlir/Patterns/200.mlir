@@ -16,9 +16,6 @@ module {
     %7 = arith.andi %6, %4 : i1
     return %7 : i1
   }
-  func.func @patternImpl(%arg0: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg2: !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> attributes {CPPCLASS = ["non_cpp_class"], applied_to = ["llvm_pattern"], is_forward = true} {
-    return %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
-  }
   func.func @sidv_exact(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
     %1 = "transfer.cmp"(%0, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
@@ -54,4 +51,3 @@ module {
     return %5 : i1
   }
 }
-
