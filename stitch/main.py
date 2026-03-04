@@ -10,12 +10,13 @@ def main():
 
     parser = argparse.ArgumentParser(description="Learn library functions with Stitch")
     parser.add_argument(
-        "library_files", 
+        "input_files", 
         nargs='+', 
         help="one or more MLIR files to learn from (e.g., mlir/Add.mlir mlir/Sub.mlir)"
     )
     parser.add_argument(
-        "-o", "--output",
+        "-o", 
+        "--output",
         default=None,
         help="output file"
     )
@@ -35,7 +36,7 @@ def main():
     args = parser.parse_args()
 
     programs = []
-    for file_path in args.library_files:
+    for file_path in args.input_files:
         programs += mlir_file_to_lam(Path(file_path))
     
     print(f"Read {len(programs)} functions")
