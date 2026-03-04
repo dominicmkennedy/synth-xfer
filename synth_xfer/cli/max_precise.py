@@ -10,14 +10,13 @@ from xdsl.context import Context
 from xdsl.dialects.arith import Arith
 from xdsl.dialects.builtin import Builtin, ModuleOp
 from xdsl.dialects.func import Func, FuncOp
+from xdsl.dialects.smt import BitVectorType, BoolType, ConstantBoolOp
 from xdsl.ir import Operation
 from xdsl.transforms.canonicalize import CanonicalizePass
-from xdsl_smt.dialects.smt_bitvector_dialect import BitVectorType, ConstantOp, ExtractOp
+from xdsl_smt.dialects.smt_bitvector_dialect import ConstantOp, ExtractOp
 from xdsl_smt.dialects.smt_dialect import (
     AssertOp,
-    BoolType,
     CallOp,
-    ConstantBoolOp,
     DeclareConstOp,
     DefineFunOp,
     EqOp,
@@ -238,7 +237,7 @@ def query_ith_bit(ctx: Context, module: ModuleOp, ith_bit: int, bit_val: int) ->
     first_op = FirstOp(concrete_res.res[0])
     ith_bit_op = ExtractOp(first_op.res, ith_bit, ith_bit)
     const_bv_op = ConstantOp.from_int_value(bit_val, 1)
-    eq_op = EqOp(ith_bit.res, const_bv_op.res)
+    eq_op = EqOp(ith_bit_op.res, const_bv_op.res)
     assert_op = AssertOp(eq_op.res)
     block.add_ops([first_op, ith_bit_op, const_bv_op, eq_op, assert_op])
     return check_sat(ctx, module)
@@ -253,6 +252,7 @@ def check_ith_knownbit(ctx: Context, verify_module: ModuleOp, ith: int) -> str:
         return "?"
     elif (not could_be_zero) and (not could_be_one):
         assert False and "found conflicts"
+        return ""
     elif not could_be_zero:
         return "1"
     elif not could_be_one:
