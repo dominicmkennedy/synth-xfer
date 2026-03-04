@@ -1,25 +1,23 @@
-"builtin.module"() ({
-  "func.func"() <{sym_name = "concrete_op", function_type = (!transfer.integer, !transfer.integer, !transfer.integer, !transfer.integer, !transfer.integer, !transfer.integer) -> !transfer.integer}> ({
-  ^0(%0 : !transfer.integer, %1 : !transfer.integer, %2 : !transfer.integer, %3 : !transfer.integer, %4 : !transfer.integer, %5 : !transfer.integer):
-    %6 = "transfer.xor"(%4, %5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %7 = "transfer.add"(%2, %3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %8 = "transfer.xor"(%1, %7) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %9 = "transfer.add"(%0, %8) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %10 = "transfer.add"(%6, %9) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    "func.return"(%10) : (!transfer.integer) -> ()
-  }) : () -> ()
-  "func.func"() <{sym_name = "op_constraint", function_type = (!transfer.integer, !transfer.integer, !transfer.integer, !transfer.integer, !transfer.integer, !transfer.integer) -> i1}> ({
-  ^0(%0 : !transfer.integer, %1 : !transfer.integer, %2 : !transfer.integer, %3 : !transfer.integer, %4 : !transfer.integer, %5 : !transfer.integer):
-    %6 = "arith.constant"() <{value = true}> : () -> i1
-    %7 = "transfer.xor"(%4, %5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %8 = "transfer.add"(%2, %3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %9 = "transfer.xor"(%1, %8) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %10 = "transfer.add"(%0, %9) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %11 = "transfer.add"(%7, %10) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    "func.return"(%6) : (i1) -> ()
-  }) : () -> ()
-  "func.func"() <{sym_name = "patternImpl", function_type = (!transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>}> ({
-  ^0(%0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %2 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %3 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %4 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %5 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>):
-    "func.return"(%0) : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> ()
-  }) {is_forward = true, applied_to = ["llvm_pattern"], CPPCLASS = ["non_cpp_class"]} : () -> ()
-}) : () -> ()
+module {
+  func.func @concrete_op(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer, %arg5: !transfer.integer) -> !transfer.integer {
+    %0 = "transfer.xor"(%arg4, %arg5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %1 = "transfer.add"(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %2 = "transfer.xor"(%arg1, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %3 = "transfer.add"(%arg0, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %4 = "transfer.add"(%0, %3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    return %4 : !transfer.integer
+  }
+  func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer, %arg5: !transfer.integer) -> i1 {
+    %true = arith.constant true
+    %0 = "transfer.xor"(%arg4, %arg5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %1 = "transfer.add"(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %2 = "transfer.xor"(%arg1, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %3 = "transfer.add"(%arg0, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %4 = "transfer.add"(%0, %3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    return %true : i1
+  }
+  func.func @patternImpl(%arg0: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg2: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg3: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg4: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg5: !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> attributes {CPPCLASS = ["non_cpp_class"], applied_to = ["llvm_pattern"], is_forward = true} {
+    return %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
+  }
+}
+

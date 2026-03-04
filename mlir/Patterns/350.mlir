@@ -1,66 +1,60 @@
-"builtin.module"() ({
-  "func.func"() <{sym_name = "concrete_op", function_type = (!transfer.integer, !transfer.integer, !transfer.integer, !transfer.integer) -> !transfer.integer}> ({
-  ^0(%0 : !transfer.integer, %1 : !transfer.integer, %2 : !transfer.integer, %3 : !transfer.integer):
-    %4 = "transfer.sub"(%3, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %5 = "transfer.ashr"(%4, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %6 = "transfer.sub"(%0, %5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    "func.return"(%6) : (!transfer.integer) -> ()
-  }) : () -> ()
-  "func.func"() <{sym_name = "op_constraint", function_type = (!transfer.integer, !transfer.integer, !transfer.integer, !transfer.integer) -> i1}> ({
-  ^0(%0 : !transfer.integer, %1 : !transfer.integer, %2 : !transfer.integer, %3 : !transfer.integer):
-    %4 = "arith.constant"() <{value = true}> : () -> i1
-    %5 = "transfer.sub"(%3, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %6 = "transfer.ashr"(%5, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %7 = "func.call"(%5, %1) <{callee = @ashr_exact}> : (!transfer.integer, !transfer.integer) -> i1
-    %8 = "func.call"(%5, %1) <{callee = @shifting_amount_less_bitwidth}> : (!transfer.integer, !transfer.integer) -> i1
-    %9 = "transfer.sub"(%0, %6) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %10 = "func.call"(%0, %6) <{callee = @sub_nuw}> : (!transfer.integer, !transfer.integer) -> i1
-    %11 = "func.call"(%0, %6) <{callee = @sub_nsw}> : (!transfer.integer, !transfer.integer) -> i1
-    %12 = "arith.andi"(%4, %7) : (i1, i1) -> i1
-    %13 = "arith.andi"(%12, %8) : (i1, i1) -> i1
-    %14 = "arith.andi"(%13, %10) : (i1, i1) -> i1
-    %15 = "arith.andi"(%14, %11) : (i1, i1) -> i1
-    "func.return"(%15) : (i1) -> ()
-  }) : () -> ()
-  "func.func"() <{sym_name = "patternImpl", function_type = (!transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>}> ({
-  ^0(%0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %2 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %3 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>):
-    "func.return"(%0) : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> ()
-  }) {is_forward = true, applied_to = ["llvm_pattern"], CPPCLASS = ["non_cpp_class"]} : () -> ()
-  "func.func"() <{sym_name = "ashr_exact", function_type = (!transfer.integer, !transfer.integer) -> i1}> ({
-  ^0(%arg0 : !transfer.integer, %arg1 : !transfer.integer):
-    %const0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
-    %bitwidth = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer
-    %arg1_ge = "transfer.cmp"(%arg1, %const0) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %arg1_le_bitwidth = "transfer.cmp"(%arg1, %bitwidth) {predicate = 7 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %check = "arith.andi"(%arg1_ge, %arg1_le_bitwidth) : (i1, i1) -> i1
-    %tmp1 = "transfer.ashr"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %tmp2 = "transfer.shl"(%tmp1, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %eq = "transfer.cmp"(%tmp2, %arg0) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %ret = "arith.andi"(%check, %eq) : (i1, i1) -> i1
-    "func.return"(%ret) : (i1) -> ()
-  }) : () -> ()
-  "func.func"() <{sym_name = "shifting_amount_less_bitwidth", function_type = (!transfer.integer, !transfer.integer) -> i1}> ({
-  ^0(%arg0 : !transfer.integer, %arg1 : !transfer.integer):
-    %const0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
-    %bitwidth = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer
-    %arg1_ge = "transfer.cmp"(%arg1, %const0) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %arg1_le_bitwidth = "transfer.cmp"(%arg1, %bitwidth) {predicate = 7 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %check = "arith.andi"(%arg1_ge, %arg1_le_bitwidth) : (i1, i1) -> i1
-    "func.return"(%check) : (i1) -> ()
-  }) : () -> ()
-  "func.func"() <{sym_name = "sub_nuw", function_type = (!transfer.integer, !transfer.integer) -> i1}> ({
-  ^0(%arg0 : !transfer.integer, %arg1 : !transfer.integer):
-    %check = "transfer.cmp"(%arg0, %arg1) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    "func.return"(%check) : (i1) -> ()
-  }) : () -> ()
-  "func.func"() <{sym_name = "sub_nsw", function_type = (!transfer.integer, !transfer.integer) -> i1}> ({
-  ^0(%arg0 : !transfer.integer, %arg1 : !transfer.integer):
-    %res = "transfer.sub"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %xor0 = "transfer.xor"(%arg0, %res) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %xor1 = "transfer.xor"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %andres = "transfer.and"(%xor0, %xor1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %zero = "transfer.constant"(%arg0) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
-    %nsw = "transfer.cmp"(%andres, %zero) {predicate = 5 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    "func.return"(%nsw) : (i1) -> ()
-  }) : () -> ()
-}) : () -> ()
+module {
+  func.func @concrete_op(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer) -> !transfer.integer {
+    %0 = "transfer.sub"(%arg3, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %1 = "transfer.ashr"(%0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %2 = "transfer.sub"(%arg0, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    return %2 : !transfer.integer
+  }
+  func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer) -> i1 {
+    %true = arith.constant true
+    %0 = "transfer.sub"(%arg3, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %1 = "transfer.ashr"(%0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %2 = call @ashr_exact(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %3 = call @shifting_amount_less_bitwidth(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %4 = "transfer.sub"(%arg0, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %5 = call @sub_nuw(%arg0, %1) : (!transfer.integer, !transfer.integer) -> i1
+    %6 = call @sub_nsw(%arg0, %1) : (!transfer.integer, !transfer.integer) -> i1
+    %7 = arith.andi %true, %2 : i1
+    %8 = arith.andi %7, %3 : i1
+    %9 = arith.andi %8, %5 : i1
+    %10 = arith.andi %9, %6 : i1
+    return %10 : i1
+  }
+  func.func @patternImpl(%arg0: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg2: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg3: !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> attributes {CPPCLASS = ["non_cpp_class"], applied_to = ["llvm_pattern"], is_forward = true} {
+    return %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
+  }
+  func.func @ashr_exact(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+    %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
+    %1 = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %2 = "transfer.cmp"(%arg1, %0) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %3 = "transfer.cmp"(%arg1, %1) {predicate = 7 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %4 = arith.andi %2, %3 : i1
+    %5 = "transfer.ashr"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %6 = "transfer.shl"(%5, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %7 = "transfer.cmp"(%6, %arg0) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %8 = arith.andi %4, %7 : i1
+    return %8 : i1
+  }
+  func.func @shifting_amount_less_bitwidth(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+    %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
+    %1 = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %2 = "transfer.cmp"(%arg1, %0) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %3 = "transfer.cmp"(%arg1, %1) {predicate = 7 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %4 = arith.andi %2, %3 : i1
+    return %4 : i1
+  }
+  func.func @sub_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+    %0 = "transfer.cmp"(%arg0, %arg1) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    return %0 : i1
+  }
+  func.func @sub_nsw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+    %0 = "transfer.sub"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %1 = "transfer.xor"(%arg0, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %2 = "transfer.xor"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %3 = "transfer.and"(%1, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %4 = "transfer.constant"(%arg0) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
+    %5 = "transfer.cmp"(%3, %4) {predicate = 5 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    return %5 : i1
+  }
+}
+

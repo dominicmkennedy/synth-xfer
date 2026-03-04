@@ -1,40 +1,36 @@
-"builtin.module"() ({
-  "func.func"() <{sym_name = "concrete_op", function_type = (!transfer.integer, !transfer.integer, !transfer.integer, !transfer.integer) -> !transfer.integer}> ({
-  ^0(%0 : !transfer.integer, %1 : !transfer.integer, %2 : !transfer.integer, %3 : !transfer.integer):
-    %4 = "transfer.mul"(%2, %3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %5 = "transfer.add"(%1, %4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %6 = "transfer.and"(%0, %5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    "func.return"(%6) : (!transfer.integer) -> ()
-  }) : () -> ()
-  "func.func"() <{sym_name = "op_constraint", function_type = (!transfer.integer, !transfer.integer, !transfer.integer, !transfer.integer) -> i1}> ({
-  ^0(%0 : !transfer.integer, %1 : !transfer.integer, %2 : !transfer.integer, %3 : !transfer.integer):
-    %4 = "arith.constant"() <{value = true}> : () -> i1
-    %5 = "transfer.mul"(%2, %3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %6 = "func.call"(%2, %3) <{callee = @mul_nuw}> : (!transfer.integer, !transfer.integer) -> i1
-    %7 = "transfer.add"(%1, %5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %8 = "func.call"(%1, %5) <{callee = @add_nuw}> : (!transfer.integer, !transfer.integer) -> i1
-    %9 = "transfer.and"(%0, %7) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %10 = "arith.andi"(%4, %6) : (i1, i1) -> i1
-    %11 = "arith.andi"(%10, %8) : (i1, i1) -> i1
-    "func.return"(%11) : (i1) -> ()
-  }) : () -> ()
-  "func.func"() <{sym_name = "patternImpl", function_type = (!transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>}> ({
-  ^0(%0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %2 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %3 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>):
-    "func.return"(%0) : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> ()
-  }) {is_forward = true, applied_to = ["llvm_pattern"], CPPCLASS = ["non_cpp_class"]} : () -> ()
-  "func.func"() <{sym_name = "mul_nuw", function_type = (!transfer.integer, !transfer.integer) -> i1}> ({
-  ^0(%arg0 : !transfer.integer, %arg1 : !transfer.integer):
-    %umul_ov = "transfer.umul_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %const1 = "arith.constant"() <{value = true}> : () -> i1
-    %check = "arith.xori"(%umul_ov, %const1) : (i1, i1) -> i1
-    "func.return"(%check) : (i1) -> ()
-  }) : () -> ()
-  "func.func"() <{sym_name = "add_nuw", function_type = (!transfer.integer, !transfer.integer) -> i1}> ({
-  ^0(%arg0 : !transfer.integer, %arg1 : !transfer.integer):
-    %sum = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %sum_ge_arg0 = "transfer.cmp"(%sum, %arg0) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %sum_ge_arg1 = "transfer.cmp"(%sum, %arg1) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %check = "arith.andi"(%sum_ge_arg0, %sum_ge_arg1) : (i1, i1) -> i1
-    "func.return"(%check) : (i1) -> ()
-  }) : () -> ()
-}) : () -> ()
+module {
+  func.func @concrete_op(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer) -> !transfer.integer {
+    %0 = "transfer.mul"(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %1 = "transfer.add"(%arg1, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %2 = "transfer.and"(%arg0, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    return %2 : !transfer.integer
+  }
+  func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer) -> i1 {
+    %true = arith.constant true
+    %0 = "transfer.mul"(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %1 = call @mul_nuw(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> i1
+    %2 = "transfer.add"(%arg1, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %3 = call @add_nuw(%arg1, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %4 = "transfer.and"(%arg0, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %5 = arith.andi %true, %1 : i1
+    %6 = arith.andi %5, %3 : i1
+    return %6 : i1
+  }
+  func.func @patternImpl(%arg0: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg2: !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg3: !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> attributes {CPPCLASS = ["non_cpp_class"], applied_to = ["llvm_pattern"], is_forward = true} {
+    return %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
+  }
+  func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+    %0 = "transfer.umul_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %true = arith.constant true
+    %1 = arith.xori %0, %true : i1
+    return %1 : i1
+  }
+  func.func @add_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+    %0 = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %1 = "transfer.cmp"(%0, %arg0) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %2 = "transfer.cmp"(%0, %arg1) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %3 = arith.andi %1, %2 : i1
+    return %3 : i1
+  }
+}
+
