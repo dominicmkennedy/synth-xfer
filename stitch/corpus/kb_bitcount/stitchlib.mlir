@@ -1,5 +1,6 @@
 builtin.module {
-  func.func @func0(%h0 : !transfer.integer, %h1 : !transfer.integer, %h2 : i1, %arg0 : !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+  func.func @flag_gated_shift_pair(%h0 : !transfer.integer, %h1 : !transfer.integer, %h2 : i1, %arg0 : !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+    // The known-bits pair of a bit-counted value after a flag-gated shift of a seed into a counting position.
     %v3 = "transfer.xor"(%h1, %h0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %v4 = "transfer.shl"(%h0, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %v2 = "transfer.and"(%v3, %v4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
@@ -10,7 +11,8 @@ builtin.module {
     %v0 = "transfer.make"(%v1, %v5) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
     func.return %v0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
   }
-  func.func @func1(%h0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %h1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+  func.func @bitcount_known_bits_from_ones_index(%h0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %h1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+    // The known bits of a popcount result derived from the known-ones side of the input's abstract value.
     %v4 = "transfer.get"(%arg0) {index = 0} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %v5 = "transfer.get"(%arg0) {index = 1} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %v3 = "transfer.and"(%v4, %v5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
@@ -65,7 +67,8 @@ builtin.module {
     %v0 = "transfer.make"(%v1, %v28) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
     func.return %v0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
   }
-  func.func @func2(%h0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %h1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+  func.func @bitcount_known_bits_from_zeros_index(%h0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %h1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+    // The known bits of a popcount result derived from the known-zeros side of the input's abstract value.
     %v4 = "transfer.get"(%arg0) {index = 0} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %v5 = "transfer.get"(%arg0) {index = 1} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %v3 = "transfer.and"(%v4, %v5) : (!transfer.integer, !transfer.integer) -> !transfer.integer

@@ -1,5 +1,6 @@
 builtin.module {
-  func.func @func0(%h0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %h1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg2 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+  func.func @known_bits_rotation_three_operands(%h0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %h1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg2 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+    // The known bits of a bitwise rotation combining left and right shifts for each valid shift amount drawn from three input operands.
     %v6 = "transfer.get"(%arg0) {index = 0} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %v7 = "transfer.get"(%arg0) {index = 1} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %v5 = "transfer.and"(%v6, %v7) : (!transfer.integer, !transfer.integer) -> !transfer.integer
@@ -469,7 +470,8 @@ builtin.module {
     %v0 = "transfer.make"(%v1, %v234) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
     func.return %v0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
   }
-  func.func @func1(%h0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %h1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+  func.func @known_bits_rotation_two_operands(%h0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %h1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+    // The known bits of a bitwise rotation combining left and right shifts for each valid shift amount drawn from two input operands.
     %v4 = "transfer.get"(%arg0) {index = 0} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %v6 = "transfer.get"(%arg0) {index = 0} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %v5 = "transfer.constant"(%v6) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
@@ -789,7 +791,8 @@ builtin.module {
     %v0 = "transfer.make"(%v1, %v159) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
     func.return %v0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
   }
-  func.func @func2(%h0 : !transfer.integer, %h1 : !transfer.integer, %h2 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg0 : !transfer.integer) -> !transfer.integer {
+  func.func @double_and_mask_transfer(%h0 : !transfer.integer, %h1 : !transfer.integer, %h2 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg0 : !transfer.integer) -> !transfer.integer {
+    // The abstract image of the input sequentially masked by two constant bit-masks.
     %v2 = "transfer.and"(%arg0, %h0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %v1 = "transfer.and"(%h1, %v2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %v0 = func.call @%h2(%v1) : (!transfer.integer) -> !transfer.integer

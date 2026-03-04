@@ -1,5 +1,6 @@
 builtin.module {
-  func.func @func0(%h0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %h1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+  func.func @conditional_merge_with_top_fallback(%h0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %h1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+    // The abstract value resulting from selecting between two abstract transfer outputs, defaulting to top when neither is definite.
     %v2 = func.call @%h1(%arg0, %arg1) : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %v4 = func.call @%h0(%arg0, %arg1) : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %v3 = "transfer.get"(%v4) {index = 0} : (!transfer.integer) -> !transfer.integer
@@ -15,11 +16,13 @@ builtin.module {
     %v0 = "transfer.make"(%v1, %v7) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
     func.return %v0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
   }
-  func.func @func1(%h0 : !transfer.integer, %arg0 : !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+  func.func @make_pair_fixed_lower_concrete_upper(%h0 : !transfer.integer, %arg0 : !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+    // The abstract value whose lower component is a fixed constant and upper component is the concrete input.
     %v0 = "transfer.make"(%h0, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
     func.return %v0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>
   }
-  func.func @func2(%arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+  func.func @shift_spacing_zero_mask(%arg0 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>, %arg1 : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]> {
+    // The known-zero bits of a value after a shift determined by the interval spacing between the zero-masks of two operands.
     %v4 = "transfer.get"(%arg0) {index = 0} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %v5 = "transfer.get"(%arg1) {index = 0} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %v3 = "transfer.cmp"(%v4, %v5) {predicate = 7 : i64} : (!transfer.integer, !transfer.integer) -> i1
