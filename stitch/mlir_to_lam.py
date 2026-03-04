@@ -286,7 +286,7 @@ def mlir_to_lam(text: str) -> list[str]:
         try:
             expressions.append(build_lambda(args, assignments, ret_var))
         except ValueError as exc:
-            print(f'Warning [{path.name}]: {exc}', file=sys.stderr)
+            print(f'Warning: {exc}', file=sys.stderr)
 
     return expressions
 
