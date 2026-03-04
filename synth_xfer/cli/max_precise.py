@@ -1,7 +1,6 @@
 from argparse import (
     ArgumentDefaultsHelpFormatter,
     ArgumentParser,
-    BooleanOptionalAction,
     Namespace,
 )
 from io import StringIO
@@ -9,32 +8,31 @@ from pathlib import Path
 
 from xdsl.context import Context
 from xdsl.dialects.arith import Arith
-from xdsl.dialects.builtin import ModuleOp, Builtin
-from xdsl.dialects.func import FuncOp, Func
-from xdsl.ir import Operation, SSAValue
-from xdsl.printer import Printer
+from xdsl.dialects.builtin import Builtin, ModuleOp
+from xdsl.dialects.func import Func, FuncOp
+from xdsl.ir import Operation
 from xdsl.transforms.canonicalize import CanonicalizePass
-from xdsl_smt.dialects.smt_dialect import DeclareConstOp, DefineFunOp, EqOp, AssertOp, CallOp, ConstantBoolOp, BoolType
-from xdsl_smt.dialects.smt_utils_dialect import PairType, PairOp, FirstOp
-from xdsl_smt.dialects.transfer import Transfer
 from xdsl_smt.dialects.smt_bitvector_dialect import BitVectorType, ConstantOp, ExtractOp
+from xdsl_smt.dialects.smt_dialect import (
+    AssertOp,
+    BoolType,
+    CallOp,
+    ConstantBoolOp,
+    DeclareConstOp,
+    DefineFunOp,
+    EqOp,
+)
+from xdsl_smt.dialects.smt_utils_dialect import FirstOp, PairOp, PairType
+from xdsl_smt.dialects.transfer import Transfer
 from xdsl_smt.passes.dead_code_elimination import DeadCodeElimination
 from xdsl_smt.passes.lower_pairs import LowerPairs
-from xdsl_smt.passes.lower_to_smt import LowerToSMTPass
-from xdsl_smt.passes.lower_to_smt.smt_lowerer_loaders import load_vanilla_semantics_with_transfer
 from xdsl_smt.passes.transfer_inline import FunctionCallInline
 from xdsl_smt.traits.smt_printer import print_to_smtlib
 from xdsl_smt.utils.transfer_function_util import get_argument_instances_with_effect
-from z3 import Solver, parse_smt2_string, unknown, sat
+from z3 import Solver, parse_smt2_string, sat, unknown
 
-from synth_xfer._util.parse_mlir import get_fns, parse_mlir
+from synth_xfer._util.parse_mlir import parse_mlir
 from synth_xfer._util.verifier import _lower_to_smt_module
-from synth_xfer.egraph_rewriter.expr_to_mlir import ExprToMLIR
-from synth_xfer.egraph_rewriter.rewriter import (
-    rewrite_meet_of_all_functions,
-    rewrite_single_function_to_exprs,
-    rewrite_solutions,
-)
 
 
 def _get_args() -> Namespace:
@@ -43,17 +41,23 @@ def _get_args() -> Namespace:
     p.add_argument("transfer_functions", type=Path, help="path to transfer function")
     p.add_argument("--domain", type=str, help="The abstract domain")
     p.add_argument("--args", type=str, help="The abstract arguments")
-    p.add_argument("--bitwidth", type=int, help="The bit width, default value is 8", default=8)
-    p.add_argument("--timeout", type=int, help="The z3 timeout default value is 5", default=5)
+    p.add_argument(
+        "--bitwidth", type=int, help="The bit width, default value is 8", default=8
+    )
+    p.add_argument(
+        "--timeout", type=int, help="The z3 timeout default value is 5", default=5
+    )
     return p.parse_args()
+
 
 CONCRETE_FUNCTION_NAME = "concrete_op"
 GET_INSTANCE_CONSTRAINT = "getInstanceConstraint"
 OP_CONSTRAINT = "op_constraint"
 ABSTRACT_DOMAIN_LENGTH = 0
-TIMEOUT= 2
+TIMEOUT = 2
 
-def get_concrete_func(op:ModuleOp) -> DefineFunOp:
+
+def get_concrete_func(op: ModuleOp) -> DefineFunOp:
     for func in op.ops:
         if isinstance(func, DefineFunOp):
             if func.fun_name.data == CONCRETE_FUNCTION_NAME:
@@ -61,8 +65,7 @@ def get_concrete_func(op:ModuleOp) -> DefineFunOp:
     assert False
 
 
-
-def get_instance_constraint(module:ModuleOp) ->  DefineFunOp:
+def get_instance_constraint(module: ModuleOp) -> DefineFunOp:
     for func in module.ops:
         if isinstance(func, DefineFunOp):
             if func.fun_name.data == GET_INSTANCE_CONSTRAINT:
@@ -70,42 +73,45 @@ def get_instance_constraint(module:ModuleOp) ->  DefineFunOp:
     assert False
 
 
-def get_op_constraint(module:ModuleOp) -> DefineFunOp | None:
+def get_op_constraint(module: ModuleOp) -> DefineFunOp | None:
     for func in module.ops:
         if isinstance(func, DefineFunOp):
             if func.fun_name.data == OP_CONSTRAINT:
                 return func
     return None
 
-def parse_single_arg_knownbits(arg:str)->list[int]:
+
+def parse_single_arg_knownbits(arg: str) -> list[int]:
     result = [0, 0]
     for ch in arg:
-        if ch == '0':
-            result[0]|=1
-        elif ch =='1':
-            result[1]|=1
-        result[0]<<=1
-        result[1]<<=1
-    result[0]>>=1
-    result[1]>>=1
+        if ch == "0":
+            result[0] |= 1
+        elif ch == "1":
+            result[1] |= 1
+        result[0] <<= 1
+        result[1] <<= 1
+    result[0] >>= 1
+    result[1] >>= 1
     return result
 
-def parse_args_str(args_str:str, domain:str, bitwidth:int)->list[list[int]]:
+
+def parse_args_str(args_str: str, domain: str, bitwidth: int) -> list[list[int]]:
     if domain == "KnownBits":
         global ABSTRACT_DOMAIN_LENGTH
         ABSTRACT_DOMAIN_LENGTH = 2
         args = args_str.split(",")
-        result:list[list[int]]= []
+        result: list[list[int]] = []
         for i, arg in enumerate(args):
-            if len(arg)!=bitwidth:
+            if len(arg) != bitwidth:
                 assert False and f"{i}-th arg mismatches with bitwidth {bitwidth}!"
             result.append(parse_single_arg_knownbits(arg))
         return result
     else:
         assert False and f"{domain} doesn't support right now"
+        return []
 
 
-def init_module(module:ModuleOp, domain:str):
+def init_module(module: ModuleOp, domain: str):
     if domain == "KnownBits":
         get_instance_constraint_str = """
         "func.func"() ({
@@ -121,77 +127,93 @@ def init_module(module:ModuleOp, domain:str):
   "func.return"(%result) : (i1) -> ()
 }) {function_type = (!transfer.abs_value<[!transfer.integer, !transfer.integer]>, !transfer.integer) -> i1, sym_name = "getInstanceConstraint"} : () -> ()
         """
-        get_instance_constraint_func=parse_mlir(get_instance_constraint_str)
+        get_instance_constraint_func = parse_mlir(get_instance_constraint_str)
     else:
         assert False
     assert isinstance(get_instance_constraint_func, FuncOp)
     module.body.block.add_op(get_instance_constraint_func)
 
 
-def get_abstract_input_arguments(concrete_args:list[DeclareConstOp])->list[DeclareConstOp]:
+def get_abstract_input_arguments(
+    concrete_args: list[DeclareConstOp],
+) -> list[DeclareConstOp]:
     concrete_type = concrete_args[0].res.type
     assert isinstance(concrete_type, BitVectorType)
     abstract_type = BoolType()
-    assert ABSTRACT_DOMAIN_LENGTH>1
+    assert ABSTRACT_DOMAIN_LENGTH > 1
     for i in range(ABSTRACT_DOMAIN_LENGTH):
         abstract_type = PairType(concrete_type, abstract_type)
     return [DeclareConstOp(abstract_type) for _ in concrete_args]
 
-def to_constant_ops(val_list:list[int], bitwidth:int) -> list[ConstantOp]:
-    result:list[ConstantOp]=[]
+
+def to_constant_ops(val_list: list[int], bitwidth: int) -> list[ConstantOp]:
+    result: list[ConstantOp] = []
     for val in val_list:
         result.append(ConstantOp.from_int_value(val, bitwidth))
     return result
 
-def to_pair_op(constant_bool:ConstantBoolOp, val_list:list[ConstantOp])->list[PairOp]:
+
+def to_pair_op(constant_bool: ConstantBoolOp, val_list: list[ConstantOp]) -> list[PairOp]:
     last_val = constant_bool.result
-    result:list[PairOp] = []
+    result: list[PairOp] = []
     for val in val_list[::-1]:
         result.append(PairOp(val.res, last_val))
         last_val = result[-1].res
     return result
 
 
-
-def get_abstract_input_constraint(const_false: ConstantBoolOp, abstract_inputs:list[DeclareConstOp], abstract_domains:list[list[int]], bitwidth:int)->list[DeclareConstOp]:
-    result:list[Operation] = []
+def get_abstract_input_constraint(
+    const_false: ConstantBoolOp,
+    abstract_inputs: list[DeclareConstOp],
+    abstract_domains: list[list[int]],
+    bitwidth: int,
+) -> list[DeclareConstOp]:
+    result: list[Operation] = []
     for abstract_domain, abstract_input in zip(abstract_domains, abstract_inputs):
         constant_ops = to_constant_ops(abstract_domain, bitwidth)
         pair_op = to_pair_op(const_false, constant_ops)
-        eq_op=EqOp(pair_op[-1].res, abstract_input.res)
+        eq_op = EqOp(pair_op[-1].res, abstract_input.res)
         assert_op = AssertOp(eq_op.res)
-        result+=(constant_ops+pair_op+[eq_op, assert_op])
+        result += constant_ops + pair_op + [eq_op, assert_op]
     return result
 
 
-def get_input_op_constraint(op_constraint:DefineFunOp, inputs:list[DeclareConstOp])->list[Operation]:
+def get_input_op_constraint(
+    op_constraint: DefineFunOp, inputs: list[DeclareConstOp]
+) -> list[Operation]:
     constant_i1 = ConstantOp.from_int_value(1, 1)
     constant_bool = ConstantBoolOp(False)
     pair_op = PairOp(constant_i1.res, constant_bool.result)
     pair_res_op = PairOp(pair_op.res, constant_bool.result)
-    call_op = CallOp(op_constraint.ret, inputs+[constant_bool.result])
+    call_op = CallOp(op_constraint.ret, inputs + [constant_bool.result])
     eq_op = EqOp(pair_res_op.res, call_op.res)
     assert_op = AssertOp(eq_op.res)
     return [constant_i1, constant_bool, pair_op, pair_res_op, call_op, eq_op, assert_op]
 
 
-
-def get_input_constraint(abstract_inputs:list[DeclareConstOp], inputs:list[DeclareConstOp], instance_constraint:DefineFunOp)->list[Operation]:
-    result:list[Operation] = []
+def get_input_constraint(
+    abstract_inputs: list[DeclareConstOp],
+    inputs: list[DeclareConstOp],
+    instance_constraint: DefineFunOp,
+) -> list[Operation]:
+    result: list[Operation] = []
     constant_i1 = ConstantOp.from_int_value(1, 1)
     constant_bool = ConstantBoolOp(False)
     pair_op = PairOp(constant_i1.res, constant_bool.result)
     pair_res_op = PairOp(pair_op.res, constant_bool.result)
     for abstract_input, concrete_input in zip(abstract_inputs, inputs):
-        call_op = CallOp(instance_constraint.ret, [abstract_input, concrete_input,constant_bool.result])
+        call_op = CallOp(
+            instance_constraint.ret,
+            [abstract_input, concrete_input, constant_bool.result],
+        )
         eq_op = EqOp(pair_res_op.res, call_op.res)
         assert_op = AssertOp(eq_op.res)
 
-        result+=[call_op, eq_op, assert_op]
-    return [constant_i1,constant_bool, pair_op, pair_res_op] + result
+        result += [call_op, eq_op, assert_op]
+    return [constant_i1, constant_bool, pair_op, pair_res_op] + result
 
 
-def check_sat(ctx:Context, module:ModuleOp)->bool:
+def check_sat(ctx: Context, module: ModuleOp) -> bool:
     FunctionCallInline(True, {}).apply(ctx, module)
     LowerPairs().apply(ctx, module)
     CanonicalizePass().apply(ctx, module)
@@ -202,11 +224,11 @@ def check_sat(ctx:Context, module:ModuleOp)->bool:
     s.set(timeout=TIMEOUT * 1000)
     s.add(parse_smt2_string(stream.getvalue()))
     r = s.check()
-    assert r!=unknown
-    return r==sat
+    assert r != unknown
+    return r == sat
 
 
-def query_ith_bit(ctx:Context, module:ModuleOp,ith_bit:int, bit_val:int) -> bool:
+def query_ith_bit(ctx: Context, module: ModuleOp, ith_bit: int, bit_val: int) -> bool:
     block = module.body.block
     concrete_res = block.last_op
     assert isinstance(concrete_res, CallOp)
@@ -215,24 +237,24 @@ def query_ith_bit(ctx:Context, module:ModuleOp,ith_bit:int, bit_val:int) -> bool
     const_bv_op = ConstantOp.from_int_value(bit_val, 1)
     eq_op = EqOp(ith_bit.res, const_bv_op.res)
     assert_op = AssertOp(eq_op.res)
-    block.add_ops([first_op, ith_bit, const_bv_op, eq_op,assert_op])
+    block.add_ops([first_op, ith_bit, const_bv_op, eq_op, assert_op])
     return check_sat(ctx, module)
 
 
-def check_ith_knownbit(ctx:Context, verify_module:ModuleOp, ith:int)->str:
-    query_zero_module=verify_module.clone()
-    query_one_module=verify_module.clone()
+def check_ith_knownbit(ctx: Context, verify_module: ModuleOp, ith: int) -> str:
+    query_zero_module = verify_module.clone()
+    query_one_module = verify_module.clone()
     could_be_zero = query_ith_bit(ctx, query_zero_module, ith, 0)
     could_be_one = query_ith_bit(ctx, query_one_module, ith, 1)
     if could_be_one and could_be_zero:
         return "?"
     elif (not could_be_zero) and (not could_be_one):
         assert False and "found conflicts"
+        return ""
     elif not could_be_zero:
         return "1"
     elif not could_be_one:
         return "0"
-
 
 
 def main() -> None:
@@ -243,7 +265,7 @@ def main() -> None:
     ctx.load_dialect(Func)
     ctx.load_dialect(Transfer)
 
-    module:ModuleOp = parse_mlir(args.transfer_functions)
+    module = parse_mlir(args.transfer_functions)
     assert isinstance(module, ModuleOp)
 
     domain = args.domain
@@ -262,23 +284,31 @@ def main() -> None:
     input_arguments = get_argument_instances_with_effect(concrete_op, {})
     abstract_input_arguments = get_abstract_input_arguments(input_arguments)
     const_false = ConstantBoolOp(False)
-    abstract_input_constraints = get_abstract_input_constraint(const_false,abstract_input_arguments, abstract_domains,bitwidth)
-    input_constraints = get_input_constraint(abstract_input_arguments, input_arguments, instance_constraint)
+    abstract_input_constraints = get_abstract_input_constraint(
+        const_false, abstract_input_arguments, abstract_domains, bitwidth
+    )
+    input_constraints = get_input_constraint(
+        abstract_input_arguments, input_arguments, instance_constraint
+    )
     input_op_constraint = []
     if op_constraint is not None:
         input_op_constraint = get_input_op_constraint()
     concrete_result = CallOp(concrete_op.ret, input_arguments)
 
-    verify_module = ModuleOp(input_arguments+[const_false]+
-                             abstract_input_arguments+abstract_input_constraints+input_op_constraint+input_constraints+[concrete_result])
+    verify_module = ModuleOp(
+        input_arguments
+        + [const_false]
+        + abstract_input_arguments
+        + abstract_input_constraints
+        + input_op_constraint
+        + input_constraints
+        + [concrete_result]
+    )
 
     result = ""
     for i in range(bitwidth):
-        result = check_ith_knownbit(ctx, verify_module,i) + result
+        result = check_ith_knownbit(ctx, verify_module, i) + result
     print(result)
-
-
-
 
 
 if __name__ == "__main__":
