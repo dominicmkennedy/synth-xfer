@@ -8,6 +8,7 @@ class LibraryState:
     version: int
     functions_text: str
 
+
 @dataclass
 class CorpusFile:
     filename: str
@@ -22,7 +23,10 @@ def build_library_learn_prompt(
 ) -> str:
     """Instantiate library learning prompt"""
 
-    synth_functions = "\n".join([file.text for file in corpus])
+    synth_functions = ""
+    for file in corpus:
+        synth_functions += f"// {file.filename}\n"
+        synth_functions += f"{file.text}\n"
 
     prompt = prompt_template.replace("<SYNTHESIZED_FUNCTIONS>", synth_functions)
     prompt = prompt.replace("<EXISTING_LIBRARY>", existing_lib)
