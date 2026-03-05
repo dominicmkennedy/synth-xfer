@@ -11,7 +11,6 @@ from .agent_sdk import format_agent_run_dump, run_agent_learn
 from .shared import LibraryState, CorpusFile, build_library_learn_prompt
 from .util import (
     clean_llm_output,
-    extract_op_name,
     save_instantiated_prompt,
     merge_library_text,
     save_library,
@@ -52,7 +51,7 @@ def print_token_usage(run_result) -> None:
 
 def run_library_learn(
     previous_library: LibraryState,
-    corpus: str,
+    corpus: list[CorpusFile],
     args,
     api_key: str,
 ) -> LibraryState:
@@ -70,7 +69,7 @@ def run_library_learn(
 
     prompt = build_library_learn_prompt(
         prompt_template=prompt_template,
-        synth_functions=corpus,
+        corpus=corpus,
         existing_lib=previous_library.functions_text,
         ops_md=ops_md,
     )
@@ -151,9 +150,13 @@ def main():
     args = parser.parse_args()
     api_key = get_api_key()
 
-    corpus = ""
+    corpus = []
     for file in args.input_files:
-        corpus += "\n" + Path(file).read_text()
+        filepath = Path(file)
+        corpus.append(CorpusFile(
+            filename=filepath.name,
+            text=filepath.read_text()
+        ))
 
     lib_state = LibraryState(version=0, functions_text="builtin.module {}")
     for i in range(args.rounds):
