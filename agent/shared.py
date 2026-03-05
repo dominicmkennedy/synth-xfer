@@ -1,4 +1,12 @@
 """Shared utilities for transformer synthesis methods."""
+from dataclasses import dataclass
+
+@dataclass
+class LibraryState:
+    """Current learned library state passed to synthesis prompts."""
+
+    version: int
+    functions_text: str
 
 def build_library_learn_prompt(
     prompt_template: str,

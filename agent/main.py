@@ -6,10 +6,9 @@ import os
 import re
 import sys
 from pathlib import Path
-from dataclasses import dataclass
 
 from .agent_sdk import format_agent_run_dump, run_agent_learn
-from .shared import build_library_learn_prompt
+from .shared import LibraryState, CorpusFile, build_library_learn_prompt
 from .util import (
     clean_llm_output,
     extract_op_name,
@@ -17,14 +16,6 @@ from .util import (
     merge_library_text,
     save_library,
 )
-
-@dataclass
-class LibraryState:
-    """Current learned library state passed to synthesis prompts."""
-
-    version: int
-    functions_text: str
-
 
 def get_api_key() -> str:
     """Get API key from env var or file."""
