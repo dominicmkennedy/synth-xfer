@@ -45,6 +45,7 @@ Output a single `builtin.module` containing only the new library functions you a
 - One allowed operation per line
 - Descriptive `snake_case` function names
 - A brief `//` comment on the first line of each function body explaining its purpose
+- A second `//` comment on the next line listing which files can be compressed with this helper (e.g., `// Usable by: kb_add.mlir, kb_sub.mlir`)
 - Arguments typed as `!transfer.integer` or `!transfer.abs_value<[!transfer.integer, !transfer.integer]>` as appropriate
 
 Example output shape (illustrative, do not copy verbatim):
@@ -53,6 +54,7 @@ Example output shape (illustrative, do not copy verbatim):
 builtin.module {
   func.func @maybe_zero(%kb : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer {
     // Returns the mask of bits that might be 0: complement of known-one.
+    // Usable by: @kb_add, @kb_sub
     %known1 = "transfer.get"(%kb) {index = 1} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
     %all_ones = "transfer.get_all_ones"(%known1) : (!transfer.integer) -> !transfer.integer
     %res = "transfer.xor"(%known1, %all_ones) : (!transfer.integer, !transfer.integer) -> !transfer.integer
@@ -66,5 +68,6 @@ builtin.module {
 1. Read each synthesized transfer function carefully. For each one, annotate (mentally) which sub-sequences of operations compute a semantically coherent intermediate result.
 2. Look for sub-computations that appear in more than one function, or that are large enough to deserve a name on their own.
 3. For each candidate, decide on a precise semantic description and a clear name.
-4. Write the MLIR for each helper function. Verify it uses only allowed primitives and is in valid SSA form.
-5. Output **only** the `builtin.module` containing the new helper functions — no explanation, no transfer functions, no markdown fences around the final answer.
+4. For each helper, identify which corpus transfer functions contain the sub-computation it encodes — these are the functions that could call it.
+5. Write the MLIR for each helper function. Verify it uses only allowed primitives and is in valid SSA form.
+6. Output **only** the `builtin.module` containing the new helper functions — no explanation, no transfer functions, no markdown fences around the final answer.
