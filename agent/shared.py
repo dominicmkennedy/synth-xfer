@@ -18,7 +18,7 @@ class CorpusFile:
 def build_library_learn_prompt(
     prompt_template: str,
     corpus: list[CorpusFile],
-    existing_lib: str,
+    existing_lib: LibraryState,
     ops_md: str,
 ) -> str:
     """Instantiate library learning prompt"""
@@ -29,7 +29,7 @@ def build_library_learn_prompt(
         synth_functions += f"{file.text}\n"
 
     prompt = prompt_template.replace("<SYNTHESIZED_FUNCTIONS>", synth_functions)
-    prompt = prompt.replace("<EXISTING_LIBRARY>", existing_lib)
+    prompt = prompt.replace("<EXISTING_LIBRARY>", existing_lib.functions_text)
     prompt = prompt.replace("<PRIMITIVE_OPERATORS>", ops_md)
 
     return prompt

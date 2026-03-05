@@ -70,7 +70,7 @@ def run_library_learn(
     prompt = build_library_learn_prompt(
         prompt_template=prompt_template,
         corpus=corpus,
-        existing_lib=previous_library.functions_text,
+        existing_lib=previous_library,
         ops_md=ops_md,
     )
 
