@@ -71,6 +71,19 @@ def learn_phase(
         synthesis_results=synthesis_results,
     )
 
+def compress_phase(
+    results: list[SynthesisResult],
+    library: LibraryState,
+    run_single_compression,
+) -> list[SynthesisResult]:
+    """Run compression agent over synthesis results"""
+
+    new_results: list[SynthesisResult] = []
+    for result in results:
+        new_result = run_single_compression(result, library)
+        new_results.append(new_result)
+    return new_results
+
 
 def run_library_learning_loop(
     tasks: list[SynthesisTask],
@@ -78,6 +91,7 @@ def run_library_learning_loop(
     initial_library: LibraryState,
     run_single_task,
     run_library_learn,
+    run_single_compression,
 ) -> tuple[LibraryState, list[SynthesisResult]]:
     """Top-level loop: synthesize tasks, then improve library.
 
@@ -93,5 +107,10 @@ def run_library_learning_loop(
         latest_results = synth_phase(tasks, library, run_single_task)
         if round_idx < num_rounds:
             library = learn_phase(library, latest_results, run_library_learn)
+            latest_results = compress_phase(
+                latest_results, 
+                library, 
+                run_single_compression
+            )
 
     return library, latest_results
