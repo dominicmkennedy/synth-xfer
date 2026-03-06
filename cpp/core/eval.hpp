@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <sstream>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -73,11 +75,39 @@ public:
 private:
   std::vector<XferFn> xfrFns;
   std::vector<XferFn> refFns;
+  unsigned int maxUnsoundExamples;
+  unsigned int maxImpreciseExamples;
+
+  template <typename T> static std::string toText(const T &value) {
+    std::ostringstream oss;
+    oss << value;
+    std::string result = oss.str();
+    // Remove trailing newline if present
+    if (!result.empty() && result.back() == '\n') {
+      result.pop_back();
+    }
+    return result;
+  }
+
+  static std::vector<std::string> argsToText(const ArgsTuple &args) {
+    std::vector<std::string> out;
+    out.reserve(N);
+
+    std::apply(
+        [&](const auto &...parts) {
+          (out.push_back(toText(parts)), ...);
+        },
+        args);
+
+    return out;
+  }
 
 public:
   constexpr Eval(const std::vector<std::uintptr_t> &xfrAddrs,
-                 const std::vector<std::uintptr_t> &refAddrs)
-      : xfrFns(xfrAddrs.size(), nullptr), refFns(refAddrs.size(), nullptr) {
+                 const std::vector<std::uintptr_t> &refAddrs,
+                 unsigned int maxUnsound = 0, unsigned int maxImprecise = 0)
+      : xfrFns(xfrAddrs.size(), nullptr), refFns(refAddrs.size(), nullptr),
+        maxUnsoundExamples(maxUnsound), maxImpreciseExamples(maxImprecise) {
     for (std::size_t i = 0; i < xfrFns.size(); ++i)
       xfrFns[i] = reinterpret_cast<XferFn>(xfrAddrs[i]);
     for (std::size_t i = 0; i < refFns.size(); ++i)
@@ -86,14 +116,14 @@ public:
 
   Results eval(const EvalVec &toEval) const {
     Results r{static_cast<unsigned int>(xfrFns.size()), ResBw,
-              ResultD::num_levels};
+              ResultD::num_levels, maxUnsoundExamples, maxImpreciseExamples};
 
     for (const Row &row : toEval) {
       const ArgsTuple &args = std::get<0>(row);
       const ResultD &best = std::get<1>(row);
       evalSingle(args, best, r);
     }
-
+    r.cleanExamples();
     return r;
   }
 
@@ -133,7 +163,10 @@ private:
       unsigned long dis = synth_after_meet.distance(best);
       unsigned long soundDis = sound ? dis : baseDis;
 
-      r.incResult(Result(sound, dis, exact, solved, soundDis), i);
+      CaseExample example(argsToText(args), toText(synth_after_meet),
+                          toText(best), static_cast<double>(dis));
+
+      r.incResult(sound, dis, exact, solved, soundDis, example, i);
     }
 
     r.incCases(solved, baseDis);

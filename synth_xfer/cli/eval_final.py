@@ -68,6 +68,18 @@ def _reg_args():
     make_sampler_parser(p)
     p.add_argument("-o", "--output", type=Path, default=None)
     p.add_argument(
+        "--unsound-ex",
+        type=int,
+        default=0,
+        help="Maximum unsound examples to collect",
+    )
+    p.add_argument(
+        "--imprecise-ex",
+        type=int,
+        default=0,
+        help="Maximum imprecise examples to collect",
+    )
+    p.add_argument(
         "-d",
         "--domain",
         type=str,
@@ -139,6 +151,8 @@ def run(
     xfer_name: str,
     random_seed: int | None,
     sampler: Sampler,
+    unsound_ex: int = 0,
+    imprecise_ex: int = 0,
 ) -> tuple[EvalResult, EvalResult]:
     all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
     helpers = get_helper_funcs(op_path, domain)
@@ -170,7 +184,9 @@ def run(
             for bw in all_bws
         }
 
-        res = eval_transfer_func(eval_input)
+        res = eval_transfer_func(
+            eval_input, unsound_ex=unsound_ex, imprecise_ex=imprecise_ex
+        )
         assert len(res) == 2
 
         return (res[0], res[1])
@@ -184,6 +200,8 @@ class EvalJob:
     xfer_name: str
     random_seed: int | None
     bw_args: tuple[list[int], list[tuple[int, int]], list[tuple[int, int, int]]]
+    unsound_ex: int
+    imprecise_ex: int
     args: Namespace
 
 
@@ -200,6 +218,8 @@ def _run_job(job: EvalJob) -> tuple[EvalResult, EvalResult]:
         xfer_name=job.xfer_name,
         random_seed=job.random_seed,
         sampler=sampler,
+        unsound_ex=job.unsound_ex,
+        imprecise_ex=job.imprecise_ex,
     )
 
 
@@ -254,6 +274,8 @@ def _make_job(
     xfer_name: str,
     args: Namespace,
     bw_args: tuple[list[int], list[tuple[int, int]], list[tuple[int, int, int]]],
+    unsound_ex: int = 0,
+    imprecise_ex: int = 0,
 ) -> EvalJob:
     return EvalJob(
         domain=domain,
@@ -262,6 +284,8 @@ def _make_job(
         xfer_name=xfer_name,
         random_seed=args.random_seed,
         bw_args=bw_args,
+        unsound_ex=unsound_ex,
+        imprecise_ex=imprecise_ex,
         args=args,
     )
 
@@ -288,6 +312,8 @@ def main() -> None:
                     xfer_name=xfer_name,
                     args=args,
                     bw_args=bw_args,
+                    unsound_ex=args.unsound_ex,
+                    imprecise_ex=args.imprecise_ex,
                 )
             )
 
@@ -305,6 +331,8 @@ def main() -> None:
                 xfer_name=xfer_name,
                 args=args,
                 bw_args=bw_args,
+                unsound_ex=args.unsound_ex,
+                imprecise_ex=args.imprecise_ex,
             )
         ]
     else:
@@ -329,6 +357,7 @@ def main() -> None:
         if exact_bw is not None:
             top_8 = next(x for x in top_r.per_bit_res if x.bitwidth == exact_bw)
             synth_8 = next(x for x in synth_r.per_bit_res if x.bitwidth == exact_bw)
+            row["Sound %"] = str(synth_8.get_sound_prop() * 100.0)
             row["Top Exact %"] = str(top_8.get_exact_prop() * 100.0)
             row["Synth Exact %"] = str(synth_8.get_exact_prop() * 100.0)
 
@@ -346,6 +375,26 @@ def main() -> None:
     print(df)
     if args.output:
         df.to_csv(args.output)
+
+    # Print unsound and imprecise examples for synthesized transformers on exact bitwidth
+    if exact_bw is not None:
+        for job, (top_r, synth_r) in zip(jobs, data):
+            synth_exact = next(x for x in synth_r.per_bit_res if x.bitwidth == exact_bw)
+            if synth_exact.unsound_examples:
+                print(f"\nUNSOUND EXAMPLES ({len(synth_exact.unsound_examples)}):")
+                for i, (inputs, output, optimal, dist) in enumerate(
+                    synth_exact.unsound_examples, 1
+                ):
+                    inputs_str = f"({', '.join(inputs)})"
+                    print(f"{inputs_str} -> {output} (best: {optimal})")
+
+            if synth_exact.imprecise_examples:
+                print(f"\nIMPRECISE EXAMPLES ({len(synth_exact.imprecise_examples)}):")
+                for i, (inputs, output, optimal, dist) in enumerate(
+                    synth_exact.imprecise_examples, 1
+                ):
+                    inputs_str = f"({', '.join(inputs)})"
+                    print(f"{inputs_str} -> {output} (best: {optimal}, dist: {dist:.4f})")
 
 
 if __name__ == "__main__":

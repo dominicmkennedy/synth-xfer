@@ -1,5 +1,8 @@
 from dataclasses import dataclass
 
+# Type alias for case examples: (inputs, output, optimal_output, distance)
+CaseExample = tuple[tuple[str, ...], str, str, float]
+
 
 @dataclass
 class PerBitRes:
@@ -33,6 +36,10 @@ class PerBitRes:
     r"sound_dis(f,g) := \sum{a, f(a) is sound} d(f(a) /\ g(a), best(a)) + \sum{a, f(a) is unsound} d(g(a), best(a))"
     "sound_dis is equal to dist if f is sound."
 
+    # Example cases for unsound and imprecise transformers
+    unsound_examples: list[CaseExample]
+    imprecise_examples: list[CaseExample]
+
     def __str__(self):
         s = ""
         s += f"bw: {self.bitwidth:<3}"
@@ -51,6 +58,13 @@ class PerBitRes:
 
     def get_exact_prop(self) -> float:
         return self.exacts / self.all_cases
+
+
+class CaseExamples:
+    args: tuple[str, ...]
+    synth: str
+    best: str
+    dist: float
 
 
 class EvalResult:
@@ -75,6 +89,10 @@ class EvalResult:
     exacts: int
     unsolved_cases: int
     unsolved_exacts: int
+
+    # Example cases for unsound and imprecise transformers
+    unsound_examples: list[CaseExample]
+    imprecise_examples: list[CaseExample]
 
     @classmethod
     def init_bw_settings(
@@ -102,6 +120,14 @@ class EvalResult:
         self.exacts = sum(res.exacts for res in low_med_res)
         self.unsolved_cases = sum(res.unsolved_cases for res in low_med_res)
         self.unsolved_exacts = sum(res.unsolved_exacts for res in low_med_res)
+
+        # Aggregate unsound and imprecise examples from all bitwidths
+        self.unsound_examples = [
+            example for res in per_bit_res for example in res.unsound_examples
+        ]
+        self.imprecise_examples = [
+            example for res in per_bit_res for example in res.imprecise_examples
+        ]
 
     def __str__(self):
         def _pct(n: float, d: float) -> float:

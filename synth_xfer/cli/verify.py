@@ -183,7 +183,7 @@ def _print_counterexample(
         try:
             abst_output = run_xfer_fn(
                 domain, bw, [tuple(abst_args)], mlir_mod, xfer_name
-            )[0]  # type: ignore
+            )[0]
         except ImportError as e:
             abst_output = None
             print(f"Warning: Could not execute due {e}")
