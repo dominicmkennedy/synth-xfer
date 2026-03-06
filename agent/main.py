@@ -7,8 +7,17 @@ import re
 import sys
 from pathlib import Path
 
-from .agent_sdk import format_agent_run_dump, run_agent_learn
-from .shared import LibraryState, CorpusFile, build_library_learn_prompt
+from .agent_sdk import (
+    format_agent_run_dump,
+    run_agent_learn,
+    run_agent_compress,
+)
+from .shared import (
+    LibraryState, 
+    CorpusFile, 
+    build_library_learn_prompt,
+    build_compression_prompt,
+)
 from .util import (
     clean_llm_output,
     save_instantiated_prompt,
@@ -58,7 +67,7 @@ def run_library_learn(
 
     print(f"\nLearning library version {version}")
 
-    # Read all files
+    # Read prompt
     prompt_template_raw = args.library_prompt.read_text()
     prompt_template = re.sub(
         r"<!--.*?-->", "", prompt_template_raw, flags=re.DOTALL
@@ -106,6 +115,59 @@ def run_library_learn(
         lib_text,
     )
 
+def run_compression(
+    library: LibraryState,
+    corpus: list[CorpusFile],
+    args,
+) -> list[CorpusFile]:
+    print("\nRunning agent compression")
+
+    # Read prompt
+    prompt_template_raw = args.compress_prompt.read_text()
+    prompt_template = re.sub(
+        r"<!--.*?-->", "", prompt_template_raw, flags=re.DOTALL
+    ).strip()
+
+    output_dir = Path(args.output)
+
+    print(f"Using model: {args.model}")
+
+    compressed_corpus = []
+    for file in corpus:
+        prompt = build_compression_prompt(
+            prompt_template=prompt_template,
+            target=file,
+            lib=library,
+        )
+
+        prompt_save_path = save_instantiated_prompt(prompt, output_dir, f'compress{file.filename}')
+        print(f"Prompt saved to: {prompt_save_path}")
+
+        llm_output, run_result = run_agent_compress(
+            prompt=prompt,
+            model=args.model
+        )
+
+        if args.dump_agent_run:
+            dump_path = output_dir / f"compress_run_{file.filename}.txt"
+            dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
+            print(f"Agent run dump: {dump_path}")
+
+        (output_dir / f"compress_output_{file.filename}.txt").write_text(llm_output)
+        target_text = clean_llm_output(llm_output)
+
+        corpus_file = CorpusFile(
+            path=(output_dir / file.filename),
+            filename=file.filename,
+            text=target_text,
+        )
+        corpus_file.path.write_text(corpus_file.text)
+        compressed_corpus.append(corpus_file)
+
+        print(f"Compressed file: {corpus_file.path}")
+    
+    return compressed_corpus
+
 
 def main():
     """Perform library learning over MLIR files"""
@@ -134,6 +196,12 @@ def main():
         help="Path to library learning prompt template (default: agent/library_prompt.md",
     )
     parser.add_argument(
+        "--compression-prompt",
+        type=Path,
+        default=Path(__file__).parent / "compress_prompt.md",
+        help="Path to compression prompt template (default: agent/compress_prompt.md)",
+    )
+    parser.add_argument(
         "--ops",
         type=Path,
         default=Path(__file__).parent / "ops.md",
@@ -153,6 +221,7 @@ def main():
     for file in args.input_files:
         filepath = Path(file)
         corpus.append(CorpusFile(
+            path=filepath,
             filename=filepath.name,
             text=filepath.read_text()
         ))
