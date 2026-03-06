@@ -33,3 +33,16 @@ def build_library_learn_prompt(
     prompt = prompt.replace("<PRIMITIVE_OPERATORS>", ops_md)
 
     return prompt
+
+
+def build_compression_prompt(
+    prompt_template: str,
+    target: CorpusFile,
+    lib: LibraryState,
+) -> str:
+    """Instantiate compression prompt"""
+
+    prompt = prompt_template.replace("<LIBRARY>", lib.functions_text)
+    prompt = prompt.replace("<TARGET>", target.text)
+
+    return prompt
