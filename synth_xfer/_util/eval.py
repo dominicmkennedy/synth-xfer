@@ -177,7 +177,7 @@ def eval_transfer_func(
     unsound_ex: int = 0,
     imprecise_ex: int = 0,
 ) -> list[EvalResult]:
-    def get_eval_f(x: "ToEval") -> Callable[["ToEval", list[int], list[int]], "Results"]:
+    def get_eval_f(x: "ToEval") -> Callable[["ToEval", list[int], list[int], int, int], "Results"]:
         suffix = x.__class__.__name__.lower()[6:]
         func_name = f"eval_{suffix}"
 
