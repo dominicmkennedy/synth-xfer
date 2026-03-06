@@ -1,5 +1,6 @@
 """Shared utilities for transformer synthesis methods."""
 from dataclasses import dataclass
+from pathlib import Path
 
 @dataclass
 class LibraryState:
@@ -11,6 +12,7 @@ class LibraryState:
 
 @dataclass
 class CorpusFile:
+    path: Path
     filename: str
     text: str
 
