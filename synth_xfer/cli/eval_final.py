@@ -386,7 +386,7 @@ def main() -> None:
                     synth_exact.unsound_examples, 1
                 ):
                     inputs_str = f"({', '.join(inputs)})"
-                    print(f"{inputs_str} -> {output} (optimal: {optimal})")
+                    print(f"{inputs_str} -> {output} (best: {optimal})")
 
             if synth_exact.imprecise_examples:
                 print(f"\nIMPRECISE EXAMPLES ({len(synth_exact.imprecise_examples)}):")
@@ -394,9 +394,7 @@ def main() -> None:
                     synth_exact.imprecise_examples, 1
                 ):
                     inputs_str = f"({', '.join(inputs)})"
-                    print(
-                        f"{inputs_str} -> {output} (optimal: {optimal}, dist: {dist:.4f})"
-                    )
+                    print(f"{inputs_str} -> {output} (best: {optimal}, dist: {dist:.4f})")
 
 
 if __name__ == "__main__":
