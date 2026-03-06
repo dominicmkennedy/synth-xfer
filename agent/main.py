@@ -53,7 +53,6 @@ def run_library_learn(
     previous_library: LibraryState,
     corpus: list[CorpusFile],
     args,
-    api_key: str,
 ) -> LibraryState:
     version = previous_library.version + 1
 
