@@ -28,7 +28,6 @@ Use this as the semantics of the concrete operator:
 ```mlir
 %res = func.call @f(%arg0, %arg1) : (arg0_type, arg1_type) -> res_type
 ```
-5. **Include the library function:** Include the used library functions in the output module.
 
 ### Available primitives
 
