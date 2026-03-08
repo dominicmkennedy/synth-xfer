@@ -357,6 +357,8 @@ def main():
     args = parser.parse_args()
     api_key = get_api_key()
 
+    make_output_dir(Path(args.output))
+
     tasks = [
         SynthesisTask(op_file=op_file, op_name=extract_op_name(op_file))
         for op_file in args.op_file
