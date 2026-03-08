@@ -104,13 +104,15 @@ def run_library_learning_loop(
 
     # Round 0 is synthesis-only (single-shot equivalent).
     for round_idx in range(num_rounds + 1):
-        latest_results = synth_phase(tasks, library, run_single_task)
-        if round_idx < num_rounds:
-            library = learn_phase(library, latest_results, run_library_learn)
-            latest_results = compress_phase(
-                latest_results, 
-                library, 
-                run_single_compression
-            )
+        if round_idx == 0:
+            latest_results = synth_phase(tasks, library, run_single_task)
+        else:
+            latest_results = synth_phase([r.task for r in latest_results], library, run_single_task)
+        library = learn_phase(library, latest_results, run_library_learn)
+        latest_results = compress_phase(
+            latest_results, 
+            library, 
+            run_single_compression
+        )
 
     return library, latest_results
