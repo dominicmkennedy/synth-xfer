@@ -172,7 +172,6 @@ def run_library_learn(
     previous_library: LibraryState,
     synthesis_results: list[SynthesisResult],
     args,
-    api_key: str,
 ) -> LibraryState:
     version = previous_library.version + 1
 
