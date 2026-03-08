@@ -69,6 +69,10 @@ def clean_llm_output(output: str) -> str:
     output = output.replace(r"\n", "\n").replace(r"\t", "\t")
     return output
 
+def make_output_dir(output_dir: Path):
+    """Create the output directory and the output/log directory"""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "log").mkdir(exist_ok=True)
 
 def print_token_usage(run_result) -> None:
     """Print aggregated token usage from agent run."""
