@@ -262,6 +262,11 @@ def run_single_compression(
     (log_dir / f"compress_output_{op_name}.txt").write_text(llm_output)
     target_text = clean_llm_output(llm_output)
 
+    transformer_file = save_transformer(
+        clean_llm_output(llm_output), output_dir, target.task.op_name
+    )
+    print(f"Transformer: {transformer_file}")
+
     return SynthesisResult(
         task=target.task,
         solution_text=target_text,
