@@ -66,7 +66,10 @@ def main():
 
     api_key = get_api_key()
 
-    tasks = [SynthesisTask(op_file, extract_op_name(op_file)) for op_file in args.op_file]
+    tasks = [
+        SynthesisTask(op_file=op_file, op_name=extract_op_name(op_file))
+        for op_file in args.op_file
+    ]
     initial_library = load_initial_library(args.library)
 
     final_library, latest_results = run_library_learning_loop(
