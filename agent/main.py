@@ -30,11 +30,24 @@ from .util import (
 )
 
 
-def run_eval(op_file_path: str, transformer_file: Path, op_name: str) -> str:
+def run_eval(
+    op_file_path: str,
+    transformer: SynthesisResult, 
+    library: LibraryState,
+    op_name: str
+) -> str:
     """Evaluate the transformer via eval_transformer (no subprocess)."""
     print("\nRunning eval (Python)...")
+    
+    full_soln = merge_library_text(
+        library.functions_text, 
+        transformer.solution_text
+    )
+
+    print(f"full soln:\n{full_soln}")
+
     return eval_transformer(
-        solution_path=transformer_file,
+        solution_path=full_soln,
         op_path=Path(op_file_path),
         domain=AbstractDomain.KnownBits,
         xfer_name=f"kb_{op_name.lower()}",
@@ -132,9 +145,20 @@ def run_single_synthesis_task(
     )
     print(f"Transformer: {transformer_file}")
 
+    result = SynthesisResult(
+        task=task,
+        solution_text=llm_output,
+        transformer_path=transformer_file,
+        eval_summary=None,
+    )
+
     eval_summary: str | None = None
     if not args.skip_eval:
-        eval_summary = run_eval(task.op_file, transformer_file, task.op_name)
+        eval_summary = run_eval(task.op_file,
+                                result,
+                                library,
+                                task.op_name
+        )
         print(f"Eval result:\n{eval_summary}")
         eval_file = output_dir / f"eval_{task.op_name.lower()}.txt"
         eval_file.write_text(eval_summary)
