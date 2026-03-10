@@ -82,6 +82,7 @@ def run_agent_synthesis(
     op_file: str,
     op_name: str,
     api_key: str,
+    library: LibraryState,
     model: str = "gpt-4",
     max_turns: int = 20,
 ) -> tuple[str, object]:
@@ -94,9 +95,14 @@ def run_agent_synthesis(
         - Exact %: the percentage of inputs for which the output abstract value is exactly the same the optimal transfer function (perfect precision)
         - Norm: ignore for now
         """
+        full_soln = merge_library_text(
+            library.functions_text, 
+            transformer_mlir
+        )
+
         # Xuanyu: let agent understand simple metrics first for now. Use Norm later.
         return eval_transformer(
-            solution_path=transformer_mlir,
+            solution_path=full_soln,
             op_path=Path(op_file),
             domain=AbstractDomain.KnownBits,
             xfer_name=f"kb_{op_name.lower()}",
