@@ -127,7 +127,13 @@ def run_single_synthesis_task(
 
     print(f"Using model: {args.model}")
     llm_output, run_result = run_agent_synthesis(
-        prompt, task.op_file, task.op_name, api_key, args.model, args.max_turns
+        prompt,
+        task.op_file,
+        task.op_name,
+        api_key,
+        library,
+        args.model,
+        args.max_turns
     )
 
     print_token_usage(run_result)
