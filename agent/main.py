@@ -44,8 +44,6 @@ def run_eval(
         transformer.solution_text
     )
 
-    print(f"full soln:\n{full_soln}")
-
     return eval_transformer(
         solution_path=full_soln,
         op_path=Path(op_file_path),
