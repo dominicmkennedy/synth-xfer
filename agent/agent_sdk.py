@@ -13,7 +13,8 @@ from agents.items import (
 
 from synth_xfer._util.domain import AbstractDomain
 
-from .util import eval_transformer
+from .util import eval_transformer, merge_library_text
+from .library_learning import LibraryState
 
 # System Instructions
 AGENT_INSTRUCTIONS = """You synthesize KnownBits transfer functions in MLIR. You have an eval tool that evaluates your transformer.
