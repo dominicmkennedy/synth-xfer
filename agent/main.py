@@ -37,10 +37,11 @@ def run_eval(
 ) -> str:
     """Evaluate the transformer via eval_transformer (no subprocess)."""
     print("\nRunning eval (Python)...")
-    
+
+    cleaned_mlir = clean_llm_output(transformer.solution_text)
     full_soln = merge_library_text(
-        library.functions_text, 
-        transformer.solution_text
+        library.functions_text,
+        cleaned_mlir,
     )
 
     return eval_transformer(
