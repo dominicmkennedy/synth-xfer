@@ -17,12 +17,11 @@ from .library_learning import (
     load_initial_library,
     run_library_learning_loop,
 )
-from .shared import build_prompt, build_library_learn_prompt
+from .shared import build_library_learn_prompt
 from .util import (
     clean_llm_output,
     eval_transformer,
     extract_op_name,
-    read_op_file,
     save_instantiated_prompt,
     merge_library_text,
     save_transformer,
@@ -94,30 +93,23 @@ def run_single_synthesis_task(
     """Run one synthesis task with current library context."""
     print(f"Synthesizing: {task.op_name}")
 
-    # Read all files
-    prompt_template_raw = args.synth_prompt.read_text()
-    prompt_template = re.sub(
-        r"<!--.*?-->", "", prompt_template_raw, flags=re.DOTALL
-    ).strip()
-
-    op_content = read_op_file(task.op_file)
-    template_mlir = args.template.read_text()
-    ops_md = args.ops.read_text()
-
-    examples = [
-        f"Example from {f.name}:\n```mlir\n{f.read_text()}```"
-        for f in sorted(args.examples_dir.glob("*.mlir"))
-    ]
-    examples_str = "\n\n".join(examples)
-
-    prompt = build_prompt(
-        prompt_template=prompt_template,
-        op_name=task.op_name,
-        op_content=op_content,
-        template_mlir=template_mlir,
-        examples=examples_str,
-        ops_md=ops_md,
-        library_functions=library.functions_text,
+    op_lower = task.op_name.lower()
+    prompt = (
+        "Task: Synthesize a KnownBits transfer function in MLIR.\n"
+        f"- Operation name: {task.op_name}\n"
+        f"- Operation file: {task.op_file}\n"
+        "\n"
+        "Use tools to fetch all materials; do not assume they are in this message:\n"
+        "- get_task_bundle(): concrete op MLIR\n"
+        "- get_program_templates(): output templates\n"
+        "- get_available_primitives(): allowed operators\n"
+        "- get_library_text(): available helper functions\n"
+        "- list_examples()/search_examples()/get_example(): reference implementations\n"
+        "- run_eval_tool(mlir): evaluate your candidate\n"
+        "\n"
+        "Output contract:\n"
+        f"- Return ONLY MLIR (builtin.module) defining func.func @kb_{op_lower}\n"
+        "- One operation per line; SSA form; no explanations.\n"
     )
 
     output_dir = Path(args.output)
