@@ -360,12 +360,6 @@ def main():
         help="Path to compression prompt template (default: agent/compress_prompt.md)",
     )
     parser.add_argument(
-        "--compress-prompt",
-        type=Path,
-        default=Path(__file__).parent / "compress_prompt.md",
-        help="Path to compression prompt template (default: agent/compress_prompt.md)",
-    )
-    parser.add_argument(
         "--examples-dir",
         type=Path,
         default=Path(__file__).parent / "examples",
