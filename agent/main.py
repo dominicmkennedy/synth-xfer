@@ -79,12 +79,6 @@ def main():
         help="Max iterations for agent (default: 20, use 2-3 for fast dev)",
     )
     parser.add_argument(
-        "--synth-prompt",
-        type=Path,
-        default=Path(__file__).parent / "md" / "prompt.md",
-        help="Path to synthesis prompt template (default: agent/prompt.md)",
-    )
-    parser.add_argument(
         "--library-prompt",
         type=Path,
         default=Path(__file__).parent / "md" / "library_prompt.md",

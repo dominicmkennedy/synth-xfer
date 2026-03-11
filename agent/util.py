@@ -90,28 +90,12 @@ def print_token_usage(run_result) -> None:
     print(f"Tokens: {token_str} ({total:,} total)")
 
 
-def _save_file(content: str, path: Path) -> Path:
-    """Helper to save file."""
+def save_file(content: str, dir: Path, file_name: str) -> Path:
+    """Save content to dir/file_name and return the full path."""
+    path = Path(dir) / file_name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     return path
-
-
-def save_transformer(output: str, output_dir: Path, op_name: str) -> Path:
-    """Save generated transformer to kb_{op_name}.mlir."""
-    return _save_file(output, Path(output_dir) / f"kb_{op_name.lower()}.mlir")
-
-
-def save_library(output: str, output_dir: Path, version: int) -> Path:
-    """Save learned library to library_v{version}.mlir"""
-    return _save_file(output, Path(output_dir) / f"library_v{version}.mlir")
-
-
-def save_instantiated_prompt(prompt: str, output_dir: Path, op_name: str) -> Path:
-    """Save instantiated prompt to instantiated_prompt_{op_name}.md."""
-    return _save_file(
-        prompt, Path(output_dir) / f"instantiated_prompt_{op_name.lower()}.md"
-    )
 
 
 def _extract_module_body(mlir: str) -> str:

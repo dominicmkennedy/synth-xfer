@@ -16,7 +16,7 @@ from .util import (
     eval_transformer,
     merge_library_text,
     print_token_usage,
-    save_transformer,
+    save_file,
 )
 
 _MD_DIR = Path(__file__).parent / "md"
@@ -213,12 +213,17 @@ def run_single_synthesis_task(
     )
     print_token_usage(run_result)
     if args.dump_agent_run:
-        dump_path = output_dir / f"agent_run_{task.op_name.lower()}.txt"
-        dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
+        dump_path = save_file(
+            format_agent_run_dump(run_result),
+            output_dir,
+            f"synth_agent_{task.op_name.lower()}.log",
+        )
         print(f"Agent run dump: {dump_path}")
 
-    transformer_file = save_transformer(
-        clean_llm_output(llm_output), output_dir, task.op_name
+    transformer_file = save_file(
+        clean_llm_output(llm_output),
+        output_dir,
+        f"kb_{task.op_name.lower()}.mlir",
     )
     print(f"Transformer: {transformer_file}")
 
@@ -228,8 +233,6 @@ def run_single_synthesis_task(
     if not args.skip_eval:
         eval_summary = run_eval(task.op_file, result, library, task.op_name)
         print(f"Eval result:\n{eval_summary}")
-        eval_file = output_dir / f"eval_{task.op_name.lower()}.txt"
-        eval_file.write_text(eval_summary)
-        print(f"Eval result saved: {eval_file}")
+        save_file(eval_summary, output_dir, f"eval_{task.op_name.lower()}.txt")
 
     return SynthesisResult(task, llm_output, transformer_file, eval_summary)

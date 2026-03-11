@@ -13,8 +13,7 @@ from .util import (
     clean_llm_output,
     merge_library_text,
     print_token_usage,
-    save_instantiated_prompt,
-    save_library,
+    save_file,
 )
 
 _MD_DIR = Path(__file__).parent / "md"
@@ -75,7 +74,7 @@ def run_library_learn(
 
     output_dir = Path(args.output)
     print(
-        f"Prompt saved to: {save_instantiated_prompt(prompt, output_dir, f'library{version}')}"
+        f"Prompt saved to: {save_file(prompt, output_dir, f'instantiated_prompt_library{version}.md')}"
     )
 
     print(f"Using model: {args.model}")
@@ -84,19 +83,18 @@ def run_library_learn(
     print_token_usage(run_result)
 
     if args.dump_agent_run:
-        dump_path = output_dir / f"library_run_{version}.txt"
-        dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
+        dump_path = save_file(
+            format_agent_run_dump(run_result),
+            output_dir,
+            f"learn_agent_{version}.log",
+        )
         print(f"Agent run dump: {dump_path}")
 
-    (output_dir / f"library_output_{version}.txt").write_text(llm_output)
     lib_text = merge_library_text(
         previous_library.functions_text,
         clean_llm_output(llm_output),
     )
-    library_file = save_library(lib_text, output_dir, version)
+    library_file = save_file(lib_text, output_dir, f"library_v{version}.mlir")
     print(f"Library: {library_file}")
 
-    return LibraryState(
-        version,
-        lib_text,
-    )
+    return LibraryState(version, lib_text)
