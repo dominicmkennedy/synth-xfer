@@ -60,7 +60,7 @@ def get_concrete_func(op: ModuleOp) -> DefineFunOp:
     for func in op.ops:
         if isinstance(func, DefineFunOp):
             func_name = func.fun_name
-            if func_name is not None and func_name == CONCRETE_FUNCTION_NAME:
+            if func_name is not None and func_name.data == CONCRETE_FUNCTION_NAME:
                 return func
     assert False
 
@@ -69,7 +69,7 @@ def get_instance_constraint(module: ModuleOp) -> DefineFunOp:
     for func in module.ops:
         if isinstance(func, DefineFunOp):
             func_name = func.fun_name
-            if func_name is not None and func_name == GET_INSTANCE_CONSTRAINT:
+            if func_name is not None and func_name.data == GET_INSTANCE_CONSTRAINT:
                 return func
     assert False
 
@@ -78,9 +78,9 @@ def get_op_constraint(module: ModuleOp) -> DefineFunOp | None:
     for func in module.ops:
         if isinstance(func, DefineFunOp):
             func_name = func.fun_name
-            if func_name is not None and func_name == OP_CONSTRAINT:
+            if func_name is not None and func_name.data == OP_CONSTRAINT:
                 return func
-    assert False
+    return None
 
 
 def parse_single_arg_knownbits(arg: str) -> list[int]:
@@ -275,6 +275,11 @@ def main() -> None:
     global TIMEOUT
     TIMEOUT = args.timeout
     abstract_domains = parse_args_str(args_str, domain, bitwidth)
+    func_name_mapping = {}
+    for op in module.ops:
+        if isinstance(op, FuncOp):
+            func_name_mapping[op.sym_name.data] = op
+    FunctionCallInline(False, func_name_mapping).apply(ctx, module)
     init_module(module, domain)
 
     _lower_to_smt_module(module, bitwidth, ctx)
@@ -287,7 +292,7 @@ def main() -> None:
         for arg in get_argument_instances_with_effect(concrete_op, {})
         if isinstance(arg, DeclareConstOp)
     ]
-    assert len(input_arguments) == len(concrete_op.func_type.inputs)
+    assert len(input_arguments) + 1 == len(concrete_op.func_type.inputs)
     abstract_input_arguments = get_abstract_input_arguments(input_arguments)
     const_false = ConstantBoolOp(False)
     abstract_input_constraints = get_abstract_input_constraint(
