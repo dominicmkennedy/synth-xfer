@@ -9,7 +9,12 @@ import sys
 
 from synth_xfer._util.domain import AbstractDomain
 
-from .agent_sdk import format_agent_run_dump, run_agent_learn, run_agent_synthesis
+from .agent_sdk import (
+    format_agent_run_dump, 
+    run_agent_synthesis, 
+    run_agent_learn,
+    run_agent_compress,
+)
 from .library_learning import (
     LibraryState,
     SynthesisResult,
@@ -17,7 +22,11 @@ from .library_learning import (
     load_initial_library,
     run_library_learning_loop,
 )
-from .shared import build_library_learn_prompt
+from .shared import (
+    build_prompt,
+    build_library_learn_prompt,
+    build_compression_prompt
+)
 from .util import (
     clean_llm_output,
     eval_transformer,
@@ -209,6 +218,53 @@ def run_library_learn(
         lib_text,
     )
 
+def run_single_compression(
+    target: SynthesisResult,
+    library: LibraryState,
+    args,
+) -> SynthesisResult:
+    op_name = target.task.op_name
+    print(f"\nRunning compression on {op_name}")
+
+    # Read prompt
+    prompt_template_raw = args.compress_prompt.read_text()
+    prompt_template = re.sub(
+        r"<!--.*?-->", "", prompt_template_raw, flags=re.DOTALL
+    ).strip()
+
+    output_dir = Path(args.output)
+
+    print(f"Using model: {args.model}")
+
+    prompt = build_compression_prompt(
+        prompt_template=prompt_template,
+        target=target,
+        lib=library,
+    )
+
+    prompt_save_path = save_instantiated_prompt(prompt, output_dir, f'compress{op_name}')
+    print(f"Prompt saved to: {prompt_save_path}")
+
+    llm_output, run_result = run_agent_compress(
+        prompt=prompt,
+        model=args.model
+    )
+
+    if args.dump_agent_run:
+        dump_path = output_dir / f"compress_run_{op_name}.txt"
+        dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
+        print(f"Agent run dump: {dump_path}")
+
+    (output_dir / f"compress_output_{op_name}.txt").write_text(llm_output)
+    target_text = clean_llm_output(llm_output)
+
+    return SynthesisResult(
+        task=target.task,
+        solution_text=target_text,
+        transformer_path=target.transformer_path,
+        eval_summary=target.eval_summary,
+    )
+
 
 def main():
     """Synthesize transformer using selected method."""
@@ -245,6 +301,18 @@ def main():
         type=Path,
         default=Path(__file__).parent / "md" / "library_prompt.md",
         help="Path to library learning prompt template (default: agent/md/library_prompt.md)",
+    )
+    parser.add_argument(
+        "--compress-prompt",
+        type=Path,
+        default=Path(__file__).parent / "md" / "compress_prompt.md",
+        help="Path to compression prompt template (default: agent/compress_prompt.md)",
+    )
+    parser.add_argument(
+        "--compress-prompt",
+        type=Path,
+        default=Path(__file__).parent / "compress_prompt.md",
+        help="Path to compression prompt template (default: agent/compress_prompt.md)",
     )
     parser.add_argument(
         "--examples-dir",
@@ -302,7 +370,7 @@ def main():
             previous_library=previous_library,
             synthesis_results=synthesis_results,
             args=args,
-            api_key=api_key,
+            api_key=api_key
         )
 
     final_library, latest_results = run_library_learning_loop(
@@ -311,6 +379,7 @@ def main():
         initial_library=initial_library,
         run_single_task=_run_task,
         run_library_learn=_library_learn,
+        run_single_compression=_compress,
     )
     print(
         f"Library learning complete: version={final_library.version}, "
