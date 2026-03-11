@@ -25,7 +25,7 @@ from .library_learning import (
 from .shared import (
     build_prompt,
     build_library_learn_prompt,
-    build_compression_prompt
+    build_compression_prompt,
 )
 from .util import (
     clean_llm_output,
@@ -35,6 +35,8 @@ from .util import (
     save_instantiated_prompt,
     save_library,
     save_transformer,
+    save_library,
+    make_output_dir,
 )
 
 
