@@ -122,8 +122,9 @@ def run_single_synthesis_task(
     )
 
     output_dir = Path(args.output)
+    log_dir = (output_dir / "log")
     print(
-        f"Prompt saved to: {save_instantiated_prompt(prompt, output_dir, task.op_name)}"
+        f"Prompt saved to: {save_instantiated_prompt(prompt, log_dir, task.op_name)}"
     )
 
     print(f"Using model: {args.model}")
@@ -134,11 +135,11 @@ def run_single_synthesis_task(
     print_token_usage(run_result)
 
     if args.dump_agent_run:
-        dump_path = output_dir / f"agent_run_{task.op_name.lower()}.txt"
+        dump_path = log_dir / f"agent_run_{task.op_name.lower()}.txt"
         dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
         print(f"Agent run dump: {dump_path}")
 
-    (output_dir / f"llm_output_{task.op_name.lower()}.txt").write_text(llm_output)
+    (log_dir / f"llm_output_{task.op_name.lower()}.txt").write_text(llm_output)
     transformer_file = save_transformer(
         clean_llm_output(llm_output), output_dir, task.op_name
     )
@@ -155,7 +156,7 @@ def run_single_synthesis_task(
     if not args.skip_eval:
         eval_summary = run_eval(task.op_file, result, library, task.op_name)
         print(f"Eval result:\n{eval_summary}")
-        eval_file = output_dir / f"eval_{task.op_name.lower()}.txt"
+        eval_file = log_dir / f"eval_{task.op_name.lower()}.txt"
         eval_file.write_text(eval_summary)
         print(f"Eval result saved: {eval_file}")
 
@@ -194,8 +195,9 @@ def run_library_learn(
     )
 
     output_dir = Path(args.output)
+    log_dir = (output_dir / "log")
     print(
-        f"Prompt saved to: {save_instantiated_prompt(prompt, output_dir, f'library{version}')}"
+        f"Prompt saved to: {save_instantiated_prompt(prompt, log_dir, f"library{version}")}"
     )
 
     print(f"Using model: {args.model}")
@@ -204,11 +206,11 @@ def run_library_learn(
     print_token_usage(run_result)
 
     if args.dump_agent_run:
-        dump_path = output_dir / f"library_run_{version}.txt"
+        dump_path = log_dir / f"library_run_{version}.txt"
         dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
         print(f"Agent run dump: {dump_path}")
 
-    (output_dir / f"library_output_{version}.txt").write_text(llm_output)
+    (log_dir / f"library_output_{version}.txt").write_text(llm_output)
     lib_text = merge_library_text(
         previous_library.functions_text, clean_llm_output(llm_output)
     )
@@ -235,6 +237,7 @@ def run_single_compression(
     ).strip()
 
     output_dir = Path(args.output)
+    log_dir = (output_dir / "log")
 
     print(f"Using model: {args.model}")
 
@@ -244,7 +247,7 @@ def run_single_compression(
         lib=library,
     )
 
-    prompt_save_path = save_instantiated_prompt(prompt, output_dir, f'compress{op_name}')
+    prompt_save_path = save_instantiated_prompt(prompt, log_dir, f'compress{op_name}')
     print(f"Prompt saved to: {prompt_save_path}")
 
     llm_output, run_result = run_agent_compress(
@@ -253,11 +256,11 @@ def run_single_compression(
     )
 
     if args.dump_agent_run:
-        dump_path = output_dir / f"compress_run_{op_name}.txt"
+        dump_path = log_dir / f"compress_run_{op_name}.txt"
         dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
         print(f"Agent run dump: {dump_path}")
 
-    (output_dir / f"compress_output_{op_name}.txt").write_text(llm_output)
+    (log_dir / f"compress_output_{op_name}.txt").write_text(llm_output)
     target_text = clean_llm_output(llm_output)
 
     return SynthesisResult(
