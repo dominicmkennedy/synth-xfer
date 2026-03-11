@@ -3,7 +3,9 @@
 from pathlib import Path
 import re
 
-from .agent_sdk import format_agent_run_dump, run_agent_learn
+from agents import Agent, Runner
+
+from .agent_helper import format_agent_run_dump
 from .shared import build_library_learn_prompt
 from .util import (
     LibraryState,
@@ -14,6 +16,33 @@ from .util import (
     save_instantiated_prompt,
     save_library,
 )
+
+_MD_DIR = Path(__file__).parent / "md"
+
+
+def _read_instruction_file(name: str) -> str:
+    text = (_MD_DIR / name).read_text(encoding="utf-8")
+    return text.strip()
+
+
+LEARN_INSTRUCTIONS = _read_instruction_file("learn_instructions.md")
+
+
+def run_agent_learn(
+    prompt: str,
+    model: str = "gpt-4",
+) -> tuple[str, object]:
+    """Run agent to learn library functions. Returns (final_output, run_result)."""
+
+    agent = Agent(
+        name="LibraryFunctionLearner",
+        instructions=LEARN_INSTRUCTIONS,
+        model=model,
+    )
+
+    result = Runner.run_sync(agent, prompt)
+
+    return (result.final_output, result)
 
 
 def run_library_learn(
