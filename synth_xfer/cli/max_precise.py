@@ -84,7 +84,6 @@ def get_op_constraint(module: ModuleOp) -> DefineFunOp | None:
     return None
 
 
-
 def parse_single_arg_knownbits(arg: str) -> list[int]:
     result = [0, 0]
     for ch in arg:
@@ -294,7 +293,7 @@ def main() -> None:
         for arg in get_argument_instances_with_effect(concrete_op, {})
         if isinstance(arg, DeclareConstOp)
     ]
-    assert len(input_arguments)+1 == len(concrete_op.func_type.inputs)
+    assert len(input_arguments) + 1 == len(concrete_op.func_type.inputs)
     abstract_input_arguments = get_abstract_input_arguments(input_arguments)
     const_false = ConstantBoolOp(False)
     abstract_input_constraints = get_abstract_input_constraint(
