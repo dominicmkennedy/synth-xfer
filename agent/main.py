@@ -425,6 +425,16 @@ def main():
             args=args,
             api_key=api_key
         )
+    
+    def _compress(
+        target: SynthesisResult,
+        library: LibraryState,
+    ) -> SynthesisResult:
+        return run_single_compression(
+            target=target,
+            library=library,
+            args=args,
+        )
 
     final_library, latest_results = run_library_learning_loop(
         tasks=tasks,
