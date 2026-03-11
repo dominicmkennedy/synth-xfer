@@ -251,7 +251,7 @@ def check_ith_knownbit(ctx: Context, verify_module: ModuleOp, ith: int) -> str |
     if could_be_one and could_be_zero:
         return "?"
     elif (not could_be_zero) and (not could_be_one):
-        assert False and "found conflicts"
+        return None
     elif not could_be_zero:
         return "1"
     elif not could_be_one:
@@ -319,7 +319,9 @@ def main() -> None:
     result = ""
     for i in range(bitwidth):
         ith_result = check_ith_knownbit(ctx, verify_module, i)
-        assert ith_result is not None
+        if ith_result is None:
+            print("(bottom)")
+            exit(0)
         result = ith_result + result
     print(result)
 
