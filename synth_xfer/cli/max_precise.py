@@ -59,9 +59,8 @@ TIMEOUT = 2
 def get_concrete_func(op: ModuleOp) -> DefineFunOp:
     for func in op.ops:
         if isinstance(func, DefineFunOp):
-            func_name = func.fun_name.data
-            if func_name is not None and func_name == CONCRETE_FUNCTION_NAME:
-                print(func.func_type)
+            func_name = func.fun_name
+            if func_name is not None and func_name.data == CONCRETE_FUNCTION_NAME:
                 return func
     assert False
 
@@ -69,8 +68,8 @@ def get_concrete_func(op: ModuleOp) -> DefineFunOp:
 def get_instance_constraint(module: ModuleOp) -> DefineFunOp:
     for func in module.ops:
         if isinstance(func, DefineFunOp):
-            func_name = func.fun_name.data
-            if func_name is not None and func_name == GET_INSTANCE_CONSTRAINT:
+            func_name = func.fun_name
+            if func_name is not None and func_name.data == GET_INSTANCE_CONSTRAINT:
                 return func
     assert False
 
@@ -78,8 +77,8 @@ def get_instance_constraint(module: ModuleOp) -> DefineFunOp:
 def get_op_constraint(module: ModuleOp) -> DefineFunOp | None:
     for func in module.ops:
         if isinstance(func, DefineFunOp):
-            func_name = func.fun_name.data
-            if func_name is not None and func_name == OP_CONSTRAINT:
+            func_name = func.fun_name
+            if func_name is not None and func_name.data == OP_CONSTRAINT:
                 return func
     return None
 
