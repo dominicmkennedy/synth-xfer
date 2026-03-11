@@ -31,7 +31,6 @@ class SynthesisResult:
 class LibraryState:
     """Current learned library state passed to synthesis prompts."""
 
-    version: int
     functions_text: str
 
 
@@ -43,8 +42,8 @@ def extract_op_name(op_file_path: str) -> str:
 def load_initial_library(library_file: Path | None) -> LibraryState:
     """Load initial library text for round 0."""
     if library_file is None:
-        return LibraryState(0, "builtin.module {}")
-    return LibraryState(0, library_file.read_text())
+        return LibraryState("builtin.module {}")
+    return LibraryState(library_file.read_text())
 
 
 def read_prompt_template() -> str:

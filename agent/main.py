@@ -32,10 +32,16 @@ def run_library_learning_loop(
     for round_idx in range(num_rounds + 1):
         latest_results = []
         for task in tasks:
-            result = run_single_synthesis_task(task, library, args, api_key)
+            result = run_single_synthesis_task(task, round_idx, library, args, api_key)
             latest_results.append(result)
         if round_idx < num_rounds:
-            library = run_library_learn(library, latest_results, args, api_key)
+            library = run_library_learn(
+                version=round_idx + 1,
+                previous_library=library,
+                synthesis_results=latest_results,
+                args=args,
+                api_key=api_key,
+            )
 
     return library, latest_results
 
@@ -125,7 +131,7 @@ def main():
         tasks, args.rounds, initial_library, args, api_key
     )
     print(
-        f"Library learning complete: version={final_library.version}, "
+        f"Library learning complete: version={args.rounds}, "
         f"latest_results={len(latest_results)}"
     )
 

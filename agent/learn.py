@@ -45,6 +45,7 @@ def run_agent_learn(
 
 
 def run_library_learn(
+    version: int,
     previous_library: LibraryState,
     synthesis_results: list[SynthesisResult],
     args,
@@ -52,8 +53,6 @@ def run_library_learn(
 ) -> LibraryState:
     """Learn a new library version from synthesized task results."""
     del api_key  # Reserved for future model/provider auth parity.
-
-    version = previous_library.version + 1
 
     print(f"\nLearning library version {version}")
 
@@ -97,4 +96,4 @@ def run_library_learn(
     library_file = save_file(lib_text, output_dir, f"library_v{version}.mlir")
     print(f"Library: {library_file}")
 
-    return LibraryState(version, lib_text)
+    return LibraryState(lib_text)

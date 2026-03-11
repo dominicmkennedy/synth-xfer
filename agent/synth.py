@@ -174,14 +174,16 @@ def run_eval(
 
 def run_single_synthesis_task(
     task: SynthesisTask,
+    round_num: int,
     library: LibraryState,
     args,
     api_key: str,
 ) -> SynthesisResult:
     """Run one synthesis task with current library context."""
-    print(f"Synthesizing: {task.op_name}")
+    print(f"Synthesizing: round={round_num}, op={task.op_name}")
 
     op_lower = task.op_name.lower()
+    # Xuanyu: make this a md file
     prompt = (
         "Task: Synthesize a KnownBits transfer function in MLIR.\n"
         f"- Operation name: {task.op_name}\n"
@@ -216,14 +218,14 @@ def run_single_synthesis_task(
         dump_path = save_file(
             format_agent_run_dump(run_result),
             output_dir,
-            f"synth_agent_{task.op_name.lower()}.log",
+            f"synth_agent_r{round_num}_{task.op_name.lower()}.log",
         )
         print(f"Agent run dump: {dump_path}")
 
     transformer_file = save_file(
         clean_llm_output(llm_output),
         output_dir,
-        f"kb_{task.op_name.lower()}.mlir",
+        f"kb_r{round_num}_{task.op_name.lower()}.mlir",
     )
     print(f"Transformer: {transformer_file}")
 
@@ -233,6 +235,8 @@ def run_single_synthesis_task(
     if not args.skip_eval:
         eval_summary = run_eval(task.op_file, result, library, task.op_name)
         print(f"Eval result:\n{eval_summary}")
-        save_file(eval_summary, output_dir, f"eval_{task.op_name.lower()}.txt")
+        save_file(
+            eval_summary, output_dir, f"eval_r{round_num}_{task.op_name.lower()}.txt"
+        )
 
     return SynthesisResult(task, llm_output, transformer_file, eval_summary)
