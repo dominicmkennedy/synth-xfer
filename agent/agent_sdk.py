@@ -14,8 +14,7 @@ from agents.items import (
 
 from synth_xfer._util.domain import AbstractDomain
 
-from .library_learning import LibraryState
-from .util import eval_transformer, merge_library_text
+from .util import LibraryState, eval_transformer, merge_library_text
 
 # System instructions live under agent/md.
 _AGENT_DIR = Path(__file__).parent

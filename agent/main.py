@@ -4,49 +4,40 @@
 import argparse
 import os
 from pathlib import Path
-import re
 import sys
 
-from synth_xfer._util.domain import AbstractDomain
-
-from .agent_sdk import format_agent_run_dump, run_agent_learn, run_agent_synthesis
-from .library_learning import (
+from .learn import run_library_learn
+from .synth import run_single_synthesis_task
+from .util import (
     LibraryState,
     SynthesisResult,
     SynthesisTask,
-    load_initial_library,
-    run_library_learning_loop,
-)
-from .shared import build_library_learn_prompt
-from .util import (
-    clean_llm_output,
-    eval_transformer,
     extract_op_name,
-    merge_library_text,
-    save_instantiated_prompt,
-    save_library,
-    save_transformer,
+    load_initial_library,
 )
 
 
-def run_eval(
-    op_file_path: str, transformer: SynthesisResult, library: LibraryState, op_name: str
-) -> str:
-    """Evaluate the transformer via eval_transformer (no subprocess)."""
-    print("\nRunning eval (Python)...")
+def run_library_learning_loop(
+    tasks: list[SynthesisTask],
+    num_rounds: int,
+    initial_library: LibraryState,
+    args,
+    api_key: str,
+) -> tuple[LibraryState, list[SynthesisResult]]:
+    """Top-level loop: synthesize tasks, then improve library."""
+    library = initial_library
+    latest_results: list[SynthesisResult] = []
 
-    cleaned_mlir = clean_llm_output(transformer.solution_text)
-    full_soln = merge_library_text(
-        library.functions_text,
-        cleaned_mlir,
-    )
+    # Round 0 is synthesis-only (single-shot equivalent).
+    for round_idx in range(num_rounds + 1):
+        latest_results = []
+        for task in tasks:
+            result = run_single_synthesis_task(task, library, args, api_key)
+            latest_results.append(result)
+        if round_idx < num_rounds:
+            library = run_library_learn(library, latest_results, args, api_key)
 
-    return eval_transformer(
-        solution_path=full_soln,
-        op_path=Path(op_file_path),
-        domain=AbstractDomain.KnownBits,
-        xfer_name=f"kb_{op_name.lower()}",
-    )
+    return library, latest_results
 
 
 def get_api_key() -> str:
@@ -61,153 +52,6 @@ def get_api_key() -> str:
             "API key not found. Set OPENAI_API_KEY or create agent/api_key.txt"
         )
     return api_key
-
-
-def print_token_usage(run_result) -> None:
-    """Print aggregated token usage from agent run."""
-    inp = out = reason = 0
-    for resp in getattr(run_result, "raw_responses", []):
-        u = getattr(resp, "usage", None)
-        if u is None:
-            continue
-        inp += getattr(u, "input_tokens", 0) or 0
-        out += getattr(u, "output_tokens", 0) or 0
-        od = getattr(u, "output_tokens_details", None)
-        if od is not None:
-            reason += getattr(od, "reasoning_tokens", 0) or 0
-    total = inp + out + reason
-    token_str = f"{inp:,} input, {out:,} output" + (
-        f", {reason:,} reasoning" if reason else ""
-    )
-    print(f"Tokens: {token_str} ({total:,} total)")
-
-
-def run_single_synthesis_task(
-    task: SynthesisTask,
-    library: LibraryState,
-    args,
-    api_key: str,
-) -> SynthesisResult:
-    """Run one synthesis task with current library context."""
-    print(f"Synthesizing: {task.op_name}")
-
-    op_lower = task.op_name.lower()
-    prompt = (
-        "Task: Synthesize a KnownBits transfer function in MLIR.\n"
-        f"- Operation name: {task.op_name}\n"
-        f"- Operation file: {task.op_file}\n"
-        "\n"
-        "Use tools to fetch all materials; do not assume they are in this message:\n"
-        "- get_task_bundle(): concrete op MLIR\n"
-        "- get_program_templates(): output templates\n"
-        "- get_available_primitives(): allowed operators\n"
-        "- get_library_text(): available helper functions\n"
-        "- list_examples()/search_examples()/get_example(): reference implementations\n"
-        "- run_eval_tool(mlir): evaluate your candidate\n"
-        "\n"
-        "Output contract:\n"
-        f"- Return ONLY MLIR (builtin.module) defining func.func @kb_{op_lower}\n"
-        "- One operation per line; SSA form; no explanations.\n"
-    )
-
-    output_dir = Path(args.output)
-    print(
-        f"Prompt saved to: {save_instantiated_prompt(prompt, output_dir, task.op_name)}"
-    )
-
-    print(f"Using model: {args.model}")
-    llm_output, run_result = run_agent_synthesis(
-        prompt, task.op_file, task.op_name, api_key, library, args.model, args.max_turns
-    )
-
-    print_token_usage(run_result)
-
-    if args.dump_agent_run:
-        dump_path = output_dir / f"agent_run_{task.op_name.lower()}.txt"
-        dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
-        print(f"Agent run dump: {dump_path}")
-
-    (output_dir / f"llm_output_{task.op_name.lower()}.txt").write_text(llm_output)
-    transformer_file = save_transformer(
-        clean_llm_output(llm_output), output_dir, task.op_name
-    )
-    print(f"Transformer: {transformer_file}")
-
-    result = SynthesisResult(
-        task=task,
-        solution_text=llm_output,
-        transformer_path=transformer_file,
-        eval_summary=None,
-    )
-
-    eval_summary: str | None = None
-    if not args.skip_eval:
-        eval_summary = run_eval(task.op_file, result, library, task.op_name)
-        print(f"Eval result:\n{eval_summary}")
-        eval_file = output_dir / f"eval_{task.op_name.lower()}.txt"
-        eval_file.write_text(eval_summary)
-        print(f"Eval result saved: {eval_file}")
-
-    return SynthesisResult(
-        task=task,
-        solution_text=llm_output,
-        transformer_path=transformer_file,
-        eval_summary=eval_summary,
-    )
-
-
-def run_library_learn(
-    previous_library: LibraryState,
-    synthesis_results: list[SynthesisResult],
-    args,
-    api_key: str,
-) -> LibraryState:
-    version = previous_library.version + 1
-
-    print(f"\nLearning library version {version}")
-
-    # Read all files
-    prompt_template_raw = args.library_prompt.read_text()
-    prompt_template = re.sub(
-        r"<!--.*?-->", "", prompt_template_raw, flags=re.DOTALL
-    ).strip()
-
-    ops_md = args.ops.read_text()
-    synthesized_functions = [sr.solution_text for sr in synthesis_results]
-
-    prompt = build_library_learn_prompt(
-        prompt_template=prompt_template,
-        synth_functions="\n".join(synthesized_functions),
-        existing_lib=previous_library.functions_text,
-        ops_md=ops_md,
-    )
-
-    output_dir = Path(args.output)
-    print(
-        f"Prompt saved to: {save_instantiated_prompt(prompt, output_dir, f'library{version}')}"
-    )
-
-    print(f"Using model: {args.model}")
-    llm_output, run_result = run_agent_learn(prompt=prompt, model=args.model)
-
-    print_token_usage(run_result)
-
-    if args.dump_agent_run:
-        dump_path = output_dir / f"library_run_{version}.txt"
-        dump_path.write_text(format_agent_run_dump(run_result), encoding="utf-8")
-        print(f"Agent run dump: {dump_path}")
-
-    (output_dir / f"library_output_{version}.txt").write_text(llm_output)
-    lib_text = merge_library_text(
-        previous_library.functions_text, clean_llm_output(llm_output)
-    )
-    library_file = save_library(lib_text, output_dir, version)
-    print(f"Library: {library_file}")
-
-    return LibraryState(
-        version,
-        lib_text,
-    )
 
 
 def main():
@@ -280,37 +124,11 @@ def main():
     args = parser.parse_args()
     api_key = get_api_key()
 
-    tasks = [
-        SynthesisTask(op_file=op_file, op_name=extract_op_name(op_file))
-        for op_file in args.op_file
-    ]
+    tasks = [SynthesisTask(op_file, extract_op_name(op_file)) for op_file in args.op_file]
     initial_library = load_initial_library(args.library)
 
-    def _run_task(task: SynthesisTask, library: LibraryState) -> SynthesisResult:
-        return run_single_synthesis_task(
-            task=task,
-            library=library,
-            args=args,
-            api_key=api_key,
-        )
-
-    def _library_learn(
-        previous_library: LibraryState,
-        synthesis_results: list[SynthesisResult],
-    ) -> LibraryState:
-        return run_library_learn(
-            previous_library=previous_library,
-            synthesis_results=synthesis_results,
-            args=args,
-            api_key=api_key,
-        )
-
     final_library, latest_results = run_library_learning_loop(
-        tasks=tasks,
-        num_rounds=args.rounds,
-        initial_library=initial_library,
-        run_single_task=_run_task,
-        run_library_learn=_library_learn,
+        tasks, args.rounds, initial_library, args, api_key
     )
     print(
         f"Library learning complete: version={final_library.version}, "

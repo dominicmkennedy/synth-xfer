@@ -1,5 +1,6 @@
 """Agent utilities."""
 
+from dataclasses import dataclass
 from pathlib import Path
 import re
 
@@ -8,9 +9,42 @@ from synth_xfer._util.random import Sampler
 from synth_xfer.cli.eval_final import _parse_bw_args, run
 
 
+@dataclass
+class SynthesisTask:
+    """Concrete synthesis task for one operator/program file."""
+
+    op_file: str
+    op_name: str
+
+
+@dataclass
+class SynthesisResult:
+    """High-level synthesis output for one task."""
+
+    task: SynthesisTask
+    solution_text: str
+    transformer_path: Path
+    eval_summary: str | None = None
+
+
+@dataclass
+class LibraryState:
+    """Current learned library state passed to synthesis prompts."""
+
+    version: int
+    functions_text: str
+
+
 def extract_op_name(op_file_path: str) -> str:
     """Extract operation name from file path (e.g., mlir/Operations/Add.mlir -> Add)."""
     return Path(op_file_path).stem
+
+
+def load_initial_library(library_file: Path | None) -> LibraryState:
+    """Load initial library text for round 0."""
+    if library_file is None:
+        return LibraryState(0, "builtin.module {}")
+    return LibraryState(0, library_file.read_text())
 
 
 def read_prompt_template() -> str:
@@ -35,6 +69,25 @@ def clean_llm_output(output: str) -> str:
                 break
     output = output.replace(r"\n", "\n").replace(r"\t", "\t")
     return output
+
+
+def print_token_usage(run_result) -> None:
+    """Print aggregated token usage from agent run."""
+    inp = out = reason = 0
+    for resp in getattr(run_result, "raw_responses", []):
+        u = getattr(resp, "usage", None)
+        if u is None:
+            continue
+        inp += getattr(u, "input_tokens", 0) or 0
+        out += getattr(u, "output_tokens", 0) or 0
+        od = getattr(u, "output_tokens_details", None)
+        if od is not None:
+            reason += getattr(od, "reasoning_tokens", 0) or 0
+    total = inp + out + reason
+    token_str = f"{inp:,} input, {out:,} output" + (
+        f", {reason:,} reasoning" if reason else ""
+    )
+    print(f"Tokens: {token_str} ({total:,} total)")
 
 
 def _save_file(content: str, path: Path) -> Path:
