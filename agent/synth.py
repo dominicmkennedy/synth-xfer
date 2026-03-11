@@ -147,7 +147,7 @@ def run_agent_synthesis(
     # Full task as user message
     max_turn_message = (
         f"You have a maximum of {max_turns} iterations to complete this task.  "
-        "Do not exceed this limit."
+        "Do not exceed this limit. If you are going to exceed the limit, you should return the current MLIR you have generated."
     )
     user_message = prompt + "\n" + max_turn_message
     result = Runner.run_sync(agent, user_message, max_turns=max_turns)
