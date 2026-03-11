@@ -253,6 +253,44 @@ def run_single_compression(
         prompt=prompt,
         model=args.model
     )
+    target_text = clean_llm_output(llm_output)
+
+    if (args.safe_compress and target.eval_summary):
+        pattern = r"Sound %:\s*(?P<sound>[\d.]+),\s*Exact %:\s*(?P<exact>[\d.]+)"
+        match = re.search(pattern, target.eval_summary)
+
+        curr_sound = float(match.group("sound"))
+        curr_exact = float(match.group("exact"))
+
+        compressed_eval = run_eval(
+            op_file_path=Path(target.task.op_file),
+            transformer=SynthesisResult(
+                task=target.task,
+                solution_text=target_text,
+                transformer_path=target.transformer_path,
+                eval_summary=None),
+            library=library,
+            op_name=target.task.op_name,
+        )
+
+        match = re.search(pattern, compressed_eval)
+
+        compressed_sound = float(match.group("sound"))
+        compressed_exact = float(match.group("exact"))
+
+        if (abs(compressed_sound - curr_sound) > 0.1):
+            print(f"Compression of {target.task.op_name} failed.")
+            print(f"    Soundness before compression: {curr_sound}")
+            print(f"    Soundness after compression: {compressed_sound}")
+            return target
+        
+        if (abs(compressed_exact - curr_exact) > 0.1):
+            print(f"Compression of {target.task.op_name} failed.")
+            print(f"    Exactness before compression: {curr_exact}")
+            print(f"    Exactness after compression: {compressed_exact}")
+            return target
+
+        print("Safe compression successful!")
 
     if args.dump_agent_run:
         dump_path = log_dir / f"compress_run_{op_name}.txt"
@@ -260,10 +298,9 @@ def run_single_compression(
         print(f"Agent run dump: {dump_path}")
 
     (log_dir / f"compress_output_{op_name}.txt").write_text(llm_output)
-    target_text = clean_llm_output(llm_output)
 
     transformer_file = save_transformer(
-        clean_llm_output(llm_output), output_dir, target.task.op_name
+        target_text, output_dir, target.task.op_name
     )
     print(f"Transformer: {transformer_file}")
 
@@ -292,6 +329,11 @@ def main():
         "--dump-agent-run",
         action="store_true",
         help="Dump full agent run (messages, tool calls, outputs) to output dir",
+    )
+    parser.add_argument(
+        "--safe-compress",
+        action="store_true",
+        help="Only accepts compression if eval result is the same before and after",
     )
     parser.add_argument(
         "--max-turns",
