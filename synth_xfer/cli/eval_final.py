@@ -382,19 +382,13 @@ def main() -> None:
             synth_exact = next(x for x in synth_r.per_bit_res if x.bitwidth == exact_bw)
             if synth_exact.unsound_examples:
                 print(f"\nUNSOUND EXAMPLES ({len(synth_exact.unsound_examples)}):")
-                for i, (inputs, output, optimal, dist) in enumerate(
-                    synth_exact.unsound_examples, 1
-                ):
-                    inputs_str = f"({', '.join(inputs)})"
-                    print(f"{inputs_str} -> {output} (best: {optimal})")
+                for ex in synth_exact.unsound_examples:
+                    print(ex.to_str(show_dist=False))
 
             if synth_exact.imprecise_examples:
                 print(f"\nIMPRECISE EXAMPLES ({len(synth_exact.imprecise_examples)}):")
-                for i, (inputs, output, optimal, dist) in enumerate(
-                    synth_exact.imprecise_examples, 1
-                ):
-                    inputs_str = f"({', '.join(inputs)})"
-                    print(f"{inputs_str} -> {output} (best: {optimal}, dist: {dist:.4f})")
+                for ex in synth_exact.imprecise_examples:
+                    print(ex.to_str())
 
 
 if __name__ == "__main__":

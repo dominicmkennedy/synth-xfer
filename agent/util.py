@@ -1,5 +1,6 @@
 """Agent utilities."""
 
+from dataclasses import dataclass
 from pathlib import Path
 import re
 
@@ -8,9 +9,41 @@ from synth_xfer._util.random import Sampler
 from synth_xfer.cli.eval_final import _parse_bw_args, run
 
 
+@dataclass
+class SynthesisTask:
+    """Concrete synthesis task for one operator/program file."""
+
+    op_file: str
+    op_name: str
+
+
+@dataclass
+class SynthesisResult:
+    """High-level synthesis output for one task."""
+
+    task: SynthesisTask
+    solution_text: str
+    transformer_path: Path
+    eval_summary: str | None = None
+
+
+@dataclass
+class LibraryState:
+    """Current learned library state passed to synthesis prompts."""
+
+    functions_text: str
+
+
 def extract_op_name(op_file_path: str) -> str:
     """Extract operation name from file path (e.g., mlir/Operations/Add.mlir -> Add)."""
     return Path(op_file_path).stem
+
+
+def load_initial_library(library_file: Path | None) -> LibraryState:
+    """Load initial library text for round 0."""
+    if library_file is None:
+        return LibraryState("builtin.module {}")
+    return LibraryState(library_file.read_text())
 
 
 def read_prompt_template() -> str:
@@ -37,28 +70,31 @@ def clean_llm_output(output: str) -> str:
     return output
 
 
-def _save_file(content: str, path: Path) -> Path:
-    """Helper to save file."""
+def print_token_usage(run_result) -> None:
+    """Print aggregated token usage from agent run."""
+    inp = out = reason = 0
+    for resp in getattr(run_result, "raw_responses", []):
+        u = getattr(resp, "usage", None)
+        if u is None:
+            continue
+        inp += getattr(u, "input_tokens", 0) or 0
+        out += getattr(u, "output_tokens", 0) or 0
+        od = getattr(u, "output_tokens_details", None)
+        if od is not None:
+            reason += getattr(od, "reasoning_tokens", 0) or 0
+    total = inp + out + reason
+    token_str = f"{inp:,} input, {out:,} output" + (
+        f", {reason:,} reasoning" if reason else ""
+    )
+    print(f"Tokens: {token_str} ({total:,} total)")
+
+
+def save_file(content: str, dir: Path, file_name: str) -> Path:
+    """Save content to dir/file_name and return the full path."""
+    path = Path(dir) / file_name
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     return path
-
-
-def save_transformer(output: str, output_dir: Path, op_name: str) -> Path:
-    """Save generated transformer to kb_{op_name}.mlir."""
-    return _save_file(output, Path(output_dir) / f"kb_{op_name.lower()}.mlir")
-
-
-def save_library(output: str, output_dir: Path, version: int) -> Path:
-    """Save learned library to library_v{version}.mlir"""
-    return _save_file(output, Path(output_dir) / f"library_v{version}.mlir")
-
-
-def save_instantiated_prompt(prompt: str, output_dir: Path, op_name: str) -> Path:
-    """Save instantiated prompt to instantiated_prompt_{op_name}.md."""
-    return _save_file(
-        prompt, Path(output_dir) / f"instantiated_prompt_{op_name.lower()}.md"
-    )
 
 
 def _extract_module_body(mlir: str) -> str:
