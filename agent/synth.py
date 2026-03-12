@@ -2,6 +2,7 @@
 
 import json
 from pathlib import Path
+import time
 
 from agents import Agent, Runner, function_tool
 
@@ -201,6 +202,7 @@ def run_single_synthesis_task(
 
     output_dir = Path(args.output)
     print(f"Using model: {args.model}")
+    t0 = time.monotonic()
     llm_output, run_result = run_agent_synthesis(
         prompt,
         task.op_file,
@@ -214,6 +216,7 @@ def run_single_synthesis_task(
         examples_dir=args.examples_dir,
         instructions_path=args.agent_instructions,
     )
+    synthesis_time = time.monotonic() - t0
     print_token_usage(run_result)
     if args.dump_agent_run:
         dump_path = save_file(
@@ -237,7 +240,9 @@ def run_single_synthesis_task(
         eval_summary = run_eval(task.op_file, result, library, task.op_name)
         print(f"Eval result:\n{eval_summary}")
         save_file(
-            eval_summary, output_dir, f"eval_r{round_num}_{task.op_name.lower()}.txt"
+            f"synthesis_time: {synthesis_time:.2f}s\n\n{eval_summary}",
+            output_dir,
+            f"eval_r{round_num}_{task.op_name.lower()}.txt",
         )
 
     return SynthesisResult(task, llm_output, transformer_file, eval_summary)
