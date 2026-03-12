@@ -1,7 +1,20 @@
 from dataclasses import dataclass
+from typing import NamedTuple
 
-# Type alias for case examples: (inputs, output, optimal_output, distance)
-CaseExample = tuple[tuple[str, ...], str, str, float]
+
+class CaseExample(NamedTuple):
+    inputs: tuple[str, ...]
+    output: str
+    optimal: str
+    dist: float
+
+    def to_str(self, show_dist: bool = True) -> str:
+        inputs_str = f"({', '.join(self.inputs)})"
+        s = f"{inputs_str} -> {self.output} (best: {self.optimal}"
+        if show_dist:
+            s += f", dist: {self.dist:.4f}"
+        s += ")"
+        return s
 
 
 @dataclass
@@ -58,13 +71,6 @@ class PerBitRes:
 
     def get_exact_prop(self) -> float:
         return self.exacts / self.all_cases
-
-
-class CaseExamples:
-    args: tuple[str, ...]
-    synth: str
-    best: str
-    dist: float
 
 
 class EvalResult:
