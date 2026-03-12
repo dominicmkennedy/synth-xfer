@@ -60,6 +60,27 @@ def get_api_key() -> str:
     return api_key
 
 
+def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    for name, path in [
+        ("--agent-instructions", args.agent_instructions),
+        ("--library-prompt", args.library_prompt),
+        ("--ops", args.ops),
+        ("--template", args.template),
+    ]:
+        if not path.exists():
+            parser.error(f"{name}: path does not exist: {path}")
+
+    if not args.examples_dir.is_dir():
+        parser.error(f"--examples-dir: not a directory: {args.examples_dir}")
+
+    if args.library is not None and not args.library.exists():
+        parser.error(f"--library: path does not exist: {args.library}")
+
+    for op_file in args.op_file:
+        if not Path(op_file).exists():
+            parser.error(f"op_file: path does not exist: {op_file}")
+
+
 def main():
     """Synthesize transformer using selected method."""
     parser = argparse.ArgumentParser(description="Synthesize transfer functions")
@@ -83,6 +104,12 @@ def main():
         type=int,
         default=20,
         help="Max iterations for agent (default: 20, use 2-3 for fast dev)",
+    )
+    parser.add_argument(
+        "--agent-instructions",
+        type=Path,
+        default=Path(__file__).parent / "md" / "agent_instructions.md",
+        help="Path to agent instructions file (default: agent/md/agent_instructions.md)",
     )
     parser.add_argument(
         "--library-prompt",
@@ -122,6 +149,8 @@ def main():
     )
 
     args = parser.parse_args()
+    _validate_args(parser, args)
+
     api_key = get_api_key()
 
     tasks = [SynthesisTask(op_file, extract_op_name(op_file)) for op_file in args.op_file]

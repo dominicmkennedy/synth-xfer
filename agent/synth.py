@@ -19,16 +19,6 @@ from .util import (
     save_file,
 )
 
-_MD_DIR = Path(__file__).parent / "md"
-
-
-def _read_instruction_file(name: str) -> str:
-    text = (_MD_DIR / name).read_text(encoding="utf-8")
-    return text.strip()
-
-
-AGENT_INSTRUCTIONS = _read_instruction_file("agent_instructions.md")
-
 
 def run_agent_synthesis(
     prompt: str,
@@ -36,12 +26,15 @@ def run_agent_synthesis(
     op_name: str,
     api_key: str,
     library: LibraryState,
-    model: str = "gpt-4",
-    max_turns: int = 20,
+    model: str,
+    max_turns: int,
+    template_path: Path,
+    ops_path: Path,
+    examples_dir: Path,
+    instructions_path: Path,
 ) -> tuple[str, object]:
     """Run agent to synthesize transformer. Returns (final_output, run_result)."""
     del api_key  # Reserved for future model/provider auth parity.
-    agent_dir = Path(__file__).parent
 
     @function_tool
     def get_task_bundle() -> str:
@@ -57,12 +50,12 @@ def run_agent_synthesis(
     @function_tool
     def get_program_templates() -> str:
         """Return the MLIR output templates (agent/template.mlir)."""
-        return (agent_dir / "template.mlir").read_text(encoding="utf-8")
+        return template_path.read_text(encoding="utf-8")
 
     @function_tool
     def get_available_primitives() -> str:
         """Return the allowed primitive operators documentation (agent/ops.md)."""
-        return (agent_dir / "ops.md").read_text(encoding="utf-8")
+        return ops_path.read_text(encoding="utf-8")
 
     @function_tool
     def get_library_text() -> str:
@@ -72,17 +65,22 @@ def run_agent_synthesis(
     @function_tool
     def list_examples() -> str:
         """List available example transformer files as JSON array of filenames."""
-        ex_dir = agent_dir / "examples"
-        names = [p.name for p in sorted(ex_dir.glob("*.mlir"))] if ex_dir.exists() else []
+        names = (
+            [p.name for p in sorted(examples_dir.glob("*.mlir"))]
+            if examples_dir.exists()
+            else []
+        )
         return json.dumps(names)
 
     @function_tool
     def get_example(name: str) -> str:
         """Return the contents of one example transformer file by filename (e.g. 'kb_xor.mlir')."""
-        p = (agent_dir / "examples" / name).resolve()
-        ex_dir = (agent_dir / "examples").resolve()
+        p = (examples_dir / name).resolve()
+        ex_dir = examples_dir.resolve()
         if ex_dir not in p.parents:
-            raise ValueError("example name must refer to a file under agent/examples/")
+            raise ValueError(
+                "example name must refer to a file under the examples directory"
+            )
         if p.suffix != ".mlir":
             raise ValueError("example must be a .mlir file")
         return p.read_text(encoding="utf-8")
@@ -95,9 +93,8 @@ def run_agent_synthesis(
         q = query.strip()
         if not q:
             return "[]"
-        ex_dir = agent_dir / "examples"
         matches: list[dict] = []
-        for p in sorted(ex_dir.glob("*.mlir")) if ex_dir.exists() else []:
+        for p in sorted(examples_dir.glob("*.mlir")) if examples_dir.exists() else []:
             text = p.read_text(encoding="utf-8", errors="replace")
             idx = text.lower().find(q.lower())
             if idx == -1:
@@ -130,7 +127,7 @@ def run_agent_synthesis(
 
     agent = Agent(
         name="TransformerSynthesizer",
-        instructions=AGENT_INSTRUCTIONS,
+        instructions=instructions_path.read_text(encoding="utf-8").strip(),
         tools=[
             get_task_bundle,
             get_program_templates,
@@ -212,6 +209,10 @@ def run_single_synthesis_task(
         library,
         args.model,
         args.max_turns,
+        template_path=args.template,
+        ops_path=args.ops,
+        examples_dir=args.examples_dir,
+        instructions_path=args.agent_instructions,
     )
     print_token_usage(run_result)
     if args.dump_agent_run:
