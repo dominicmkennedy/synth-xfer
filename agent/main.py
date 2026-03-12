@@ -97,7 +97,7 @@ def run_single_synthesis_task(
     task: SynthesisTask,
     library: LibraryState,
     args,
-    api_key: str,
+    api_key,
 ) -> SynthesisResult:
     """Run one synthesis task with current library context."""
     print(f"Synthesizing: {task.op_name}")
@@ -172,6 +172,7 @@ def run_library_learn(
     previous_library: LibraryState,
     synthesis_results: list[SynthesisResult],
     args,
+    api_key,
 ) -> LibraryState:
     version = previous_library.version + 1
 
@@ -200,7 +201,11 @@ def run_library_learn(
     )
 
     print(f"Using model: {args.model}")
-    llm_output, run_result = run_agent_learn(prompt=prompt, model=args.model)
+    llm_output, run_result = run_agent_learn(
+        prompt=prompt, 
+        api_key=api_key,
+        model=args.model,
+    )
 
     print_token_usage(run_result)
 
@@ -225,6 +230,7 @@ def run_single_compression(
     target: SynthesisResult,
     library: LibraryState,
     args,
+    api_key,
 ) -> SynthesisResult:
     op_name = target.task.op_name
     print(f"\nRunning compression on {op_name}")
@@ -251,7 +257,8 @@ def run_single_compression(
 
     llm_output, run_result = run_agent_compress(
         prompt=prompt,
-        model=args.model
+        api_key=api_key,
+        model=args.model,
     )
     target_text = clean_llm_output(llm_output)
 
@@ -417,7 +424,7 @@ def main():
             previous_library=previous_library,
             synthesis_results=synthesis_results,
             args=args,
-            api_key=api_key
+            api_key=api_key,
         )
     
     def _compress(
@@ -428,6 +435,7 @@ def main():
             target=target,
             library=library,
             args=args,
+            api_key=api_key,
         )
 
     final_library, latest_results = run_library_learning_loop(

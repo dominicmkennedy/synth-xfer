@@ -219,6 +219,7 @@ def run_agent_synthesis(
 
 def run_agent_learn(
     prompt: str,
+    api_key: str,
     model: str = "gpt-4",
 ) -> tuple[str, object]:
     """Run agent to learn library functions. Returns (final_output, run_result)."""
@@ -235,6 +236,7 @@ def run_agent_learn(
 
 def run_agent_compress(
     prompt: str,
+    api_key: str,
     model: str = "gpt-4",
 ) -> tuple[str, object]:
     """Run agent to compress a target file. Returns (final_output, run_result)."""
