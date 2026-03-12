@@ -6,7 +6,7 @@ from xdsl_smt.dialects.transfer import TransIntegerType
 
 from synth_xfer import _eval_engine
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval_result import EvalResult, PerBitRes
+from synth_xfer._util.eval_result import CaseExample, EvalResult, PerBitRes
 from synth_xfer._util.jit import FnPtr, Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import HelperFuncs
@@ -58,6 +58,17 @@ def get_per_bit(a: "Results") -> list[PerBitRes]:
     num_unsolved_exact_cases = get(x[7], "num unsolved exact", get_ints)
     sound_distance = get(x[8], "sound distance", get_floats)
 
+    # Fetch unsound/imprecise examples from C++ bindings
+    unsound_examples = a.get_unsound_examples()
+    imprecise_examples = a.get_imprecise_examples()
+
+    # for (uex, iex) in zip(unsound_examples, imprecise_examples):
+    #     print("unsound results of ith:")
+    #     for ex in uex:
+    #         print(ex)
+    #     print("imprecise results of ith:")
+    #     for ex in iex:
+    #         print(ex)
     assert len(sound) > 0, "No output from EvalEngine"
     assert (
         len(sound)
@@ -65,6 +76,8 @@ def get_per_bit(a: "Results") -> list[PerBitRes]:
         == len(exact)
         == len(num_unsolved_exact_cases)
         == len(sound_distance)
+        == len(unsound_examples)
+        == len(imprecise_examples)
     ), "EvalEngine output mismatch"
 
     return [
@@ -78,6 +91,8 @@ def get_per_bit(a: "Results") -> list[PerBitRes]:
             base_dist=base_distance,
             sound_dist=sound_distance[i],
             bitwidth=bw,
+            unsound_examples=[CaseExample(*ex) for ex in unsound_examples[i]],
+            imprecise_examples=[CaseExample(*ex) for ex in imprecise_examples[i]],
         )
         for i in range(len(sound))
     ]
@@ -159,8 +174,12 @@ def get_eval_res(per_bits: list[list[PerBitRes]]) -> list[EvalResult]:
 
 def eval_transfer_func(
     x: dict[int, tuple["ToEval", list[FnPtr], list[FnPtr]]],
+    unsound_ex: int = 0,
+    imprecise_ex: int = 0,
 ) -> list[EvalResult]:
-    def get_eval_f(x: "ToEval") -> Callable[["ToEval", list[int], list[int]], "Results"]:
+    def get_eval_f(
+        x: "ToEval",
+    ) -> Callable[["ToEval", list[int], list[int], int, int], "Results"]:
         suffix = x.__class__.__name__.lower()[6:]
         func_name = f"eval_{suffix}"
 
@@ -170,7 +189,10 @@ def eval_transfer_func(
     for to_eval, xs, bs in x.values():
         xs_addrs = [x.addr for x in xs]
         bs_addrs = [b.addr for b in bs]
-        per_bits.append(get_per_bit(get_eval_f(to_eval)(to_eval, xs_addrs, bs_addrs)))
+        result = get_eval_f(to_eval)(
+            to_eval, xs_addrs, bs_addrs, unsound_ex, imprecise_ex
+        )
+        per_bits.append(get_per_bit(result))
 
     return get_eval_res(per_bits)
 

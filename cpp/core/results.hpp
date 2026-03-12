@@ -1,29 +1,54 @@
 #pragma once
 
+#include <algorithm>
+#include <cstdint>
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <string>
 #include <string_view>
+#include <tuple>
+#include <utility>
 #include <vector>
 
+using CaseExample =
+    std::tuple<std::vector<std::string>, std::string, std::string,
+         double>;
+
 class Result {
+  // The result of evaluating a single transformer on one bitwidth.
 public:
   Result() = default;
 
-  Result(bool s, unsigned long p, bool e, bool solved, unsigned long sd)
-      : sound(s), distance(p), exact(e), soundDistance(sd) {
-    unsolvedExact = !solved ? e : 0;
-  }
+  // Result(bool s, unsigned long p, bool e, bool solved, unsigned long sd,
+  //        const CaseExample &ex = {})
+  //     : sound(s), distance(p), exact(e), soundDistance(sd) {
+  //   unsolvedExact = !solved ? e : 0;
+  //   if (!s)
+  //     unsoundExamples.push_back(ex);
+  //   else if (!e)
+  //     impreciseExamples.push_back(ex);
+  // }
 
-  Result &operator+=(const Result &rhs) {
-    sound += rhs.sound;
-    distance += rhs.distance;
-    exact += rhs.exact;
-    unsolvedExact += rhs.unsolvedExact;
-    soundDistance += rhs.soundDistance;
+  // Result &operator+=(const Result &rhs) {
+  //   sound += rhs.sound;
+  //   distance += rhs.distance;
+  //   exact += rhs.exact;
+  //   unsolvedExact += rhs.unsolvedExact;
+  //   soundDistance += rhs.soundDistance;
 
-    return *this;
-  }
+  //   // Make sure those thershold are 0 when doing synthesis
+  //   if (MAX_UNSOUND_EXAMPLES > 0) {
+  //     unsoundExamples.insert(unsoundExamples.end(), rhs.unsoundExamples.begin(),
+  //                  rhs.unsoundExamples.end());
+  //   }
+  //   if (MAX_IMPRECISE_EXAMPLES > 0) {
+  //     impreciseExamples.insert(impreciseExamples.end(),
+  //                  rhs.impreciseExamples.begin(),
+  //                  rhs.impreciseExamples.end());
+  //   }
+  //   return *this;
+  // }
 
   friend class Results;
 
@@ -33,19 +58,25 @@ private:
   unsigned long exact;
   unsigned long unsolvedExact;
   unsigned long soundDistance;
+  std::vector<CaseExample> unsoundExamples;
+  std::vector<CaseExample> impreciseExamples;
 };
 
 class Results {
+  // The result of evaluating a set of transformers on one bitwidth.
 private:
+  using CaseExamples = std::vector<CaseExample>;
   const unsigned int bw = {};
   std::vector<Result> r;
   unsigned int cases = {};
   unsigned int unsolvedCases = {};
   unsigned int baseDistance = {};
   std::uint64_t (*maxDist)() = {};
+  unsigned int maxUnsoundExamples = 0;
+  unsigned int maxImpreciseExamples = 0;
 
   void printMember(std::ostream &os, std::string_view name,
-                   const std::function<unsigned int(const Result &x)> &getter,
+                   const std::function<unsigned long(const Result &x)> &getter,
                    bool md) const {
     os << std::left << std::setw(20) << name;
     os << "[";
@@ -62,9 +93,29 @@ private:
     }
   }
 
+  template <typename Getter>
+  std::vector<CaseExamples> collectExampleTuples(Getter getter) const {
+    std::vector<CaseExamples> out;
+    out.reserve(r.size());
+    for (const auto &ri : r) {
+      const auto &examples = getter(ri);
+      CaseExamples converted;
+      converted.reserve(examples.size());
+      for (const auto &ex : examples) {
+        converted.emplace_back(std::get<0>(ex), std::get<1>(ex),
+                               std::get<2>(ex),
+                               std::get<3>(ex) / static_cast<double>(maxDist()));
+      }
+      out.push_back(std::move(converted));
+    }
+    return out;
+  }
+
 public:
-  Results(unsigned int numFns, unsigned int bw_, std::uint64_t (*_maxDist)())
-      : bw(bw_), r(std::vector<Result>(numFns)), maxDist(_maxDist) {}
+  Results(unsigned int numFns, unsigned int bw_, std::uint64_t (*_maxDist)(),
+          unsigned int maxUnsound = 0, unsigned int maxImprecise = 0)
+      : bw(bw_), r(std::vector<Result>(numFns)), maxDist(_maxDist),
+        maxUnsoundExamples(maxUnsound), maxImpreciseExamples(maxImprecise) {}
 
   friend std::ostream &operator<<(std::ostream &os, const Results &x) {
     os << std::left << std::setw(20) << "bw:" << x.bw << "\n";
@@ -91,11 +142,57 @@ public:
     return os << "\n";
   }
 
-  void incResult(const Result &newR, unsigned int i) { r[i] += newR; }
+  void incResult(bool s, unsigned long p, bool e, bool solved, unsigned long sd, CaseExample ex, unsigned int i) {
+    r[i].sound += s;
+    r[i].distance += p;
+    r[i].exact += e;
+    r[i].soundDistance += sd;
+    r[i].unsolvedExact += !solved ? e : 0;
+    // Xuanyu: maybe add
+    if (maxUnsoundExamples > r[i].unsoundExamples.size() && !s)
+      r[i].unsoundExamples.push_back(ex);
+    // Xuanyu: maybe when the impreciseExamples it too large, do a sort and only keep the top-k
+    else if (maxImpreciseExamples > 0 && s && !e)
+      r[i].impreciseExamples.push_back(ex);
+  }
 
   void incCases(bool solved, unsigned long dis) {
     cases += 1;
     unsolvedCases += !solved ? 1 : 0;
     baseDistance += dis;
+  }
+
+  void cleanExamples(){
+    for (auto &result : r) {
+      // Keep only the first maxUnsoundExamples
+      if (maxUnsoundExamples > 0 && result.unsoundExamples.size() > maxUnsoundExamples) {
+        result.unsoundExamples.resize(maxUnsoundExamples);
+      }
+      // Keep only the top maxImpreciseExamples with maximum distance
+      if (maxImpreciseExamples > 0 && result.impreciseExamples.size() > maxImpreciseExamples) {
+        // Sort by distance (descending) - the fourth element of the tuple
+        std::sort(result.impreciseExamples.begin(), result.impreciseExamples.end(),
+                  [](const CaseExample &a, const CaseExample &b) {
+                    return std::get<3>(a) > std::get<3>(b);
+                  });
+        result.impreciseExamples.resize(maxImpreciseExamples);
+      }
+    }
+  }
+
+
+  std::vector<CaseExamples> getUnsoundExampleTuples() const {
+
+    return collectExampleTuples(
+        [](const Result &ri) -> const CaseExamples & {
+          return ri.unsoundExamples;
+        });
+  }
+
+  std::vector<CaseExamples> getImpreciseExampleTuples() const {
+
+    return collectExampleTuples([](const Result &ri) -> const CaseExamples & {
+      return ri.impreciseExamples;
+    });
   }
 };

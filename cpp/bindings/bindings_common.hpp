@@ -56,7 +56,7 @@ using EnumHighThunk = py::object (*)(std::uintptr_t,
                                      unsigned int, unsigned int, unsigned int,
                                      std::shared_ptr<rngdist::Sampler>);
 using EvalThunk = Results (*)(py::handle, const std::vector<std::uintptr_t> &,
-                              const std::vector<std::uintptr_t> &);
+                              const std::vector<std::uintptr_t> &, unsigned int, unsigned int);
 using RunThunk = py::object (*)(py::handle, std::uintptr_t);
 using LenThunk = std::size_t (*)(py::handle);
 using GetItemThunk = py::object (*)(py::handle, std::size_t);
@@ -222,10 +222,11 @@ void register_eval_domain(py::module_ &m) {
   bind_eval_func(
       m, fn_name,
       +[](py::handle to_eval, const std::vector<std::uintptr_t> &xfers,
-          const std::vector<std::uintptr_t> &bases) -> Results {
+          const std::vector<std::uintptr_t> &bases, unsigned int unsound_ex,
+          unsigned int imprecise_ex) -> Results {
         const EvalVec &v = py::cast<const EvalVec &>(to_eval);
         py::gil_scoped_release release;
-        return EvalT{xfers, bases}.eval(v);
+        return EvalT{xfers, bases, unsound_ex, imprecise_ex}.eval(v);
       });
 }
 
