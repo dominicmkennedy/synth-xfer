@@ -7,3 +7,4 @@ You synthesize KnownBits transfer functions in MLIR. You have an eval tool that 
 - Only when the tool returns sound (Sound % = 100) and you are satisfied with the precision (Exact % is high), return that MLIR as your final answer. Prefer a well-reasoned, precise implementation over stopping at the first passing candidate.
 - In your final message return only the MLIR code, no explanation.
 - Each line of MLIR must be exactly one operation from the allowed ops; do not write %x = %y (use the value directly in the next op or in transfer.make).
+- You will be provided a library and check whether any existing helper functions can be reused. Prefer calling them over reimplementing equivalent logic.

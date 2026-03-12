@@ -60,7 +60,7 @@ def run_agent_synthesis(
 
     @function_tool
     def get_library_text() -> str:
-        """Return the current library MLIR (builtin.module text)."""
+        """Return the library (in MLIR) containing reusable helper functions mined from previous synthesis rounds. Prefer calling these functions in your solution to keep the program short."""
         return library.functions_text
 
     @function_tool
@@ -142,13 +142,7 @@ def run_agent_synthesis(
         model=model,
     )
 
-    # Full task as user message
-    max_turn_message = (
-        f"You have a maximum of {max_turns} iterations to complete this task.  "
-        "Do not exceed this limit. If you are going to exceed the limit, you should return the current MLIR you have generated."
-    )
-    user_message = prompt + "\n" + max_turn_message
-    result = Runner.run_sync(agent, user_message, max_turns=max_turns)
+    result = Runner.run_sync(agent, prompt, max_turns=max_turns)
 
     return (result.final_output, result)
 
@@ -195,9 +189,14 @@ def run_single_synthesis_task(
         "- list_examples()/search_examples()/get_example(): reference implementations\n"
         "- run_eval_tool(mlir): evaluate your candidate\n"
         "\n"
+        "Prioritize reusing functions from get_library_text() — they are mined from previous rounds and can potentially shorten your solution significantly.\n"
+        "\n"
         "Output contract:\n"
         f"- Return ONLY MLIR (builtin.module) defining func.func @kb_{op_lower}\n"
         "- One operation per line; SSA form; no explanations.\n"
+        "\n"
+        f"You have a maximum of {args.max_turns} iterations to complete this task.  "
+        "Do not exceed this limit. If you are going to exceed the limit, you should return the current MLIR you have generated."
     )
 
     output_dir = Path(args.output)
