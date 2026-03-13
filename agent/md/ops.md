@@ -6,6 +6,9 @@
 ### Boolean Operations (i1)
 
 - transfer.cmp: (!transfer.integer, !transfer.integer) -> i1
+    - example: %arg1_neq_0 = "transfer.cmp"(%const0, %arg1) {predicate=1:i64}: (!transfer.integer, !transfer.integer) -> i1
+    - the semantics of predicate attributes: {"eq": 0,"ne": 1,"slt": 2,"sle": 3,"sgt": 4,"sge": 5,"ult": 6,"ule": 7,
+"ugt": 8,"uge": 9}
 - arith.andi: (i1, i1) -> i1
 - arith.ori: (i1, i1) -> i1
 - arith.xori: (i1, i1) -> i1
