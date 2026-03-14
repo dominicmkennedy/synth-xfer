@@ -71,6 +71,7 @@ def learn_phase(
         synthesis_results=synthesis_results,
     )
 
+
 def compress_phase(
     results: list[SynthesisResult],
     library: LibraryState,
@@ -107,12 +108,10 @@ def run_library_learning_loop(
         if round_idx == 0:
             latest_results = synth_phase(tasks, library, run_single_task)
         else:
-            latest_results = synth_phase([r.task for r in latest_results], library, run_single_task)
+            latest_results = synth_phase(
+                [r.task for r in latest_results], library, run_single_task
+            )
         library = learn_phase(library, latest_results, run_library_learn)
-        latest_results = compress_phase(
-            latest_results, 
-            library, 
-            run_single_compression
-        )
+        latest_results = compress_phase(latest_results, library, run_single_compression)
 
     return library, latest_results

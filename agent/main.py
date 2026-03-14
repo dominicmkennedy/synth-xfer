@@ -10,10 +10,10 @@ import sys
 from synth_xfer._util.domain import AbstractDomain
 
 from .agent_sdk import (
-    format_agent_run_dump, 
-    run_agent_synthesis, 
-    run_agent_learn,
+    format_agent_run_dump,
     run_agent_compress,
+    run_agent_learn,
+    run_agent_synthesis,
 )
 from .library_learning import (
     LibraryState,
@@ -23,20 +23,18 @@ from .library_learning import (
     run_library_learning_loop,
 )
 from .shared import (
-    build_prompt,
-    build_library_learn_prompt,
     build_compression_prompt,
+    build_library_learn_prompt,
 )
 from .util import (
     clean_llm_output,
     eval_transformer,
     extract_op_name,
+    make_output_dir,
     merge_library_text,
     save_instantiated_prompt,
     save_library,
     save_transformer,
-    save_library,
-    make_output_dir,
 )
 
 
@@ -122,10 +120,8 @@ def run_single_synthesis_task(
     )
 
     output_dir = Path(args.output)
-    log_dir = (output_dir / "log")
-    print(
-        f"Prompt saved to: {save_instantiated_prompt(prompt, log_dir, task.op_name)}"
-    )
+    log_dir = output_dir / "log"
+    print(f"Prompt saved to: {save_instantiated_prompt(prompt, log_dir, task.op_name)}")
 
     print(f"Using model: {args.model}")
     llm_output, run_result = run_agent_synthesis(
@@ -195,14 +191,14 @@ def run_library_learn(
     )
 
     output_dir = Path(args.output)
-    log_dir = (output_dir / "log")
+    log_dir = output_dir / "log"
     print(
-        f"Prompt saved to: {save_instantiated_prompt(prompt, log_dir, f"library{version}")}"
+        f"Prompt saved to: {save_instantiated_prompt(prompt, log_dir, f'library{version}')}"
     )
 
     print(f"Using model: {args.model}")
     llm_output, run_result = run_agent_learn(
-        prompt=prompt, 
+        prompt=prompt,
         api_key=api_key,
         model=args.model,
     )
@@ -226,6 +222,7 @@ def run_library_learn(
         lib_text,
     )
 
+
 def run_single_compression(
     target: SynthesisResult,
     library: LibraryState,
@@ -242,7 +239,7 @@ def run_single_compression(
     ).strip()
 
     output_dir = Path(args.output)
-    log_dir = (output_dir / "log")
+    log_dir = output_dir / "log"
 
     print(f"Using model: {args.model}")
 
@@ -252,7 +249,7 @@ def run_single_compression(
         lib=library,
     )
 
-    prompt_save_path = save_instantiated_prompt(prompt, log_dir, f'compress{op_name}')
+    prompt_save_path = save_instantiated_prompt(prompt, log_dir, f"compress{op_name}")
     print(f"Prompt saved to: {prompt_save_path}")
 
     llm_output, run_result = run_agent_compress(
@@ -262,7 +259,7 @@ def run_single_compression(
     )
     target_text = clean_llm_output(llm_output)
 
-    if (args.safe_compress and target.eval_summary):
+    if args.safe_compress and target.eval_summary:
         pattern = r"Sound %:\s*(?P<sound>[\d.]+),\s*Exact %:\s*(?P<exact>[\d.]+)"
         match = re.search(pattern, target.eval_summary)
 
@@ -275,7 +272,8 @@ def run_single_compression(
                 task=target.task,
                 solution_text=target_text,
                 transformer_path=target.transformer_path,
-                eval_summary=None),
+                eval_summary=None,
+            ),
             library=library,
             op_name=target.task.op_name,
         )
@@ -285,13 +283,13 @@ def run_single_compression(
         compressed_sound = float(match.group("sound"))
         compressed_exact = float(match.group("exact"))
 
-        if (abs(compressed_sound - curr_sound) > 0.1):
+        if abs(compressed_sound - curr_sound) > 0.1:
             print(f"Compression of {target.task.op_name} failed.")
             print(f"    Soundness before compression: {curr_sound}")
             print(f"    Soundness after compression: {compressed_sound}")
             return target
-        
-        if (abs(compressed_exact - curr_exact) > 0.1):
+
+        if abs(compressed_exact - curr_exact) > 0.1:
             print(f"Compression of {target.task.op_name} failed.")
             print(f"    Exactness before compression: {curr_exact}")
             print(f"    Exactness after compression: {compressed_exact}")
@@ -306,9 +304,7 @@ def run_single_compression(
 
     (log_dir / f"compress_output_{op_name}.txt").write_text(llm_output)
 
-    transformer_file = save_transformer(
-        target_text, output_dir, target.task.op_name
-    )
+    transformer_file = save_transformer(target_text, output_dir, target.task.op_name)
     print(f"Transformer: {transformer_file}")
 
     return SynthesisResult(
@@ -426,7 +422,7 @@ def main():
             args=args,
             api_key=api_key,
         )
-    
+
     def _compress(
         target: SynthesisResult,
         library: LibraryState,

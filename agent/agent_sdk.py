@@ -30,7 +30,7 @@ def _read_instruction_file(name: str) -> str:
 AGENT_INSTRUCTIONS = _read_instruction_file("agent_instructions.md")
 LEARN_INSTRUCTIONS = _read_instruction_file("learn_instructions.md")
 
-COMPRESS_INSTRUCTIONS=_read_instruction_file("compress_instructions.md")
+COMPRESS_INSTRUCTIONS = _read_instruction_file("compress_instructions.md")
 
 # Helper stuff for debugging
 
@@ -233,6 +233,7 @@ def run_agent_learn(
     result = Runner.run_sync(agent, prompt)
 
     return (result.final_output, result)
+
 
 def run_agent_compress(
     prompt: str,

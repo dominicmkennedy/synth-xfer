@@ -1,5 +1,7 @@
 """Shared utilities for transformer synthesis methods."""
-from .library_learning import SynthesisResult, LibraryState
+
+from .library_learning import LibraryState, SynthesisResult
+
 
 def build_prompt(
     prompt_template: str,
@@ -39,6 +41,7 @@ def build_library_learn_prompt(
     prompt = prompt.replace("<PRIMITIVE_OPERATORS>", ops_md)
 
     return prompt
+
 
 def build_compression_prompt(
     prompt_template: str,
