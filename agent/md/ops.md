@@ -1,16 +1,18 @@
-### Constructor and Deconstructor
+## Constructor and Deconstructor
 
 - transfer.get : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
 - transfer.make : (!transfer.integer, !transfer.integer) -> !transfer.abs_value<[!transfer.integer, !transfer.integer]>
 
-### Boolean Operations (i1)
+## Boolean Operations (i1)
 
 - transfer.cmp: (!transfer.integer, !transfer.integer) -> i1
+    - example: `%arg1_neq_0 = "transfer.cmp"(%const0, %arg1) {predicate=1:i64}: (!transfer.integer, !transfer.integer) -> i1`
+    - the semantics of predicate attributes: `{"eq": 0, "ne": 1, "slt": 2, "sle": 3, "sgt": 4, "sge": 5, "ult": 6, "ule": 7, "ugt": 8, "uge": 9}`
 - arith.andi: (i1, i1) -> i1
 - arith.ori: (i1, i1) -> i1
 - arith.xori: (i1, i1) -> i1
 
-### Integer Operations
+## Integer Operations
 
 - transfer.neg: (!transfer.integer) -> !transfer.integer
 - transfer.and: (!transfer.integer, !transfer.integer) -> !transfer.integer
@@ -49,3 +51,8 @@
 - transfer.get_all_ones: (!transfer.integer) -> !transfer.integer
     - the argument is to decide bitwidth
 - transfer.get_bit_width: (!transfer.integer) -> !transfer.integer
+
+## Function Call
+
+- example: `%lhsMax = "func.call"(%lhs) {callee = @getMaxValue} : (!transfer.abs_value<[!transfer.integer,!transfer.integer]>) -> !transfer.integer`
+- example: `%lhsMin = "func.call"(%lhs) {callee = @getMinValue} : (!transfer.abs_value<[!transfer.integer,!transfer.integer]>) -> !transfer.integer`

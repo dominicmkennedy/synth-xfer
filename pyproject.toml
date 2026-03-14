@@ -57,11 +57,11 @@ SYNTH_XFER_DOMAINS = [
   "knownbits",
   "uconst_range",
   "sconst_range",
-  "mod3",
-  "mod5",
-  "mod7",
-  "mod11",
-  "mod13",
+  # "mod3",
+  # "mod5",
+  # "mod7",
+  # "mod11",
+  # "mod13",
 ]
 SYNTH_XFER_ARITIES = ["1", "2", "3", "4", "5"]
 SYNTH_XFER_WIDTHS = [

@@ -6,7 +6,7 @@ from xdsl_smt.dialects.transfer import TransIntegerType
 
 from synth_xfer import _eval_engine
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval_result import EvalResult, PerBitRes
+from synth_xfer._util.eval_result import CaseExample, EvalResult, PerBitRes
 from synth_xfer._util.jit import FnPtr, Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import HelperFuncs
@@ -91,8 +91,8 @@ def get_per_bit(a: "Results") -> list[PerBitRes]:
             base_dist=base_distance,
             sound_dist=sound_distance[i],
             bitwidth=bw,
-            unsound_examples=unsound_examples[i],
-            imprecise_examples=imprecise_examples[i],
+            unsound_examples=[CaseExample(*ex) for ex in unsound_examples[i]],
+            imprecise_examples=[CaseExample(*ex) for ex in imprecise_examples[i]],
         )
         for i in range(len(sound))
     ]
