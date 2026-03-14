@@ -42,7 +42,11 @@ def run_library_learning_loop(
                 args=args,
                 api_key=api_key,
             )
-
+        new_results: list[SynthesisResult] = []
+        for result in latest_results:
+            new_result = run_single_compression(result, library, args, api_key)
+            new_results.append(new_result)
+        latest_results = new_results
     return library, latest_results
 
 
