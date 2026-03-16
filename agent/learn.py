@@ -3,7 +3,6 @@
 import argparse
 from pathlib import Path
 from agents import Agent, Runner, function_tool
-from .main import get_api_key
 from .agent_helper import format_agent_run_dump
 from .util import (
     LibraryState,
@@ -15,6 +14,7 @@ from .util import (
     save_file,
     load_initial_library,
     extract_op_name,
+    get_api_key,
 )
 
 
