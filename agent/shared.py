@@ -26,6 +26,18 @@ def build_prompt(
     return prompt
 
 
+def build_agent_instructions(
+    template: str,
+    op_name: str,
+    op_file: str,
+) -> str:
+    """Instantiate agent_instructions.md template with task-specific values."""
+    instructions = template.replace("<OP>", op_name)
+    instructions = instructions.replace("<op>", op_name.lower())
+    instructions = instructions.replace("<OP_FILE>", op_file)
+    return instructions
+
+
 def build_library_learn_prompt(
     prompt_template: str,
     synth_functions: str,
