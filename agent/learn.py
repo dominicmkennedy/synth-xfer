@@ -18,7 +18,7 @@ from .util import (
 )
 
 
-def run_agent_learn(
+def _run_agent_learn(
     prompt: str,
     api_key: str,
     previous_library: LibraryState,
@@ -63,7 +63,7 @@ def run_agent_learn(
     return (result.final_output, result)
 
 
-def run_library_learn(
+def run_library_learn_task(
     version: int,
     previous_library: LibraryState,
     synthesis_results: list[SynthesisResult],
@@ -79,7 +79,7 @@ def run_library_learn(
     output_dir = Path(args.output)
     print(f"Using model: {args.model}")
 
-    llm_output, run_result = run_agent_learn(
+    llm_output, run_result = _run_agent_learn(
         prompt=prompt,
         api_key=api_key,
         previous_library=previous_library,
@@ -193,7 +193,7 @@ def main():
     lib = load_initial_library(args.library)
 
     for rnd in range(args.rounds):
-        lib = run_library_learn(
+        lib = run_library_learn_task(
             version=rnd,
             previous_library=lib,
             synthesis_results=corpus,
