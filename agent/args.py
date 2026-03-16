@@ -8,7 +8,9 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
     for name, path in [
         ("--agent-instructions", args.agent_instructions),
         ("--library-instructions", args.library_instructions),
+        ("--compress-instructions", args.compress_instructions),
         ("--library-prompt", args.library_prompt),
+        ("--compress-prompt", args.compress_prompt),
         ("--ops", args.ops),
         ("--template", args.template),
     ]:
@@ -63,10 +65,22 @@ def parse_args() -> argparse.Namespace:
         help="Path to library agent instructions file (default: agent/md/library_instructions.md)",
     )
     parser.add_argument(
+        "--compress-instructions",
+        type=Path,
+        default=Path(__file__).parent / "md" / "compress_instructions.md",
+        help="Path to compress agent instructions file (default: agent/md/compress_instructions.md)",
+    )
+    parser.add_argument(
         "--library-prompt",
         type=Path,
         default=Path(__file__).parent / "md" / "library_prompt.md",
-        help="Path to library learning prompt template (default: agent/md/library_prompt.md)",
+        help="Path to library learning prompt (default: agent/md/library_prompt.md)",
+    )
+    parser.add_argument(
+        "--compress-prompt",
+        type=Path,
+        default=Path(__file__).parent / "md" / "compress_prompt.md",
+        help="Path to compression prompt (default: agent/md/compress_prompt.md)",
     )
     parser.add_argument(
         "--examples-dir",
