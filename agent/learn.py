@@ -71,7 +71,6 @@ def run_library_learn(
     api_key: str,
 ) -> LibraryState:
     """Learn a new library version from synthesized task results."""
-    del api_key  # Reserved for future model/provider auth parity.
 
     print(f"\nLearning library version {version}")
 
