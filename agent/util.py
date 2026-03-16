@@ -1,8 +1,9 @@
 """Agent utilities."""
 
+import re
+import os
 from dataclasses import dataclass
 from pathlib import Path
-import re
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.random import Sampler
@@ -32,6 +33,20 @@ class LibraryState:
     """Current learned library state passed to synthesis prompts."""
 
     functions_text: str
+
+
+def get_api_key() -> str:
+    """Get API key from env var or file."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        api_file = Path(__file__).parent / "api_key.txt"
+        if api_file.exists():
+            api_key = api_file.read_text().strip()
+    if not api_key:
+        raise ValueError(
+            "API key not found. Set OPENAI_API_KEY or create agent/api_key.txt"
+        )
+    return api_key
 
 
 def extract_op_name(op_file_path: str) -> str:

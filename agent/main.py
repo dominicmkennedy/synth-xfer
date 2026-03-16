@@ -15,6 +15,7 @@ from .util import (
     SynthesisTask,
     extract_op_name,
     load_initial_library,
+    get_api_key,
 )
 
 
@@ -48,20 +49,6 @@ def run_library_learning_loop(
             new_results.append(new_result)
         latest_results = new_results
     return library, latest_results
-
-
-def get_api_key() -> str:
-    """Get API key from env var or file."""
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        api_file = Path(__file__).parent / "api_key.txt"
-        if api_file.exists():
-            api_key = api_file.read_text().strip()
-    if not api_key:
-        raise ValueError(
-            "API key not found. Set OPENAI_API_KEY or create agent/api_key.txt"
-        )
-    return api_key
 
 
 def main():
