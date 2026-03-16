@@ -119,7 +119,7 @@ def main():
     parser.add_argument(
         "-o", "--output", default="outputs/agent", help="Output directory"
     )
-    parser.add_argument("--model", default="gpt-4", help="OpenAI model")
+    parser.add_argument("--model", default="gpt-5.1-codex-mini", help="OpenAI model")
     parser.add_argument(
         "--dump-agent-run",
         action="store_true",
