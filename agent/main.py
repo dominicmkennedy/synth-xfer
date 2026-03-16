@@ -7,8 +7,9 @@ from pathlib import Path
 import sys
 
 from .args import parse_args
-from .learn import run_library_learn
 from .synth import run_synthesis_tasks
+from .learn import run_library_learn_task
+from .compress import run_compress_task
 from .util import (
     LibraryState,
     SynthesisResult,
@@ -36,7 +37,7 @@ def run_library_learning_loop(
             run_synthesis_tasks(tasks, round_idx, library, args, api_key)
         )
         if round_idx < num_rounds:
-            library = run_library_learn(
+            library = run_library_learn_task(
                 version=round_idx + 1,
                 previous_library=library,
                 synthesis_results=latest_results,
@@ -45,7 +46,7 @@ def run_library_learning_loop(
             )
         new_results: list[SynthesisResult] = []
         for result in latest_results:
-            new_result = run_single_compression(result, library, args, api_key)
+            new_result = run_compress_task(result, library, round_idx, args, api_key)
             new_results.append(new_result)
         latest_results = new_results
     return library, latest_results
