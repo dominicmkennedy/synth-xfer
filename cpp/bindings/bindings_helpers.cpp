@@ -92,7 +92,7 @@ void bind_enum_funcs(py::module_ &m, const std::string &fn_name,
 void bind_eval_func(py::module_ &m, const std::string &fn_name,
                     EvalThunk eval) {
   m.def(fn_name.c_str(), eval, py::arg("to_eval"), py::arg("xfers"),
-        py::arg("bases"));
+        py::arg("bases"), py::arg("unsound_ex") = 0, py::arg("imprecise_ex") = 0);
 }
 
 void bind_run_func(py::module_ &m, const std::string &fn_name, RunThunk run) {

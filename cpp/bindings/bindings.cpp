@@ -1,5 +1,22 @@
 #include "bindings_common.hpp"
 
+namespace {
+
+template <typename NestedExamples>
+py::list to_py_examples(const NestedExamples &all_examples) {
+  py::list outer;
+  for (const auto &per_xfer : all_examples) {
+    py::list inner;
+    for (const auto &[args, synth, best, distance] : per_xfer) {
+      inner.append(py::make_tuple(py::cast(args), synth, best, distance));
+    }
+    outer.append(std::move(inner));
+  }
+  return outer;
+}
+
+} // namespace
+
 void register_rng(py::module_ &m) {
   using SamplerPtr = std::shared_ptr<rngdist::Sampler>;
 
@@ -50,6 +67,14 @@ void register_results_class(py::module_ &m) {
     std::string s = oss.str();
     s.pop_back();
     return s;
+  });
+
+  cls.def("get_unsound_examples", [](const Results &self) {
+    return to_py_examples(self.getUnsoundExampleTuples());
+  });
+
+  cls.def("get_imprecise_examples", [](const Results &self) {
+    return to_py_examples(self.getImpreciseExampleTuples());
   });
 }
 

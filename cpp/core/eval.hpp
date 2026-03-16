@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <sstream>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -73,11 +75,15 @@ public:
 private:
   std::vector<XferFn> xfrFns;
   std::vector<XferFn> refFns;
+  unsigned int maxUnsoundExamples;
+  unsigned int maxImpreciseExamples;
 
 public:
   constexpr Eval(const std::vector<std::uintptr_t> &xfrAddrs,
-                 const std::vector<std::uintptr_t> &refAddrs)
-      : xfrFns(xfrAddrs.size(), nullptr), refFns(refAddrs.size(), nullptr) {
+                 const std::vector<std::uintptr_t> &refAddrs,
+                 unsigned int maxUnsound = 0, unsigned int maxImprecise = 0)
+      : xfrFns(xfrAddrs.size(), nullptr), refFns(refAddrs.size(), nullptr),
+        maxUnsoundExamples(maxUnsound), maxImpreciseExamples(maxImprecise) {
     for (std::size_t i = 0; i < xfrFns.size(); ++i)
       xfrFns[i] = reinterpret_cast<XferFn>(xfrAddrs[i]);
     for (std::size_t i = 0; i < refFns.size(); ++i)
@@ -86,14 +92,14 @@ public:
 
   Results eval(const EvalVec &toEval) const {
     Results r{static_cast<unsigned int>(xfrFns.size()), ResBw,
-              ResultD::num_levels};
+              ResultD::num_levels, maxUnsoundExamples, maxImpreciseExamples};
 
     for (const Row &row : toEval) {
       const ArgsTuple &args = std::get<0>(row);
       const ResultD &best = std::get<1>(row);
       evalSingle(args, best, r);
     }
-
+    r.cleanExamples();
     return r;
   }
 
@@ -132,8 +138,9 @@ private:
       bool exact = (synth_after_meet == best);
       unsigned long dis = synth_after_meet.distance(best);
       unsigned long soundDis = sound ? dis : baseDis;
-
-      r.incResult(Result(sound, dis, exact, solved, soundDis), i);
+      // Xuanyu: Creating a CaseExample is expensive, so we passed things to incResult and create it only when necessary.
+      r.incResult(sound, dis, exact, solved, soundDis,
+                  args, synth_after_meet, best, dis, i);
     }
 
     r.incCases(solved, baseDis);
