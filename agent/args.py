@@ -56,6 +56,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to agent instructions file (default: agent/md/agent_instructions.md)",
     )
     parser.add_argument(
+        "--library-instructions",
+        type=Path,
+        default=Path(__file__).parent / "md" / "library_instructions.md",
+        help="Path to library agent instructions file (default: agent/md/library_instructions.md)",
+    )
+    parser.add_argument(
         "--library-prompt",
         type=Path,
         default=Path(__file__).parent / "md" / "library_prompt.md",
