@@ -1,5 +1,6 @@
 """Shared utilities for transformer synthesis methods."""
 
+
 def build_prompt(
     prompt_template: str,
     op_name: str,

@@ -2,19 +2,21 @@
 
 import argparse
 from pathlib import Path
+
 from agents import Agent, Runner, function_tool
+
 from .agent_helper import format_agent_run_dump
 from .util import (
     LibraryState,
-    SynthesisTask,
     SynthesisResult,
+    SynthesisTask,
     clean_llm_output,
+    extract_op_name,
+    get_api_key,
+    load_initial_library,
     merge_library_text,
     print_token_usage,
     save_file,
-    load_initial_library,
-    extract_op_name,
-    get_api_key,
 )
 
 
@@ -36,12 +38,12 @@ def _run_agent_learn(
         corpus = "\n".join([result.solution_text for result in synthesis_results])
 
         return corpus
-    
+
     @function_tool
     def get_available_primitives() -> str:
         """Return the allowed primitive operators documentation (agent/ops.md)."""
         return ops_path.read_text(encoding="utf-8")
-    
+
     @function_tool
     def get_library_text() -> str:
         """Return the library (in MLIR) containing reusable helper functions mined from previous synthesis rounds. Prefer calling these functions in your solution to keep the program short."""
@@ -173,7 +175,7 @@ def main():
     ]:
         if not path.exists():
             parser.error(f"{name}: path does not exist: {path}")
-    
+
     if args.library is not None and not args.library.exists():
         parser.error(f"--library: path does not exist: {args.library}")
 
@@ -200,7 +202,7 @@ def main():
             args=args,
             api_key=api_key,
         )
-    
+
     print("Library learning complete")
 
     return 0

@@ -2,21 +2,19 @@
 """Agent for synthesizing transfer functions using LLM via OpenAI Agent API."""
 
 import asyncio
-import os
-from pathlib import Path
 import sys
 
 from .args import parse_args
-from .synth import run_synthesis_tasks
-from .learn import run_library_learn_task
 from .compress import run_compress_task
+from .learn import run_library_learn_task
+from .synth import run_synthesis_tasks
 from .util import (
     LibraryState,
     SynthesisResult,
     SynthesisTask,
     extract_op_name,
-    load_initial_library,
     get_api_key,
+    load_initial_library,
 )
 
 

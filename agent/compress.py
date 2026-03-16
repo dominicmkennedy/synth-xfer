@@ -1,18 +1,19 @@
 """File compression workflow helpers."""
 
-import re
 from pathlib import Path
+import re
+
 from agents import Agent, Runner, function_tool
 
-from .agent_helper import format_agent_run_dump
 from synth_xfer._util.domain import AbstractDomain
+
+from .agent_helper import format_agent_run_dump
 from .util import (
     LibraryState,
-    SynthesisTask,
     SynthesisResult,
     clean_llm_output,
-    merge_library_text,
     eval_transformer,
+    merge_library_text,
     print_token_usage,
     save_file,
 )
@@ -34,17 +35,17 @@ def _run_agent_compress(
     def get_target_file() -> str:
         """Get the MLIR code of the file to compress"""
         return target.solution_text
-    
+
     @function_tool
     def get_available_primitives() -> str:
         """Return the allowed primitive operators documentation (agent/ops.md)."""
         return ops_path.read_text(encoding="utf-8")
-    
+
     @function_tool
     def get_library_text() -> str:
         """Return the library (in MLIR) containing reusable helper functions mined from previous synthesis rounds. Prefer calling these functions in your solution to keep the program short."""
         return library.functions_text
-    
+
     @function_tool
     def verify_correctness(transformer_mlir: str) -> str:
         """Confirm that the compressed transformer has the same eval results as uncompressed transformer"""
@@ -75,18 +76,17 @@ def _run_agent_compress(
                     "Problem in eval of original file. Proceed with compression.\n"
                     f"{target.eval_summary}"
                 )
-            
+
             curr_sound = float(match.group("sound"))
             curr_exact = float(match.group("exact"))
 
         # Get eval of new transformer
         full_soln = merge_library_text(library.functions_text, transformer_mlir)
         compressed_eval_summary = eval_transformer(
-                solution_path=full_soln,
-                op_path=Path(target.task.op_file),
-                domain=AbstractDomain.KnownBits,
-                xfer_name=f"kb_{target.task.op_name.lower()}",
-        
+            solution_path=full_soln,
+            op_path=Path(target.task.op_file),
+            domain=AbstractDomain.KnownBits,
+            xfer_name=f"kb_{target.task.op_name.lower()}",
         )
         match = re.search(pattern, compressed_eval_summary)
         if match is None:
@@ -178,4 +178,3 @@ def run_compress_task(
         transformer_path=target.transformer_path,
         eval_summary=target.eval_summary,
     )
-    

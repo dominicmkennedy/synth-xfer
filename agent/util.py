@@ -1,9 +1,9 @@
 """Agent utilities."""
 
-import re
-import os
 from dataclasses import dataclass
+import os
 from pathlib import Path
+import re
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.random import Sampler
@@ -89,6 +89,7 @@ def make_output_dir(output_dir: Path):
     """Create the output directory and the output/log directory"""
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "log").mkdir(exist_ok=True)
+
 
 def print_token_usage(run_result) -> None:
     """Print aggregated token usage from agent run."""
