@@ -1,6 +1,7 @@
 """Agent utilities."""
 
 from dataclasses import dataclass
+import os
 from pathlib import Path
 import re
 
@@ -32,6 +33,20 @@ class LibraryState:
     """Current learned library state passed to synthesis prompts."""
 
     functions_text: str
+
+
+def get_api_key() -> str:
+    """Get API key from env var or file."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        api_file = Path(__file__).parent / "api_key.txt"
+        if api_file.exists():
+            api_key = api_file.read_text().strip()
+    if not api_key:
+        raise ValueError(
+            "API key not found. Set OPENAI_API_KEY or create agent/api_key.txt"
+        )
+    return api_key
 
 
 def extract_op_name(op_file_path: str) -> str:
@@ -68,6 +83,12 @@ def clean_llm_output(output: str) -> str:
                 break
     output = output.replace(r"\n", "\n").replace(r"\t", "\t")
     return output
+
+
+def make_output_dir(output_dir: Path):
+    """Create the output directory and the output/log directory"""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    (output_dir / "log").mkdir(exist_ok=True)
 
 
 def print_token_usage(run_result) -> None:
