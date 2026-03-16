@@ -1,7 +1,6 @@
 """File compression workflow helpers."""
 
 import re
-import argparse
 from pathlib import Path
 from agents import Agent, Runner, function_tool
 
@@ -16,9 +15,6 @@ from .util import (
     eval_transformer,
     print_token_usage,
     save_file,
-    extract_op_name,
-    load_initial_library,
-    get_api_key,
 )
 
 
@@ -64,10 +60,22 @@ def _run_agent_compress(
                 xfer_name=f"kb_{target.task.op_name.lower()}",
             )
             match = re.search(pattern, curr_eval_summary)
+            if match is None:
+                return (
+                    "Problem in eval of original file. Proceed with compression.\n"
+                    f"{curr_eval_summary}"
+                )
+
             curr_sound = float(match.group("sound"))
             curr_exact = float(match.group("exact"))
         else:
             match = re.search(pattern, target.eval_summary)
+            if match is None:
+                return (
+                    "Problem in eval of original file. Proceed with compression.\n"
+                    f"{target.eval_summary}"
+                )
+            
             curr_sound = float(match.group("sound"))
             curr_exact = float(match.group("exact"))
 
@@ -81,6 +89,8 @@ def _run_agent_compress(
         
         )
         match = re.search(pattern, compressed_eval_summary)
+        if match is None:
+            return compressed_eval_summary
         compressed_sound = float(match.group("sound"))
         compressed_exact = float(match.group("exact"))
 
@@ -168,92 +178,4 @@ def run_compress_task(
         transformer_path=target.transformer_path,
         eval_summary=target.eval_summary,
     )
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Compress target files")
-    parser.add_argument(
-        "input_files",
-        nargs="+",
-        type=Path,
-        help="MLIR files to compress (e.g., mlir/Operations/Add.mlir)",
-    )
-    parser.add_argument(
-        "--library",
-        type=Path,
-        help="Library file to use for compression",
-    )
-    parser.add_argument(
-        "-o", "--output", default="outputs/agent", help="Output directory"
-    )
-    parser.add_argument("--model", default="gpt-5.1-codex-mini", help="OpenAI model")
-    parser.add_argument(
-        "--dump-agent-run",
-        action="store_true",
-        help="Dump full agent run (messages, tool calls, outputs) to output dir",
-    )
-    parser.add_argument(
-        "--compress-instructions",
-        type=Path,
-        default=Path(__file__).parent / "md" / "library_instructions.md",
-        help="Path to library agent instructions file (default: agent/md/library_instructions.md)",
-    )
-    parser.add_argument(
-        "--compress-prompt",
-        type=Path,
-        default=Path(__file__).parent / "md" / "library_prompt.md",
-        help="Path to library learning prompt template (default: agent/md/library_prompt.md)",
-    )
-    parser.add_argument(
-        "--ops",
-        type=Path,
-        default=Path(__file__).parent / "md" / "ops.md",
-        help="Path to ops.md file (default: agent/ops.md)",
-    )
-
-    args = parser.parse_args()
-    
-    # Validate arguments
-    for input_file in args.input_files:
-        if not input_file.exists():
-            parser.error(f"input_file: path does not exist: {input_file}")
-    
-    for lib_file in args.library:
-        if not lib_file.exists():
-            parser.error(f"library: path does not exist: {lib_file}")
-    
-    for name, path in [
-        ("--compress-instructions", args.compress_instructions),
-        ("--compress-prompt", args.compress_prompt),
-        ("--ops", args.ops),
-    ]:
-        if not path.exists():
-            parser.error(f"{name}: path does not exist: {path}")
-    
-    # Parse input files
-    corpus = []
-    for input_file in args.input_files:
-        task = SynthesisTask("", extract_op_name(input_file))
-        result = SynthesisResult(
-            task=task,
-            solution_text=input_file.read_text(),
-            transformer_path=None,
-            eval_summary=None,
-        )
-        corpus.append(result)
-    
-    library = load_initial_library(args.library)
-    api_key = get_api_key()
-
-    for target in corpus:
-        run_compress_task(
-            target=target,
-            library=library,
-            round_num=0,
-            args=args,
-            api_key=api_key,
-        )
-    
-    print("Compression complete")
-    return 0
     
