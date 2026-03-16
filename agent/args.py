@@ -7,6 +7,7 @@ from pathlib import Path
 def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     for name, path in [
         ("--agent-instructions", args.agent_instructions),
+        ("--library-instructions", args.library_instructions),
         ("--library-prompt", args.library_prompt),
         ("--ops", args.ops),
         ("--template", args.template),
