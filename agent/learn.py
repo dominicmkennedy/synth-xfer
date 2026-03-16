@@ -86,7 +86,7 @@ def run_library_learn(
         synthesis_results=synthesis_results,
         model=args.model,
         ops_path=args.ops,
-        instructions_path=args.learn_instructions,
+        instructions_path=args.library_instructions,
     )
 
     print_token_usage(run_result)
