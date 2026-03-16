@@ -43,6 +43,7 @@ enum = "synth_xfer.cli.enum:main"
 max-precise = "synth_xfer.cli.max_precise:main"
 agent-synth = "agent.main:main"
 agent-learn = "agent.learn:main"
+agent-compress = "agent.compress:main"
 
 [tool.scikit-build]
 minimum-version = "0.11"
