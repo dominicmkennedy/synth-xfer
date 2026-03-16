@@ -7,7 +7,7 @@ from xdsl.parser import ModuleOp
 from z3 import BitVecNumRef, FuncDeclRef, ModelRef
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval import run_concrete_fn
+from synth_xfer._util.eval import parse_to_run_inputs, run_concrete_fn
 from synth_xfer._util.parse_mlir import (
     HelperFuncs,
     get_fns,
