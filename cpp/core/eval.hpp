@@ -78,30 +78,6 @@ private:
   unsigned int maxUnsoundExamples;
   unsigned int maxImpreciseExamples;
 
-  template <typename T> static std::string toText(const T &value) {
-    std::ostringstream oss;
-    oss << value;
-    std::string result = oss.str();
-    // Remove trailing newline if present
-    if (!result.empty() && result.back() == '\n') {
-      result.pop_back();
-    }
-    return result;
-  }
-
-  static std::vector<std::string> argsToText(const ArgsTuple &args) {
-    std::vector<std::string> out;
-    out.reserve(N);
-
-    std::apply(
-        [&](const auto &...parts) {
-          (out.push_back(toText(parts)), ...);
-        },
-        args);
-
-    return out;
-  }
-
 public:
   constexpr Eval(const std::vector<std::uintptr_t> &xfrAddrs,
                  const std::vector<std::uintptr_t> &refAddrs,
@@ -162,11 +138,9 @@ private:
       bool exact = (synth_after_meet == best);
       unsigned long dis = synth_after_meet.distance(best);
       unsigned long soundDis = sound ? dis : baseDis;
-
-      CaseExample example(argsToText(args), toText(synth_after_meet),
-                          toText(best), static_cast<double>(dis));
-
-      r.incResult(sound, dis, exact, solved, soundDis, example, i);
+      // Xuanyu: Creating a CaseExample is expensive, so we passed things to incResult and create it only when necessary.
+      r.incResult(sound, dis, exact, solved, soundDis,
+                  args, synth_after_meet, best, dis, i);
     }
 
     r.incCases(solved, baseDis);

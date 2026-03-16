@@ -5,6 +5,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -13,7 +14,35 @@
 
 using CaseExample =
     std::tuple<std::vector<std::string>, std::string, std::string,
-         double>;
+         unsigned long>;
+
+namespace detail {
+
+template <typename T>
+std::string toText(const T &v) {
+  std::ostringstream oss;
+  oss << v;
+  std::string s = oss.str();
+  if (!s.empty() && s.back() == '\n')
+    s.pop_back();
+  return s;
+}
+
+template <typename ArgsTuple>
+std::vector<std::string> argsToText(const ArgsTuple &args) {
+  std::vector<std::string> out;
+  std::apply([&](const auto &...parts) { (out.push_back(toText(parts)), ...); },
+             args);
+  return out;
+}
+
+template <typename ArgsTuple, typename ResultD>
+CaseExample makeCaseExample(const ArgsTuple &args, const ResultD &synth,
+                            const ResultD &best, unsigned long dis) {
+  return CaseExample(argsToText(args), toText(synth), toText(best), dis);
+}
+
+} // namespace detail
 
 class Result {
   // The result of evaluating a single transformer on one bitwidth.
@@ -104,7 +133,7 @@ private:
       for (const auto &ex : examples) {
         converted.emplace_back(std::get<0>(ex), std::get<1>(ex),
                                std::get<2>(ex),
-                               std::get<3>(ex) / static_cast<double>(maxDist()));
+                               static_cast<double>(std::get<3>(ex)) / static_cast<double>(maxDist()));
       }
       out.push_back(std::move(converted));
     }
@@ -142,18 +171,20 @@ public:
     return os << "\n";
   }
 
-  void incResult(bool s, unsigned long p, bool e, bool solved, unsigned long sd, CaseExample ex, unsigned int i) {
+  template <typename ArgsTuple, typename ResultD>
+  void incResult(bool s, unsigned long p, bool e, bool solved, unsigned long sd,
+                 const ArgsTuple &args, const ResultD &synth,
+                 const ResultD &best, unsigned long dis, unsigned int i) {
     r[i].sound += s;
     r[i].distance += p;
     r[i].exact += e;
     r[i].soundDistance += sd;
     r[i].unsolvedExact += !solved ? e : 0;
-    // Xuanyu: maybe add
     if (maxUnsoundExamples > r[i].unsoundExamples.size() && !s)
-      r[i].unsoundExamples.push_back(ex);
+      r[i].unsoundExamples.push_back(detail::makeCaseExample(args, synth, best, dis));
     // Xuanyu: maybe when the impreciseExamples it too large, do a sort and only keep the top-k
-    else if (maxImpreciseExamples > 0 && s && !e)
-      r[i].impreciseExamples.push_back(ex);
+    else if (5 * maxImpreciseExamples > r[i].impreciseExamples.size() && s && !e)
+      r[i].impreciseExamples.push_back(detail::makeCaseExample(args, synth, best, dis));
   }
 
   void incCases(bool solved, unsigned long dis) {
