@@ -1,6 +1,11 @@
 ## Task: Extract a reusable library from KnownBits transfer functions
 
-You are given a set of synthesized KnownBits transfer functions in MLIR. Your goal is to identify reusable sub-computations across them and factor these out as named helper functions in a library module.
+You are given a set of synthesized KnownBits transfer functions. Your goal is to identify reusable sub-computations across them and factor these out as named helper functions in a library module.
+
+Use tools to fetch all materials; do not assume they are in this message:
+- `get_corpus_functions()`: the synthesized transfer functions to learn from
+- `get_available_primitives()`: the allowed primitive operators
+- `get_library_text()`: the existing library (do not duplicate functions already present)
 
 ## Background: KnownBits representation
 
@@ -9,24 +14,6 @@ Each abstract value is a 2-element container `!transfer.abs_value<[!transfer.int
 - element **1**: known-one mask — a bit set here means that bit is definitely 1
 
 The complement of known-zero gives the "maybe-one" mask; the complement of known-one gives the "maybe-zero" mask.
-
-## Synthesized transfer functions (inputs)
-
-<SYNTHESIZED_FUNCTIONS>
-
-## Existing library (do not duplicate)
-
-The library already contains the following helpers. Do not re-emit functions that are already present or are trivially equivalent to them:
-
-```mlir
-<EXISTING_LIBRARY>
-```
-
-## Available primitives
-
-Library functions must use only these building blocks:
-
-<PRIMITIVE_OPERATORS>
 
 ## What to extract
 
@@ -63,8 +50,10 @@ builtin.module {
 
 ## Required workflow
 
-1. Read each synthesized transfer function carefully. For each one, annotate (mentally) which sub-sequences of operations compute a semantically coherent intermediate result.
-2. Look for sub-computations that appear in more than one function, or that are large enough to deserve a name on their own.
-3. For each candidate, decide on a precise semantic description and a clear name.
-4. Write the MLIR for each helper function. Verify it uses only allowed primitives and is in valid SSA form.
-5. Output **only** the `builtin.module` containing the new helper functions — no explanation, no transfer functions, no markdown fences around the final answer.
+1. Call `get_corpus_functions()` to read the synthesized transfer functions. For each one, annotate (mentally) which sub-sequences of operations compute a semantically coherent intermediate result.
+2. Call `get_library_text()` to see what helpers already exist — do not re-emit anything already present or trivially equivalent.
+3. Call `get_available_primitives()` to confirm which operations are allowed.
+4. Look for sub-computations that appear in more than one function, or that are large enough to deserve a name on their own.
+5. For each candidate, decide on a precise semantic description and a clear name.
+6. Write the MLIR for each helper function. Verify it uses only allowed primitives and is in valid SSA form.
+7. Output **only** the `builtin.module` containing the new helper functions — no explanation, no transfer functions, no markdown fences around the final answer.
