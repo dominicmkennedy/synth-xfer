@@ -2,6 +2,7 @@
 """Agent for synthesizing transfer functions using LLM via OpenAI Agent API."""
 
 import asyncio
+from pathlib import Path
 import sys
 
 from .args import parse_args
