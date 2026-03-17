@@ -161,7 +161,7 @@ def run_compress_task(
         dump_path = save_file(
             format_agent_run_dump(run_result),
             output_dir,
-            f"compress_run_{op_name}.log",
+            f"compress_run{round_num}_{op_name}.log",
         )
         print(f"Agent run dump: {dump_path}")
 
