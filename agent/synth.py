@@ -11,7 +11,6 @@ from agents import Agent, Runner, function_tool
 from synth_xfer._util.domain import AbstractDomain
 
 from .agent_helper import format_agent_run_dump
-from .shared import build_agent_instructions
 from .util import (
     LibraryState,
     SynthesisResult,
@@ -26,6 +25,18 @@ from .util import (
 
 def _make_initial_prompt(task: SynthesisTask) -> str:
     return f"Synthesize the KnownBits transfer function for operation {task.op_name} (file: {task.op_file})."
+
+
+def build_agent_instructions(
+    template: str,
+    op_name: str,
+    op_file: str,
+) -> str:
+    """Instantiate agent_instructions.md template with task-specific values."""
+    instructions = template.replace("<OP>", op_name)
+    instructions = instructions.replace("<op>", op_name.lower())
+    instructions = instructions.replace("<OP_FILE>", op_file)
+    return instructions
 
 
 class SynthesisAgent:
