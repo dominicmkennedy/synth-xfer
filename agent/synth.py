@@ -64,7 +64,15 @@ class SynthesisAgent:
 
         @function_tool
         def get_task_bundle() -> str:
-            """Return the concrete operation/task bundle as JSON (op_name, op_file, and op_content)."""
+            """Return the concrete operation/task bundle as JSON (op_name, op_file, and op_content).
+
+            The op_content may define one or two functions:
+            - concrete_op: the concrete semantics of the operation (always present).
+            - op_constraint (optional): a predicate over the concrete inputs that is guaranteed to
+              hold at the call site (e.g. for AddNsw it asserts no signed overflow). When present,
+              the synthesizer may assume the constraint is satisfied and exploit it to produce a
+              more precise transfer function.
+            """
             op_path = Path(task.op_file)
             bundle = {
                 "op_name": task.op_name,
