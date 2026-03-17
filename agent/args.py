@@ -113,9 +113,16 @@ def parse_args() -> argparse.Namespace:
         help="Number of library-update rounds; 0 = synthesis-only pass (default: 2)",
     )
     parser.add_argument(
-        "--parallel",
+        "--no-parallel",
+        dest="parallel",
+        action="store_false",
+        help="Run synthesis tasks sequentially within each round (default: parallel)",
+    )
+    parser.set_defaults(parallel=True)
+    parser.add_argument(
+        "--no-compress",
         action="store_true",
-        help="Run synthesis tasks in parallel within each round",
+        help="Skip the compress step after synthesis (default: compress is enabled)",
     )
 
     args = parser.parse_args()
