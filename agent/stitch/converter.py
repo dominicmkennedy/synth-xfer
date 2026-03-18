@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from xdsl.dialects.func import FuncOp
+from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.ir import BlockArgument, Operation, SSAValue
 from xdsl_smt.dialects.transfer import Constant as ConstantOp
 
@@ -30,7 +30,7 @@ def func_to_dag(func: FuncOp) -> DAG:
     root: Vertex | None = None
     for block in func.body.blocks:
         for op in block.ops:
-            if op.name == "func.return":
+            if isinstance(op, ReturnOp):
                 # Assume one returned value and one DAG root.
                 returned = op.operands[0]
                 root = value_to_vertex[returned]

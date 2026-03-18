@@ -31,7 +31,9 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     paths = [Path(p).resolve() for p in args.mlir_files]
-    result = search_patterns(paths, max_instructions=args.max_instructions, top_k=args.top_k)
+    result = search_patterns(
+        paths, max_instructions=args.max_instructions, top_k=args.top_k
+    )
 
     hits = [h for h in result.hits if h.pattern.inst_count >= 2]
 

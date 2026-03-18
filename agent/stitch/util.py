@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from xdsl.dialects.func import CallOp
 from xdsl.ir import BlockArgument, Operation
 from xdsl_smt.dialects.transfer import CmpOp, Constant as ConstantOp, GetOp
 
@@ -55,6 +56,10 @@ class Opcode:
             pred = _int_attr_value(mlir_op, "predicate")
             if pred is not None:
                 return Opcode(f"{mlir_op.name}[{pred}]", arity)
+
+        if isinstance(mlir_op, CallOp):
+            callee = mlir_op.callee.string_value()
+            return Opcode(f"{mlir_op.name}[{callee}]", arity)
 
         return Opcode(mlir_op.name, arity)
 
