@@ -22,8 +22,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--top-k",
         type=int,
-        default=None,
-        help="Print only the top-k patterns by utility (inst_count * matches)",
+        default=1,
+        help="Number of top patterns to find by utility (inst_count * matches)",
     )
     return p.parse_args()
 
@@ -31,18 +31,16 @@ def _parse_args() -> argparse.Namespace:
 def main() -> None:
     args = _parse_args()
     paths = [Path(p).resolve() for p in args.mlir_files]
-    result = search_patterns(paths, max_instructions=args.max_instructions)
+    result = search_patterns(paths, max_instructions=args.max_instructions, top_k=args.top_k)
 
     hits = [h for h in result.hits if h.pattern.inst_count >= 2]
-    if args.top_k is not None:
-        hits = hits[: args.top_k]
 
     for hit in hits:
         print(
-            f"=== utility={hit.utility} | size = {hit.pattern.inst_count} | {hit.total_matches} matches | {hit.pattern_key} ==="
+            f"=== utility={hit.utility} | size = {hit.pattern.inst_count} | {hit.total_matches} matches ==="
         )
-        # print(hit.pattern)
-        # print()
+        print(hit.pattern)
+        print()
 
 
 if __name__ == "__main__":

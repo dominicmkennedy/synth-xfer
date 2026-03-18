@@ -148,13 +148,15 @@ def _upper_bound(
     )
 
 
-def search_patterns(paths: list[Path], max_instructions: int = 3) -> SearchResult:
+def search_patterns(
+    paths: list[Path], max_instructions: int = 3, top_k: int | None = None
+) -> SearchResult:
     """Branch-and-bound search for high-utility DAG patterns.
 
     Utility = inst_count * total_matches.
     Upper bound for any extension of pattern P:
         UB(P) = sum_{r in match_roots(P)} |reachable_vertices(r)|
-    Branches are pruned when UB <= current best utility.
+    Branches are pruned when UB <= k-th best utility seen so far.
     """
     program_dags = _collect_program_dags(paths)
     op_sigs = _collect_opcode_signatures(program_dags)
@@ -171,21 +173,28 @@ def search_patterns(paths: list[Path], max_instructions: int = 3) -> SearchResul
         for sig in op_sigs
     ]
 
-    # heap entries: (-ub, tie_break, pattern)
+    # search heap entries: (-ub, tie_break, pattern)
     counter = itertools.count()
     heap: list[tuple[int, int, DAG]] = [
         (-global_ub, next(counter), pat) for pat in initial_patterns
     ]
     heapq.heapify(heap)
 
-    hits: list[PatternHit] = []
+    # top-k hits tracked as a min-heap of (utility, tie_break, hit)
+    top_hits: list[tuple[int, int, PatternHit]] = []
+    hit_counter = itertools.count()
     seen: set[str] = set()
-    best_utility = 0
+
+    def threshold() -> int:
+        """Pruning threshold: min utility among top-k (0 if fewer than k hits)."""
+        if top_k is not None and len(top_hits) >= top_k:
+            return top_hits[0][0]
+        return 0
 
     while heap:
         neg_ub, _, pattern = heapq.heappop(heap)
         ub = -neg_ub
-        if ub <= best_utility:
+        if ub <= threshold():
             break  # heap property: all remaining entries have ub <= this
 
         key = _pattern_key(pattern.root)
@@ -197,27 +206,31 @@ def search_patterns(paths: list[Path], max_instructions: int = 3) -> SearchResul
         if total == 0:
             continue
 
-        utility = pattern.inst_count * total
-        best_utility = max(best_utility, utility)
-        hits.append(
-            PatternHit(
-                pattern=pattern,
-                pattern_key=key,
-                total_matches=total,
-                matched_functions=per_fn,
-                utility=utility,
-            )
+        utility = (pattern.inst_count - 1) * total
+        hit = PatternHit(
+            pattern=pattern,
+            pattern_key=key,
+            total_matches=total,
+            matched_functions=per_fn,
+            utility=utility,
         )
+        entry = (utility, next(hit_counter), hit)
+        if top_k is None:
+            heapq.heappush(top_hits, entry)
+        elif len(top_hits) < top_k:
+            heapq.heappush(top_hits, entry)
+        elif utility > top_hits[0][0]:
+            heapq.heapreplace(top_hits, entry)
 
         if pattern.inst_count >= max_instructions:
             continue
 
         child_ub = _upper_bound(roots_by_fn, reachable_sizes)
-        if child_ub <= best_utility:
+        if child_ub <= threshold():
             continue
 
         for child in _expand_pattern(pattern, op_sigs):
             heapq.heappush(heap, (-child_ub, next(counter), child))
 
-    hits.sort(key=lambda h: (-h.utility, h.pattern_key))
+    hits = sorted([h for _, _, h in top_hits], key=lambda h: (-h.utility, h.pattern_key))
     return SearchResult(op_sigs=op_sigs, hits=hits)

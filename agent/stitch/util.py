@@ -101,28 +101,44 @@ class DAG:
         return DAG(root=_clone_subtree(self.root, {}))
 
     def __str__(self) -> str:
-        seen: dict[int, int] = {}
-        counter = [0]
+        leaf_name: dict[int, str] = {}
+        var_name: dict[int, str] = {}
+        stmts: list[str] = []
+        leaf_ctr = [0]
+        var_ctr = [0]
 
-        def fmt(v: Vertex, indent: int) -> str:
+        def name_of(v: Vertex) -> str:
             vid = id(v)
-            prefix = "  " * indent
             if v.opcode == Opcode.leaf():
-                if vid in seen:
-                    return prefix + f"@{seen[vid]}"
-                seen[vid] = counter[0]
-                counter[0] += 1
-                return prefix + "_"
-            if vid in seen:
-                return prefix + f"@{seen[vid]}"
-            seen[vid] = counter[0]
-            counter[0] += 1
-            lines = [prefix + v.opcode.key]
-            for arg in v.args:
-                lines.append(fmt(arg, indent + 1))
-            return "\n".join(lines)
+                if vid not in leaf_name:
+                    leaf_name[vid] = f"_{leaf_ctr[0]}"
+                    leaf_ctr[0] += 1
+                return leaf_name[vid]
+            return var_name[vid]
 
-        return fmt(self.root, 0)
+        def visit(v: Vertex) -> None:
+            vid = id(v)
+            if vid in var_name or vid in leaf_name:
+                return
+            if v.opcode == Opcode.leaf():
+                leaf_name[vid] = f"_{leaf_ctr[0]}"
+                leaf_ctr[0] += 1
+                return
+            for arg in v.args:
+                visit(arg)
+            lhs = f"%{var_ctr[0]}"
+            var_ctr[0] += 1
+            var_name[vid] = lhs
+            arg_names = ", ".join(name_of(a) for a in v.args)
+            stmts.append(f"  {lhs} = {v.opcode.key}({arg_names})")
+
+        visit(self.root)
+
+        params = ", ".join(leaf_name.values())
+        ret = name_of(self.root)
+        header = f"def f({params}):"
+        body = "\n".join(stmts)
+        return f"{header}\n{body}\n  return {ret}"
 
     def clone_with_substitution(self, target: Vertex, replacement: Vertex) -> DAG:
         """Clone this DAG, replacing every occurrence of `target` (by identity)
