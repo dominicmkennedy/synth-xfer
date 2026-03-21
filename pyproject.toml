@@ -13,7 +13,7 @@ readme = "README.md"
 requires-python = ">=3.13,<3.14"
 dependencies = [
   "xdsl>=0.48.3",
-  "xdsl-smt @ https://github.com/dominicmkennedy/xdsl-smt/archive/5ce0ebe.tar.gz",
+  "xdsl-smt @ https://github.com/dominicmkennedy/xdsl-smt/archive/2fd76eb.tar.gz",
   "z3-solver==4.15.1.0",
   "llvmlite==0.44.0",
   "pandas>=2.3.3",
