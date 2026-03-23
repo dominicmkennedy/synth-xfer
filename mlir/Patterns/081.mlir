@@ -6,21 +6,18 @@ module {
     return %2 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer) -> i1 {
-    %true = arith.constant true
     %0 = "transfer.mul"(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = call @mul_nuw(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> i1
-    %2 = call @mul_nsw(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> i1
-    %3 = "transfer.add"(%arg1, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %4 = call @add_nuw(%arg1, %0) : (!transfer.integer, !transfer.integer) -> i1
-    %5 = call @add_nsw(%arg1, %0) : (!transfer.integer, !transfer.integer) -> i1
-    %6 = "transfer.lshr"(%3, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %7 = call @shifting_amount_less_bitwidth(%3, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %8 = arith.andi %true, %1 : i1
-    %9 = arith.andi %8, %2 : i1
-    %10 = arith.andi %9, %4 : i1
-    %11 = arith.andi %10, %5 : i1
-    %12 = arith.andi %11, %7 : i1
-    return %12 : i1
+    %0_constraint_0 = func.call @mul_nuw(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> i1
+    %0_constraint_1 = func.call @mul_nsw(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> i1
+    %1 = "transfer.add"(%arg1, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %1_constraint_0 = func.call @add_nuw(%arg1, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %1_constraint_1 = func.call @add_nsw(%arg1, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %2_constraint_0 = func.call @shifting_amount_less_bitwidth(%1, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %0_constraint_0, %0_constraint_1 : i1
+    %and_1 = arith.andi %and_0, %1_constraint_0 : i1
+    %and_2 = arith.andi %and_1, %1_constraint_1 : i1
+    %and_3 = arith.andi %and_2, %2_constraint_0 : i1
+    return %and_3 : i1
   }
   func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.umul_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
