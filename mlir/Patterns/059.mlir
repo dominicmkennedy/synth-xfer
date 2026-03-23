@@ -5,15 +5,18 @@ module {
     return %1 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
+    %true = arith.constant true
     %0 = "transfer.urem"(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = call @rhs_neq_zero(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %2 = call @shl_nuw(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %3 = call @shl_nsw(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %4 = call @shifting_amount_less_bitwidth(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %5 = arith.andi %1, %2 : i1
-    %6 = arith.andi %5, %3 : i1
-    %7 = arith.andi %6, %4 : i1
-    return %7 : i1
+    %2 = "transfer.shl"(%0, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %3 = call @shl_nuw(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %4 = call @shl_nsw(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %5 = call @shifting_amount_less_bitwidth(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %6 = arith.andi %true, %1 : i1
+    %7 = arith.andi %6, %3 : i1
+    %8 = arith.andi %7, %4 : i1
+    %9 = arith.andi %8, %5 : i1
+    return %9 : i1
   }
   func.func @rhs_neq_zero(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer

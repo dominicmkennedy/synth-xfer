@@ -8,14 +8,17 @@ module {
     return %4 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer, %arg5: !transfer.integer) -> i1 {
+    %true = arith.constant true
     %0 = "transfer.or"(%arg4, %arg5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.or"(%arg3, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %2 = "transfer.lshr"(%1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %3 = call @shifting_amount_less_bitwidth(%1, %arg2) : (!transfer.integer, !transfer.integer) -> i1
     %4 = "transfer.or"(%arg1, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %5 = call @shifting_amount_less_bitwidth(%4, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %6 = arith.andi %3, %5 : i1
-    return %6 : i1
+    %5 = "transfer.lshr"(%4, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %6 = call @shifting_amount_less_bitwidth(%4, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %7 = arith.andi %true, %3 : i1
+    %8 = arith.andi %7, %6 : i1
+    return %8 : i1
   }
   func.func @shifting_amount_less_bitwidth(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer

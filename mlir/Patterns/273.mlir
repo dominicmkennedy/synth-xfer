@@ -5,12 +5,16 @@ module {
     return %1 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
-    %0 = call @shl_nuw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %1 = call @shl_nsw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %2 = call @shifting_amount_less_bitwidth(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %3 = arith.andi %0, %1 : i1
-    %4 = arith.andi %3, %2 : i1
-    return %4 : i1
+    %true = arith.constant true
+    %0 = "transfer.shl"(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %1 = call @shl_nuw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %2 = call @shl_nsw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %3 = call @shifting_amount_less_bitwidth(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %4 = "transfer.xor"(%arg0, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %5 = arith.andi %true, %1 : i1
+    %6 = arith.andi %5, %2 : i1
+    %7 = arith.andi %6, %3 : i1
+    return %7 : i1
   }
   func.func @shl_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
