@@ -7,18 +7,13 @@ module {
     return %3 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
-    %true = arith.constant true
-    %0 = "transfer.mul"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = call @mul_nuw(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> i1
-    %2 = "transfer.mul"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %3 = call @mul_nuw(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> i1
-    %4 = "transfer.lshr"(%2, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %5 = call @shifting_amount_less_bitwidth(%2, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %6 = "transfer.xor"(%0, %4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %7 = arith.andi %true, %1 : i1
-    %8 = arith.andi %7, %3 : i1
-    %9 = arith.andi %8, %5 : i1
-    return %9 : i1
+    %0 = call @mul_nuw(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> i1
+    %1 = "transfer.mul"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %2 = call @mul_nuw(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> i1
+    %3 = call @shifting_amount_less_bitwidth(%1, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %4 = arith.andi %0, %2 : i1
+    %5 = arith.andi %4, %3 : i1
+    return %5 : i1
   }
   func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.umul_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1

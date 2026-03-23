@@ -6,17 +6,14 @@ module {
     return %2 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer) -> i1 {
-    %true = arith.constant true
     %0 = "transfer.and"(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.add"(%arg1, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %2 = call @add_nuw(%arg1, %0) : (!transfer.integer, !transfer.integer) -> i1
     %3 = call @add_nsw(%arg1, %0) : (!transfer.integer, !transfer.integer) -> i1
-    %4 = "transfer.lshr"(%1, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %5 = call @shifting_amount_less_bitwidth(%1, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %6 = arith.andi %true, %2 : i1
-    %7 = arith.andi %6, %3 : i1
-    %8 = arith.andi %7, %5 : i1
-    return %8 : i1
+    %4 = call @shifting_amount_less_bitwidth(%1, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %5 = arith.andi %2, %3 : i1
+    %6 = arith.andi %5, %4 : i1
+    return %6 : i1
   }
   func.func @add_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
