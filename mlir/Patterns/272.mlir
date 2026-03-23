@@ -7,13 +7,16 @@ module {
     return %3 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer) -> i1 {
+    %true = arith.constant true
     %0 = "transfer.add"(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.add"(%arg2, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1_constraint_0 = func.call @add_nuw(%arg2, %0) : (!transfer.integer, !transfer.integer) -> i1
-    %2 = "transfer.and"(%arg1, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %3_constraint_0 = func.call @add_nuw(%arg0, %2) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %1_constraint_0, %3_constraint_0 : i1
-    return %and_0 : i1
+    %2 = call @add_nuw(%arg2, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %3 = "transfer.and"(%arg1, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %4 = "transfer.add"(%arg0, %3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %5 = call @add_nuw(%arg0, %3) : (!transfer.integer, !transfer.integer) -> i1
+    %6 = arith.andi %true, %2 : i1
+    %7 = arith.andi %6, %5 : i1
+    return %7 : i1
   }
   func.func @add_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer

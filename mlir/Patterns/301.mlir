@@ -8,16 +8,19 @@ module {
     return %4 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer, %arg5: !transfer.integer) -> i1 {
+    %true = arith.constant true
     %0 = "transfer.mul"(%arg4, %arg5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %0_constraint_0 = func.call @mul_nuw(%arg4, %arg5) : (!transfer.integer, !transfer.integer) -> i1
-    %1 = "transfer.add"(%arg3, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1_constraint_0 = func.call @add_nuw(%arg3, %0) : (!transfer.integer, !transfer.integer) -> i1
-    %2 = "transfer.and"(%arg2, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %3 = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %4_constraint_0 = func.call @add_nuw(%2, %3) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %0_constraint_0, %1_constraint_0 : i1
-    %and_1 = arith.andi %and_0, %4_constraint_0 : i1
-    return %and_1 : i1
+    %1 = call @mul_nuw(%arg4, %arg5) : (!transfer.integer, !transfer.integer) -> i1
+    %2 = "transfer.add"(%arg3, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %3 = call @add_nuw(%arg3, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %4 = "transfer.and"(%arg2, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %5 = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %6 = "transfer.add"(%4, %5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %7 = call @add_nuw(%4, %5) : (!transfer.integer, !transfer.integer) -> i1
+    %8 = arith.andi %true, %1 : i1
+    %9 = arith.andi %8, %3 : i1
+    %10 = arith.andi %9, %7 : i1
+    return %10 : i1
   }
   func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.umul_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1

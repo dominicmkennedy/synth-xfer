@@ -6,14 +6,17 @@ module {
     return %2 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
+    %true = arith.constant true
     %0 = "transfer.shl"(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %0_constraint_0 = func.call @shifting_amount_less_bitwidth(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %1 = "transfer.add"(%arg0, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %2_constraint_0 = func.call @ashr_exact(%1, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %2_constraint_1 = func.call @shifting_amount_less_bitwidth(%1, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %0_constraint_0, %2_constraint_0 : i1
-    %and_1 = arith.andi %and_0, %2_constraint_1 : i1
-    return %and_1 : i1
+    %1 = call @shifting_amount_less_bitwidth(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %2 = "transfer.add"(%arg0, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %3 = "transfer.ashr"(%2, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %4 = call @ashr_exact(%2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %5 = call @shifting_amount_less_bitwidth(%2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %6 = arith.andi %true, %1 : i1
+    %7 = arith.andi %6, %4 : i1
+    %8 = arith.andi %7, %5 : i1
+    return %8 : i1
   }
   func.func @shifting_amount_less_bitwidth(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer

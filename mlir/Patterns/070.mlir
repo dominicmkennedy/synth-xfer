@@ -5,13 +5,16 @@ module {
     return %1 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
+    %true = arith.constant true
     %0 = "transfer.sub"(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %0_constraint_0 = func.call @sub_nuw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %1_constraint_0 = func.call @lshr_exact(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %1_constraint_1 = func.call @shifting_amount_less_bitwidth(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %0_constraint_0, %1_constraint_0 : i1
-    %and_1 = arith.andi %and_0, %1_constraint_1 : i1
-    return %and_1 : i1
+    %1 = call @sub_nuw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %2 = "transfer.lshr"(%0, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %3 = call @lshr_exact(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %4 = call @shifting_amount_less_bitwidth(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %5 = arith.andi %true, %1 : i1
+    %6 = arith.andi %5, %3 : i1
+    %7 = arith.andi %6, %4 : i1
+    return %7 : i1
   }
   func.func @sub_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.cmp"(%arg0, %arg1) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
