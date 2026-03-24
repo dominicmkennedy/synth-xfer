@@ -7,16 +7,13 @@ module {
     return %3 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer) -> i1 {
-    %true = arith.constant true
     %0 = "transfer.add"(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.mul"(%arg2, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %2 = call @mul_nuw(%arg2, %0) : (!transfer.integer, !transfer.integer) -> i1
-    %3 = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %4 = "transfer.add"(%1, %3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %5 = call @add_nuw(%1, %3) : (!transfer.integer, !transfer.integer) -> i1
-    %6 = arith.andi %true, %2 : i1
-    %7 = arith.andi %6, %5 : i1
-    return %7 : i1
+    %ssa_1_con_0_z = func.call @mul_nuw(%arg2, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %2 = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %ssa_3_con_0_z = func.call @add_nuw(%1, %2) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_1_con_0_z, %ssa_3_con_0_z : i1
+    return %and_0 : i1
   }
   func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.umul_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
@@ -25,10 +22,9 @@ module {
     return %1 : i1
   }
   func.func @add_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %0 = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = "transfer.cmp"(%0, %arg0) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %2 = "transfer.cmp"(%0, %arg1) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %3 = arith.andi %1, %2 : i1
-    return %3 : i1
+    %uadd_ov = "transfer.uadd_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %true = arith.constant true
+    %no_ov = arith.xori %uadd_ov, %true : i1
+    return %no_ov : i1
   }
 }
