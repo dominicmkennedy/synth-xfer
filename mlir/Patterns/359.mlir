@@ -11,13 +11,13 @@ module {
     %0 = "transfer.shl"(%arg5, %arg4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %constraint_0_0 = func.call @shl_nuw(%arg5, %arg4) : (!transfer.integer, !transfer.integer) -> i1
     %constraint_0_1 = func.call @shl_nsw(%arg5, %arg4) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_0_2 = func.call @shifting_amount_less_bitwidth(%arg5, %arg4) : (!transfer.integer, !transfer.integer) -> i1
+    %constraint_0_2 = func.call @shift_lt_bw(%arg5, %arg4) : (!transfer.integer, !transfer.integer) -> i1
     %1 = "transfer.or"(%arg3, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %constraint_1_0 = func.call @or_disjoint(%arg3, %0) : (!transfer.integer, !transfer.integer) -> i1
     %2 = "transfer.shl"(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %constraint_2_0 = func.call @shl_nuw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
     %constraint_2_1 = func.call @shl_nsw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_2_2 = func.call @shifting_amount_less_bitwidth(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %constraint_2_2 = func.call @shift_lt_bw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
     %3 = "transfer.or"(%1, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %constraint_3_0 = func.call @or_disjoint(%1, %2) : (!transfer.integer, !transfer.integer) -> i1
     %constraint_4_0 = func.call @or_disjoint(%arg0, %3) : (!transfer.integer, !transfer.integer) -> i1
@@ -57,7 +57,7 @@ module {
     %11 = arith.andi %4, %10 : i1
     return %11 : i1
   }
-  func.func @shifting_amount_less_bitwidth(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+  func.func @shift_lt_bw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
     %1 = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer
     %2 = "transfer.cmp"(%arg1, %0) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1

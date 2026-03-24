@@ -6,10 +6,10 @@ module {
     return %2 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer) -> i1 {
-    %constraint_0_0 = func.call @shifting_amount_less_bitwidth(%arg3, %arg2) : (!transfer.integer, !transfer.integer) -> i1
+    %constraint_0_0 = func.call @shift_lt_bw(%arg3, %arg2) : (!transfer.integer, !transfer.integer) -> i1
     return %constraint_0_0 : i1
   }
-  func.func @shifting_amount_less_bitwidth(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+  func.func @shift_lt_bw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
     %1 = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer
     %2 = "transfer.cmp"(%arg1, %0) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
