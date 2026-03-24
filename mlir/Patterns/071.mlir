@@ -5,16 +5,12 @@ module {
     return %1 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
-    %true = arith.constant true
-    %0 = "transfer.shl"(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = call @shl_nuw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %2 = call @shl_nsw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %3 = call @shifting_amount_less_bitwidth(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %4 = "transfer.and"(%arg0, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %5 = arith.andi %true, %1 : i1
-    %6 = arith.andi %5, %2 : i1
-    %7 = arith.andi %6, %3 : i1
-    return %7 : i1
+    %constraint_0_0 = func.call @shl_nuw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %constraint_0_1 = func.call @shl_nsw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %constraint_0_2 = func.call @shifting_amount_less_bitwidth(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %constraint_0_0, %constraint_0_1 : i1
+    %and_1 = arith.andi %and_0, %constraint_0_2 : i1
+    return %and_1 : i1
   }
   func.func @shl_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer

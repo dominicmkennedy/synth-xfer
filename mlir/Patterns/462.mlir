@@ -7,24 +7,21 @@ module {
     return %3 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer) -> i1 {
-    %true = arith.constant true
     %0 = "transfer.or"(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = call @or_disjoint(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> i1
-    %2 = "transfer.shl"(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %3 = call @shl_nuw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %4 = call @shl_nsw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %5 = call @shifting_amount_less_bitwidth(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %6 = "transfer.or"(%0, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %7 = call @or_disjoint(%0, %2) : (!transfer.integer, !transfer.integer) -> i1
-    %8 = "transfer.or"(%arg0, %6) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %9 = call @or_disjoint(%arg0, %6) : (!transfer.integer, !transfer.integer) -> i1
-    %10 = arith.andi %true, %1 : i1
-    %11 = arith.andi %10, %3 : i1
-    %12 = arith.andi %11, %4 : i1
-    %13 = arith.andi %12, %5 : i1
-    %14 = arith.andi %13, %7 : i1
-    %15 = arith.andi %14, %9 : i1
-    return %15 : i1
+    %constraint_0_0 = func.call @or_disjoint(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> i1
+    %1 = "transfer.shl"(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %constraint_1_0 = func.call @shl_nuw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %constraint_1_1 = func.call @shl_nsw(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %constraint_1_2 = func.call @shifting_amount_less_bitwidth(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %2 = "transfer.or"(%0, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %constraint_2_0 = func.call @or_disjoint(%0, %1) : (!transfer.integer, !transfer.integer) -> i1
+    %constraint_3_0 = func.call @or_disjoint(%arg0, %2) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %constraint_0_0, %constraint_1_0 : i1
+    %and_1 = arith.andi %and_0, %constraint_1_1 : i1
+    %and_2 = arith.andi %and_1, %constraint_1_2 : i1
+    %and_3 = arith.andi %and_2, %constraint_2_0 : i1
+    %and_4 = arith.andi %and_3, %constraint_3_0 : i1
+    return %and_4 : i1
   }
   func.func @or_disjoint(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer

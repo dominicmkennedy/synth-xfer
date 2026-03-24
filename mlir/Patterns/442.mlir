@@ -7,20 +7,17 @@ module {
     return %3 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer) -> i1 {
-    %true = arith.constant true
     %0 = "transfer.mul"(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = call @mul_nsw(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> i1
-    %2 = "transfer.ashr"(%0, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %3 = call @shifting_amount_less_bitwidth(%0, %arg2) : (!transfer.integer, !transfer.integer) -> i1
-    %4 = "transfer.add"(%arg1, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %5 = call @add_nsw(%arg1, %2) : (!transfer.integer, !transfer.integer) -> i1
-    %6 = "transfer.sub"(%arg0, %4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %7 = call @sub_nsw(%arg0, %4) : (!transfer.integer, !transfer.integer) -> i1
-    %8 = arith.andi %true, %1 : i1
-    %9 = arith.andi %8, %3 : i1
-    %10 = arith.andi %9, %5 : i1
-    %11 = arith.andi %10, %7 : i1
-    return %11 : i1
+    %constraint_0_0 = func.call @mul_nsw(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> i1
+    %1 = "transfer.ashr"(%0, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %constraint_1_0 = func.call @shifting_amount_less_bitwidth(%0, %arg2) : (!transfer.integer, !transfer.integer) -> i1
+    %2 = "transfer.add"(%arg1, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %constraint_2_0 = func.call @add_nsw(%arg1, %1) : (!transfer.integer, !transfer.integer) -> i1
+    %constraint_3_0 = func.call @sub_nsw(%arg0, %2) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %constraint_0_0, %constraint_1_0 : i1
+    %and_1 = arith.andi %and_0, %constraint_2_0 : i1
+    %and_2 = arith.andi %and_1, %constraint_3_0 : i1
+    return %and_2 : i1
   }
   func.func @mul_nsw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.smul_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
