@@ -8,8 +8,8 @@ module {
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer) -> i1 {
     %0 = "transfer.or"(%arg2, %arg4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_1_0 = func.call @shift_lt_bw(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    return %constraint_1_0 : i1
+    %ssa_1_con_0_z = func.call @shift_lt_bw(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    return %ssa_1_con_0_z : i1
   }
   func.func @shift_lt_bw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %bitwidth = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer

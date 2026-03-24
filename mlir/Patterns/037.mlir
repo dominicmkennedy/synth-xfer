@@ -6,11 +6,11 @@ module {
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
     %0 = "transfer.ashr"(%arg2, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_0_0 = func.call @ashr_exact(%arg2, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_0_1 = func.call @shift_lt_bw(%arg2, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_1_0 = func.call @add_nsw(%arg1, %0) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %constraint_0_0, %constraint_0_1 : i1
-    %and_1 = arith.andi %and_0, %constraint_1_0 : i1
+    %ssa_0_con_0_z = func.call @ashr_exact(%arg2, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_0_con_1_z = func.call @shift_lt_bw(%arg2, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_1_con_0_z = func.call @add_nsw(%arg1, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_0_con_0_z, %ssa_0_con_1_z : i1
+    %and_1 = arith.andi %and_0, %ssa_1_con_0_z : i1
     return %and_1 : i1
   }
   func.func @ashr_exact(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {

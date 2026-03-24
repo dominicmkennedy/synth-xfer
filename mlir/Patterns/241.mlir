@@ -8,21 +8,21 @@ module {
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer) -> i1 {
     %0 = "transfer.mul"(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_0_0 = func.call @mul_nuw(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_0_1 = func.call @mul_nsw(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_0_con_0_z = func.call @mul_nuw(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_0_con_1_z = func.call @mul_nsw(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> i1
     %1 = "transfer.add"(%arg2, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_1_0 = func.call @add_nuw(%arg2, %0) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_1_1 = func.call @add_nsw(%arg2, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_1_con_0_z = func.call @add_nuw(%arg2, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_1_con_1_z = func.call @add_nsw(%arg2, %0) : (!transfer.integer, !transfer.integer) -> i1
     %2 = "transfer.lshr"(%1, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_2_0 = func.call @shift_lt_bw(%1, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_3_0 = func.call @add_nuw(%arg0, %2) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_3_1 = func.call @add_nsw(%arg0, %2) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %constraint_0_0, %constraint_0_1 : i1
-    %and_1 = arith.andi %and_0, %constraint_1_0 : i1
-    %and_2 = arith.andi %and_1, %constraint_1_1 : i1
-    %and_3 = arith.andi %and_2, %constraint_2_0 : i1
-    %and_4 = arith.andi %and_3, %constraint_3_0 : i1
-    %and_5 = arith.andi %and_4, %constraint_3_1 : i1
+    %ssa_2_con_0_z = func.call @shift_lt_bw(%1, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_3_con_0_z = func.call @add_nuw(%arg0, %2) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_3_con_1_z = func.call @add_nsw(%arg0, %2) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_0_con_0_z, %ssa_0_con_1_z : i1
+    %and_1 = arith.andi %and_0, %ssa_1_con_0_z : i1
+    %and_2 = arith.andi %and_1, %ssa_1_con_1_z : i1
+    %and_3 = arith.andi %and_2, %ssa_2_con_0_z : i1
+    %and_4 = arith.andi %and_3, %ssa_3_con_0_z : i1
+    %and_5 = arith.andi %and_4, %ssa_3_con_1_z : i1
     return %and_5 : i1
   }
   func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {

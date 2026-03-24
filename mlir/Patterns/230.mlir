@@ -11,8 +11,8 @@ module {
     %0 = "transfer.or"(%arg4, %arg5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.or"(%arg3, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %2 = "transfer.or"(%arg2, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_3_0 = func.call @shift_lt_bw(%2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    return %constraint_3_0 : i1
+    %ssa_3_con_0_z = func.call @shift_lt_bw(%2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    return %ssa_3_con_0_z : i1
   }
   func.func @shift_lt_bw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %bitwidth = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer

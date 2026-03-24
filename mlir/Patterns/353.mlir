@@ -8,10 +8,10 @@ module {
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer) -> i1 {
     %0 = "transfer.mul"(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_0_0 = func.call @mul_nuw(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_0_con_0_z = func.call @mul_nuw(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> i1
     %1 = "transfer.add"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_2_0 = func.call @add_nuw(%0, %1) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %constraint_0_0, %constraint_2_0 : i1
+    %ssa_2_con_0_z = func.call @add_nuw(%0, %1) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_0_con_0_z, %ssa_2_con_0_z : i1
     return %and_0 : i1
   }
   func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {

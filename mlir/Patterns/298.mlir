@@ -11,10 +11,10 @@ module {
     %0 = "transfer.or"(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.or"(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %2 = "transfer.lshr"(%1, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_2_0 = func.call @shift_lt_bw(%1, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_2_con_0_z = func.call @shift_lt_bw(%1, %arg1) : (!transfer.integer, !transfer.integer) -> i1
     %3 = "transfer.or"(%0, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_4_0 = func.call @shift_lt_bw(%3, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %constraint_2_0, %constraint_4_0 : i1
+    %ssa_4_con_0_z = func.call @shift_lt_bw(%3, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_2_con_0_z, %ssa_4_con_0_z : i1
     return %and_0 : i1
   }
   func.func @shift_lt_bw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {

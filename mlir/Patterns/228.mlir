@@ -6,8 +6,8 @@ module {
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
     %0 = "transfer.add"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_1_0 = func.call @mul_nuw(%arg0, %0) : (!transfer.integer, !transfer.integer) -> i1
-    return %constraint_1_0 : i1
+    %ssa_1_con_0_z = func.call @mul_nuw(%arg0, %0) : (!transfer.integer, !transfer.integer) -> i1
+    return %ssa_1_con_0_z : i1
   }
   func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.umul_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1

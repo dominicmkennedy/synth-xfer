@@ -5,8 +5,8 @@ module {
     return %1 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %constraint_0_0 = func.call @rhs_neq_zero(%arg1, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    return %constraint_0_0 : i1
+    %ssa_0_con_0_z = func.call @rhs_neq_zero(%arg1, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    return %ssa_0_con_0_z : i1
   }
   func.func @rhs_neq_zero(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %const_0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer

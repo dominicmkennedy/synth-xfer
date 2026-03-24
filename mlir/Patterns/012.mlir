@@ -6,11 +6,11 @@ module {
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
     %0 = "transfer.sub"(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_1_0 = func.call @sdiv_exact(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_1_1 = func.call @rhs_neq_zero(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_1_2 = func.call @no_sdiv_ov(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %constraint_1_0, %constraint_1_1 : i1
-    %and_1 = arith.andi %and_0, %constraint_1_2 : i1
+    %ssa_1_con_0_z = func.call @sdiv_exact(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_1_con_1_z = func.call @rhs_neq_zero(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_1_con_2_z = func.call @no_sdiv_ov(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_1_con_0_z, %ssa_1_con_1_z : i1
+    %and_1 = arith.andi %and_0, %ssa_1_con_2_z : i1
     return %and_1 : i1
   }
   func.func @sdiv_exact(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {

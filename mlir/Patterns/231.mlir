@@ -8,8 +8,8 @@ module {
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer) -> i1 {
     %0 = "transfer.and"(%arg1, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.and"(%arg0, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_2_0 = func.call @or_disjoint(%0, %1) : (!transfer.integer, !transfer.integer) -> i1
-    return %constraint_2_0 : i1
+    %ssa_2_con_0_z = func.call @or_disjoint(%0, %1) : (!transfer.integer, !transfer.integer) -> i1
+    return %ssa_2_con_0_z : i1
   }
   func.func @or_disjoint(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer

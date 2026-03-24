@@ -8,23 +8,23 @@ module {
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer) -> i1 {
     %0 = "transfer.shl"(%arg4, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_0_0 = func.call @shl_nuw(%arg4, %arg3) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_0_1 = func.call @shl_nsw(%arg4, %arg3) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_0_2 = func.call @shift_lt_bw(%arg4, %arg3) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_0_con_0_z = func.call @shl_nuw(%arg4, %arg3) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_0_con_1_z = func.call @shl_nsw(%arg4, %arg3) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_0_con_2_z = func.call @shift_lt_bw(%arg4, %arg3) : (!transfer.integer, !transfer.integer) -> i1
     %1 = "transfer.or"(%arg2, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_1_0 = func.call @or_disjoint(%arg2, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_1_con_0_z = func.call @or_disjoint(%arg2, %0) : (!transfer.integer, !transfer.integer) -> i1
     %2 = "transfer.shl"(%arg1, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_2_0 = func.call @shl_nuw(%arg1, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_2_1 = func.call @shl_nsw(%arg1, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_2_2 = func.call @shift_lt_bw(%arg1, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_3_0 = func.call @or_disjoint(%1, %2) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %constraint_0_0, %constraint_0_1 : i1
-    %and_1 = arith.andi %and_0, %constraint_0_2 : i1
-    %and_2 = arith.andi %and_1, %constraint_1_0 : i1
-    %and_3 = arith.andi %and_2, %constraint_2_0 : i1
-    %and_4 = arith.andi %and_3, %constraint_2_1 : i1
-    %and_5 = arith.andi %and_4, %constraint_2_2 : i1
-    %and_6 = arith.andi %and_5, %constraint_3_0 : i1
+    %ssa_2_con_0_z = func.call @shl_nuw(%arg1, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_2_con_1_z = func.call @shl_nsw(%arg1, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_2_con_2_z = func.call @shift_lt_bw(%arg1, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_3_con_0_z = func.call @or_disjoint(%1, %2) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_0_con_0_z, %ssa_0_con_1_z : i1
+    %and_1 = arith.andi %and_0, %ssa_0_con_2_z : i1
+    %and_2 = arith.andi %and_1, %ssa_1_con_0_z : i1
+    %and_3 = arith.andi %and_2, %ssa_2_con_0_z : i1
+    %and_4 = arith.andi %and_3, %ssa_2_con_1_z : i1
+    %and_5 = arith.andi %and_4, %ssa_2_con_2_z : i1
+    %and_6 = arith.andi %and_5, %ssa_3_con_0_z : i1
     return %and_6 : i1
   }
   func.func @shl_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {

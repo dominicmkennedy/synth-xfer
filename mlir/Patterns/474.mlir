@@ -9,14 +9,14 @@ module {
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer) -> i1 {
     %0 = "transfer.lshr"(%arg4, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_0_0 = func.call @shift_lt_bw(%arg4, %arg2) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_0_con_0_z = func.call @shift_lt_bw(%arg4, %arg2) : (!transfer.integer, !transfer.integer) -> i1
     %1 = "transfer.or"(%arg4, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %2 = "transfer.lshr"(%1, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_2_0 = func.call @shift_lt_bw(%1, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_2_con_0_z = func.call @shift_lt_bw(%1, %arg1) : (!transfer.integer, !transfer.integer) -> i1
     %3 = "transfer.or"(%arg0, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_4_0 = func.call @shift_lt_bw(%3, %arg3) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %constraint_0_0, %constraint_2_0 : i1
-    %and_1 = arith.andi %and_0, %constraint_4_0 : i1
+    %ssa_4_con_0_z = func.call @shift_lt_bw(%3, %arg3) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_0_con_0_z, %ssa_2_con_0_z : i1
+    %and_1 = arith.andi %and_0, %ssa_4_con_0_z : i1
     return %and_1 : i1
   }
   func.func @shift_lt_bw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {

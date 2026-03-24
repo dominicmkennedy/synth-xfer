@@ -10,8 +10,8 @@ module {
     %0 = "transfer.xor"(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.xor"(%arg2, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %2 = "transfer.xor"(%arg1, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_3_0 = func.call @shift_lt_bw(%2, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    return %constraint_3_0 : i1
+    %ssa_3_con_0_z = func.call @shift_lt_bw(%2, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    return %ssa_3_con_0_z : i1
   }
   func.func @shift_lt_bw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %bitwidth = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer

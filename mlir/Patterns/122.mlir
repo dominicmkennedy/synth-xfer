@@ -6,9 +6,9 @@ module {
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
     %0 = "transfer.xor"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_1_0 = func.call @mul_nuw(%arg0, %0) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_1_1 = func.call @mul_nsw(%arg0, %0) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %constraint_1_0, %constraint_1_1 : i1
+    %ssa_1_con_0_z = func.call @mul_nuw(%arg0, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_1_con_1_z = func.call @mul_nsw(%arg0, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_1_con_0_z, %ssa_1_con_1_z : i1
     return %and_0 : i1
   }
   func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {

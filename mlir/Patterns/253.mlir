@@ -11,10 +11,10 @@ module {
     %0 = "transfer.sub"(%arg3, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.add"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %2 = "transfer.add"(%arg0, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_2_0 = func.call @add_nuw(%arg0, %1) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_2_con_0_z = func.call @add_nuw(%arg0, %1) : (!transfer.integer, !transfer.integer) -> i1
     %3 = "transfer.and"(%0, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_4_0 = func.call @sub_nsw(%arg3, %3) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %constraint_2_0, %constraint_4_0 : i1
+    %ssa_4_con_0_z = func.call @sub_nsw(%arg3, %3) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_2_con_0_z, %ssa_4_con_0_z : i1
     return %and_0 : i1
   }
   func.func @add_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {

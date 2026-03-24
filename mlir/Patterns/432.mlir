@@ -10,10 +10,10 @@ module {
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer, %arg5: !transfer.integer) -> i1 {
     %0 = "transfer.add"(%arg4, %arg5) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.mul"(%arg3, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_1_0 = func.call @mul_nuw(%arg3, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_1_con_0_z = func.call @mul_nuw(%arg3, %0) : (!transfer.integer, !transfer.integer) -> i1
     %2 = "transfer.add"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_3_0 = func.call @add_nuw(%1, %2) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %constraint_1_0, %constraint_3_0 : i1
+    %ssa_3_con_0_z = func.call @add_nuw(%1, %2) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_1_con_0_z, %ssa_3_con_0_z : i1
     return %and_0 : i1
   }
   func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {

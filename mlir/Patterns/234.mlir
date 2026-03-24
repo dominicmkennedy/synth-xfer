@@ -8,13 +8,13 @@ module {
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer, %arg4: !transfer.integer) -> i1 {
     %0 = "transfer.mul"(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_0_0 = func.call @mul_nuw(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_0_con_0_z = func.call @mul_nuw(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> i1
     %1 = "transfer.add"(%arg2, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_1_0 = func.call @add_nuw(%arg2, %0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_1_con_0_z = func.call @add_nuw(%arg2, %0) : (!transfer.integer, !transfer.integer) -> i1
     %2 = "transfer.and"(%arg1, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_3_0 = func.call @add_nuw(%arg0, %2) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %constraint_0_0, %constraint_1_0 : i1
-    %and_1 = arith.andi %and_0, %constraint_3_0 : i1
+    %ssa_3_con_0_z = func.call @add_nuw(%arg0, %2) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_0_con_0_z, %ssa_1_con_0_z : i1
+    %and_1 = arith.andi %and_0, %ssa_3_con_0_z : i1
     return %and_1 : i1
   }
   func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {

@@ -10,9 +10,9 @@ module {
     %0 = "transfer.and"(%arg3, %arg4) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.and"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %2 = "transfer.or"(%arg0, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_2_0 = func.call @or_disjoint(%arg0, %1) : (!transfer.integer, !transfer.integer) -> i1
-    %constraint_3_0 = func.call @or_disjoint(%0, %2) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %constraint_2_0, %constraint_3_0 : i1
+    %ssa_2_con_0_z = func.call @or_disjoint(%arg0, %1) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_3_con_0_z = func.call @or_disjoint(%0, %2) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_2_con_0_z, %ssa_3_con_0_z : i1
     return %and_0 : i1
   }
   func.func @or_disjoint(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
