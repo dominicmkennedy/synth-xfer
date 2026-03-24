@@ -14,24 +14,20 @@ module {
     return %and_1 : i1
   }
   func.func @sub_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %0 = "transfer.cmp"(%arg0, %arg1) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    return %0 : i1
+    %usub_ov = "transfer.usub_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %true = arith.constant true
+    %no_ov = arith.xori %usub_ov, %true : i1
+    return %no_ov : i1
   }
   func.func @udiv_exact(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
-    %1 = "transfer.constant"(%arg1) {value = 1 : index} : (!transfer.integer) -> !transfer.integer
-    %2 = "transfer.cmp"(%0, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %3 = "transfer.select"(%2, %arg1, %1) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
-    %4 = "transfer.urem"(%arg0, %3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %5 = "transfer.cmp"(%4, %0) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %6 = arith.andi %5, %2 : i1
-    return %6 : i1
+    %const_0 = "transfer.constant"(%arg1) {value = 0 : i64} : (!transfer.integer) -> !transfer.integer
+    %urem = "transfer.urem"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %exact = "transfer.cmp"(%urem, %const_0) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    return %exact : i1
   }
   func.func @rhs_neq_zero(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
-    %1 = "transfer.cmp"(%0, %arg1) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %true = arith.constant true
-    %2 = arith.xori %1, %true : i1
-    return %2 : i1
+    %const_0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
+    %rhs_not = "transfer.cmp"(%const_0, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    return %rhs_not : i1
   }
 }

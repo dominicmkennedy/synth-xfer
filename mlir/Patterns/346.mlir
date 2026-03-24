@@ -12,16 +12,15 @@ module {
     return %and_0 : i1
   }
   func.func @sub_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %0 = "transfer.cmp"(%arg0, %arg1) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    return %0 : i1
+    %usub_ov = "transfer.usub_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %true = arith.constant true
+    %no_ov = arith.xori %usub_ov, %true : i1
+    return %no_ov : i1
   }
   func.func @sub_nsw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %0 = "transfer.sub"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = "transfer.xor"(%arg0, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %2 = "transfer.xor"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %3 = "transfer.and"(%1, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %4 = "transfer.constant"(%arg0) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
-    %5 = "transfer.cmp"(%3, %4) {predicate = 5 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    return %5 : i1
+    %ssub_ov = "transfer.ssub_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %true = arith.constant true
+    %no_ov = arith.xori %ssub_ov, %true : i1
+    return %no_ov : i1
   }
 }

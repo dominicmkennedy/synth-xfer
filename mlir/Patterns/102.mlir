@@ -8,7 +8,7 @@ module {
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer) -> i1 {
     %0 = "transfer.sub"(%arg3, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.sdiv"(%0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %constraint_1_0 = func.call @sidv_exact(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %constraint_1_0 = func.call @sdiv_exact(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
     %constraint_1_1 = func.call @rhs_neq_zero(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
     %constraint_1_2 = func.call @no_sdiv_ov(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
     %constraint_2_0 = func.call @add_nsw(%arg0, %1) : (!transfer.integer, !transfer.integer) -> i1
@@ -17,42 +17,30 @@ module {
     %and_2 = arith.andi %and_1, %constraint_1_2 : i1
     return %and_2 : i1
   }
-  func.func @sidv_exact(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
-    %1 = "transfer.cmp"(%0, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %2 = "transfer.cmp"(%0, %arg0) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %3 = "transfer.add"(%arg0, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %4 = "transfer.cmp"(%3, %0) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %5 = arith.ori %2, %4 : i1
-    %6 = "transfer.get_all_ones"(%arg0) : (!transfer.integer) -> !transfer.integer
-    %7 = "transfer.cmp"(%6, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %8 = arith.ori %5, %7 : i1
-    %9 = arith.andi %1, %8 : i1
-    %10 = "transfer.constant"(%arg1) {value = 1 : index} : (!transfer.integer) -> !transfer.integer
-    %11 = "transfer.select"(%1, %arg1, %10) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
-    %12 = "transfer.srem"(%arg0, %11) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %13 = "transfer.cmp"(%12, %0) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %14 = arith.andi %13, %9 : i1
-    return %14 : i1
+  func.func @sdiv_exact(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+    %const_0 = "transfer.constant"(%arg1) {value = 0 : i64} : (!transfer.integer) -> !transfer.integer
+    %srem = "transfer.srem"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %exact = "transfer.cmp"(%srem, %const_0) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    return %exact : i1
   }
   func.func @rhs_neq_zero(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
-    %1 = "transfer.cmp"(%0, %arg1) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %true = arith.constant true
-    %2 = arith.xori %1, %true : i1
-    return %2 : i1
+    %const_0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
+    %rhs_not = "transfer.cmp"(%const_0, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    return %rhs_not : i1
   }
   func.func @add_nsw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %0 = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = "transfer.xor"(%arg0, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %2 = "transfer.xor"(%arg1, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %3 = "transfer.and"(%1, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %4 = "transfer.constant"(%arg0) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
-    %5 = "transfer.cmp"(%3, %4) {predicate = 5 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    return %5 : i1
+    %sadd_ov = "transfer.sadd_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %true = arith.constant true
+    %no_ov = arith.xori %sadd_ov, %true : i1
+    return %no_ov : i1
   }
   func.func @no_sdiv_ov(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %true = arith.constant true
-    return %true : i1
+    %int_min = "transfer.get_signed_min_value"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %lhs_not_int_min = "transfer.cmp"(%int_min, %arg0) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %neg = "transfer.get_all_ones"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %rhs_not_neg = "transfer.cmp"(%neg, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %no_overflow = arith.ori %lhs_not_int_min, %rhs_not_neg : i1
+    %res = arith.andi %0, %no_overflow : i1
+    return %res : i1
   }
 }
