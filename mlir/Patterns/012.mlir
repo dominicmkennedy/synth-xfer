@@ -14,14 +14,14 @@ module {
     return %and_1 : i1
   }
   func.func @sdiv_exact(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %const_0 = "transfer.constant"(%arg1) {value = 0 : i64} : (!transfer.integer) -> !transfer.integer
+    %const = "transfer.constant"(%arg1) {value = 0 : i64} : (!transfer.integer) -> !transfer.integer
     %srem = "transfer.srem"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %exact = "transfer.cmp"(%srem, %const_0) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %exact = "transfer.cmp"(%srem, %const) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
     return %exact : i1
   }
   func.func @rhs_neq_zero(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %const_0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
-    %rhs_not = "transfer.cmp"(%const_0, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %const = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
+    %rhs_not = "transfer.cmp"(%const, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
     return %rhs_not : i1
   }
   func.func @no_sdiv_ov(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
