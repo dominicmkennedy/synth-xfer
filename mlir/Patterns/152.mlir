@@ -7,9 +7,11 @@ module {
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
     %0 = "transfer.sdiv"(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %constraint_0_0 = func.call @rhs_neq_zero(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %constraint_0_1 = func.call @no_sdiv_ov(%arg2, %arg1) : (!transfer.integer, !transfer.integer) -> i1
     %constraint_1_0 = func.call @add_nsw(%arg0, %0) : (!transfer.integer, !transfer.integer) -> i1
     %and_0 = arith.andi %constraint_0_0, %constraint_1_0 : i1
-    return %and_0 : i1
+    %and_1 = arith.andi %and_0, %constraint_0_1 : i1
+    return %and_1 : i1
   }
   func.func @rhs_neq_zero(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
@@ -26,5 +28,9 @@ module {
     %4 = "transfer.constant"(%arg0) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
     %5 = "transfer.cmp"(%3, %4) {predicate = 5 : i64} : (!transfer.integer, !transfer.integer) -> i1
     return %5 : i1
+  }
+  func.func @no_sdiv_ov(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+    %true = arith.constant true
+    return %true : i1
   }
 }
