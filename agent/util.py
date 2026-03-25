@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import re
 
+from pydantic import BaseModel
+
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.random import Sampler
 from synth_xfer.cli.eval_final import _parse_bw_args, run
@@ -33,6 +35,20 @@ class LibraryState:
     """Current learned library state passed to synthesis prompts."""
 
     functions_text: str
+
+
+class LibraryFunction(BaseModel):
+    """A single extracted helper function from the library learning agent."""
+
+    function_name: str
+    docstring: str
+    function_code: str
+
+
+class LibraryOutput(BaseModel):
+    """Structured output from the library learning agent."""
+
+    functions: list[LibraryFunction]
 
 
 def get_api_key() -> str:
@@ -134,6 +150,15 @@ def _extract_module_body(mlir: str) -> str:
     inner = mlir[start : i - 1]
     lines = [line[2:] if line.startswith("  ") else line for line in inner.splitlines()]
     return "\n".join(lines).strip()
+
+
+def library_output_to_mlir(output: "LibraryOutput") -> str:
+    """Reconstruct a builtin.module MLIR string from structured LibraryOutput."""
+    bodies = "\n\n".join(f.function_code.strip() for f in output.functions)
+    indented = "\n".join(
+        "  " + line if line.strip() else "" for line in bodies.splitlines()
+    )
+    return f"builtin.module {{\n{indented}\n}}"
 
 
 def merge_library_text(mod1: str, mod2: str) -> str:

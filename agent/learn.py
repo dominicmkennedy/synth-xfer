@@ -7,12 +7,13 @@ from agents import Agent, Runner, function_tool
 
 from .agent_helper import format_agent_run_dump
 from .util import (
+    LibraryOutput,
     LibraryState,
     SynthesisResult,
     SynthesisTask,
-    clean_llm_output,
     extract_op_name,
     get_api_key,
+    library_output_to_mlir,
     load_initial_library,
     merge_library_text,
     print_token_usage,
@@ -28,8 +29,8 @@ def _run_agent_learn(
     model: str,
     ops_path: Path,
     instructions_path: Path,
-) -> tuple[str, object]:
-    """Run agent to learn library functions. Returns (final_output, run_result)."""
+) -> tuple[LibraryOutput, object]:
+    """Run agent to learn library functions. Returns (LibraryOutput, run_result)."""
     del api_key  # Reserved for future model/provider auth parity.
 
     @function_tool
@@ -57,6 +58,7 @@ def _run_agent_learn(
             get_available_primitives,
             get_library_text,
         ],
+        output_type=LibraryOutput,
         model=model,
     )
 
@@ -103,7 +105,7 @@ def run_library_learn_task(
 
     lib_text = merge_library_text(
         previous_library.functions_text,
-        clean_llm_output(llm_output),
+        library_output_to_mlir(llm_output),
     )
     save_file(lib_text, output_dir, "library_current.mlir")
     library_file = save_file(lib_text, output_dir, f"library_v{version}.mlir")
