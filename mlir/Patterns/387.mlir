@@ -2,9 +2,8 @@ module {
   func.func @concrete_op(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> !transfer.integer {
     %0 = "transfer.or"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %1 = "transfer.lshr"(%0, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %2 = "transfer.or"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %3 = "transfer.or"(%1, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    return %3 : !transfer.integer
+    %2 = "transfer.or"(%1, %0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    return %2 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
     %0 = "transfer.or"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer

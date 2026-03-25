@@ -1,16 +1,14 @@
 module {
   func.func @concrete_op(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> !transfer.integer {
     %0 = "transfer.mul"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = "transfer.mul"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %2 = "transfer.lshr"(%1, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %3 = "transfer.xor"(%0, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    return %3 : !transfer.integer
+    %1 = "transfer.lshr"(%0, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %2 = "transfer.xor"(%0, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    return %2 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer) -> i1 {
-    %ssa_1_con_0_z = func.call @mul_nuw(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_0_con_0_z = func.call @mul_nuw(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> i1
     %0 = "transfer.mul"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %ssa_1_con_1_z = func.call @mul_nuw(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> i1
-    %ssa_0_con_0_z = func.call @shift_lt_bw(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_1_con_0_z = func.call @shift_lt_bw(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
     %and_0 = arith.andi %ssa_1_con_0_z, %ssa_1_con_1_z : i1
     %and_1 = arith.andi %and_0, %ssa_0_con_0_z : i1
     return %and_1 : i1
