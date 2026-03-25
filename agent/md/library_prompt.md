@@ -27,24 +27,23 @@ Do **not** extract the transfer functions themselves (e.g. `@kb_add`). Only extr
 
 ## Output format
 
-Output a single `builtin.module` containing only the new library functions you are adding. Do not include the transfer functions from the input. Use `func.func` with:
-- SSA form only
-- One allowed operation per line
-- Descriptive `snake_case` function names
-- A brief `//` comment on the first line of each function body explaining its purpose
-- Arguments typed as `!transfer.integer` or `!transfer.abs_value<[!transfer.integer, !transfer.integer]>` as appropriate
+Return a JSON object with a `functions` array. Each element has three fields:
+
+- `function_name` — `snake_case` name matching the `@name` in the MLIR (e.g., `"maybe_zero"`)
+- `docstring` — one sentence describing what the function computes semantically (e.g., `"Returns the mask of bits that might be 0: complement of known-one."`)
+- `function_code` — the complete `func.func` definition in valid MLIR, using SSA form, one allowed operation per line, with arguments typed as `!transfer.integer` or `!transfer.abs_value<[!transfer.integer, !transfer.integer]>` as appropriate
 
 Example output shape (illustrative, do not copy verbatim):
 
-```mlir
-builtin.module {
-  func.func @maybe_zero(%kb : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer {
-    // Returns the mask of bits that might be 0: complement of known-one.
-    %known1 = "transfer.get"(%kb) {index = 1} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
-    %all_ones = "transfer.get_all_ones"(%known1) : (!transfer.integer) -> !transfer.integer
-    %res = "transfer.xor"(%known1, %all_ones) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    func.return %res : !transfer.integer
-  }
+```json
+{
+  "functions": [
+    {
+      "function_name": "maybe_zero",
+      "docstring": "Returns the mask of bits that might be 0: complement of known-one.",
+      "function_code": "func.func @maybe_zero(%kb : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer {\n  %known1 = \"transfer.get\"(%kb) {index = 1} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer\n  %all_ones = \"transfer.get_all_ones\"(%known1) : (!transfer.integer) -> !transfer.integer\n  %res = \"transfer.xor\"(%known1, %all_ones) : (!transfer.integer, !transfer.integer) -> !transfer.integer\n  func.return %res : !transfer.integer\n}"
+    }
+  ]
 }
 ```
 
@@ -56,4 +55,4 @@ builtin.module {
 4. Look for sub-computations that appear in more than one function, or that are large enough to deserve a name on their own.
 5. For each candidate, decide on a precise semantic description and a clear name.
 6. Write the MLIR for each helper function. Verify it uses only allowed primitives and is in valid SSA form.
-7. Output **only** the `builtin.module` containing the new helper functions — no explanation, no transfer functions, no markdown fences around the final answer.
+7. Return the JSON object with the `functions` array — no surrounding explanation, no transfer functions, no markdown fences around the final answer.
