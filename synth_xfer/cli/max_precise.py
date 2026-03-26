@@ -44,7 +44,7 @@ def _get_args() -> Namespace:
         "--bitwidth", type=int, help="The bit width, default value is 8", default=8
     )
     p.add_argument(
-        "--timeout", type=int, help="The z3 timeout default value is 5", default=5
+        "--timeout", type=int, help="The z3 timeout default value is 5", default=300
     )
     return p.parse_args()
 
@@ -53,7 +53,7 @@ CONCRETE_FUNCTION_NAME = "concrete_op"
 GET_INSTANCE_CONSTRAINT = "getInstanceConstraint"
 OP_CONSTRAINT = "op_constraint"
 ABSTRACT_DOMAIN_LENGTH = 0
-TIMEOUT = 2
+TIMEOUT = 300
 
 
 def get_concrete_func(op: ModuleOp) -> DefineFunOp:
@@ -226,7 +226,8 @@ def check_sat(ctx: Context, module: ModuleOp) -> bool:
     s.set(timeout=TIMEOUT * 1000)
     s.add(parse_smt2_string(stream.getvalue()))
     r = s.check()
-    assert r != unknown
+    if r == unknown:
+        raise ValueError()
     return r == sat
 
 
@@ -240,7 +241,13 @@ def query_ith_bit(ctx: Context, module: ModuleOp, ith_bit: int, bit_val: int) ->
     eq_op = EqOp(ith_bit_op.res, const_bv_op.res)
     assert_op = AssertOp(eq_op.res)
     block.add_ops([first_op, ith_bit_op, const_bv_op, eq_op, assert_op])
-    return check_sat(ctx, module)
+    try:
+        ret = check_sat(ctx, module)
+    except ValueError:
+        print(f"timeout after {TIMEOUT}s, checking that bit {ith_bit} can be {bit_val}")
+        assert False
+
+    return ret
 
 
 def check_ith_knownbit(ctx: Context, verify_module: ModuleOp, ith: int) -> str | None:

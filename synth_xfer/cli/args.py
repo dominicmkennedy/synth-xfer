@@ -122,69 +122,6 @@ def get_sampler(args: Namespace) -> Sampler:
     return Sampler.uniform()
 
 
-ALL_OPS = [
-    "Abds",
-    "Abdu",
-    "Add",
-    "AddNsw",
-    "AddNswNuw",
-    "AddNuw",
-    "And",
-    "Ashr",
-    "AshrExact",
-    "AvgCeilS",
-    "AvgCeilU",
-    "AvgFloorS",
-    "AvgFloorU",
-    "CountLOne",
-    "CountLZero",
-    "CountROne",
-    "CountRZero",
-    "Fshl",
-    "Fshr",
-    "Lerp",
-    "Lshr",
-    "LshrExact",
-    "Mods",
-    "Modu",
-    "Mul",
-    "MulNsw",
-    "MulNswNuw",
-    "MulNuw",
-    "Nop",
-    "Or",
-    "PopCount",
-    "Rotl",
-    "Rotr",
-    "SaddSat",
-    "Sdiv",
-    "SdivExact",
-    "Shl",
-    "ShlNsw",
-    "ShlNswNuw",
-    "ShlNuw",
-    "Smax",
-    "Smin",
-    "SmulSat",
-    "Square",
-    "SshlSat",
-    "SsubSat",
-    "Sub",
-    "SubNsw",
-    "SubNswNuw",
-    "SubNuw",
-    "UaddSat",
-    "Udiv",
-    "UdivExact",
-    "Umax",
-    "Umin",
-    "UmulSat",
-    "UshlSat",
-    "UsubSat",
-    "Xor",
-]
-
-
 def build_parser(prog: str) -> Namespace:
     p = ArgumentParser(prog=prog, formatter_class=ArgumentDefaultsHelpFormatter)
 
@@ -208,25 +145,10 @@ def build_parser(prog: str) -> Namespace:
 
     if prog == "benchmark":
         p.add_argument(
-            "--kb-eval",
-            nargs="*",
-            choices=ALL_OPS,
-            default=[],
-            help=f"Zero or more items from: {', '.join(ALL_OPS)}",
-        )
-        p.add_argument(
-            "--ucr-eval",
-            nargs="*",
-            choices=ALL_OPS,
-            default=[],
-            help=f"Zero or more items from: {', '.join(ALL_OPS)}",
-        )
-        p.add_argument(
-            "--scr-eval",
-            nargs="*",
-            choices=ALL_OPS,
-            default=[],
-            help=f"Zero or more items from: {', '.join(ALL_OPS)}",
+            "--benchmarks",
+            type=Path,
+            required=True,
+            help="YAML config specifying benchmark inputs and per-arity bw settings",
         )
 
     output_dir = Path("outputs") if prog == "benchmark" else None
@@ -269,27 +191,28 @@ def build_parser(prog: str) -> Namespace:
         default=list(range(4, 65)),
         help="bws to verify at",
     )
-    p.add_argument(
-        "--lbw",
-        nargs="*",
-        type=int,
-        default=[4],
-        help="Low-bitwidths to evaluate exhaustively",
-    )
-    p.add_argument(
-        "--mbw",
-        nargs="*",
-        type=int_tuple,
-        default=[],
-        help="Mid-bitwidths to sample abstract values with, but enumerate the concretizations of each of them exhaustively",
-    )
-    p.add_argument(
-        "--hbw",
-        nargs="*",
-        type=int_triple,
-        default=[],
-        help="High-bitwidths to sample abstract values with, and sample the concretizations of each of them",
-    )
+    if prog != "benchmark":
+        p.add_argument(
+            "--lbw",
+            nargs="*",
+            type=int,
+            default=[4],
+            help="Low-bitwidths to evaluate exhaustively",
+        )
+        p.add_argument(
+            "--mbw",
+            nargs="*",
+            type=int_tuple,
+            default=[],
+            help="Mid-bitwidths to sample abstract values with, but enumerate the concretizations of each of them exhaustively",
+        )
+        p.add_argument(
+            "--hbw",
+            nargs="*",
+            type=int_triple,
+            default=[],
+            help="High-bitwidths to sample abstract values with, and sample the concretizations of each of them",
+        )
     p.add_argument(
         "--num-iters",
         type=int,
