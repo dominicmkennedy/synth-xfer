@@ -30,8 +30,7 @@ class SynthesisResult:
     eval_summary: str | None = None
 
 
-@dataclass
-class LibraryFunction:
+class LibraryFunction(BaseModel):
     """A single library function"""
 
     function_name: str
@@ -39,11 +38,21 @@ class LibraryFunction:
     source: str
 
 
-@dataclass
-class LibraryState:
+class LibraryState(BaseModel):
     """Current learned library state passed to synthesis prompts."""
 
     functions: list[LibraryFunction]
+
+    @property
+    def functions_text(self) -> str:
+        """Render all functions as a builtin.module MLIR string."""
+        if not self.functions:
+            return ""
+        body = "\n\n".join(f.source for f in self.functions)
+        indented = "\n".join(
+            "  " + line if line.strip() else "" for line in body.splitlines()
+        )
+        return f"builtin.module {{\n{indented}\n}}"
 
 
 def get_api_key() -> str:
@@ -172,6 +181,13 @@ def save_file(content: str, dir: Path, file_name: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     return path
+
+def dump_library(lib: LibraryState, out_dir: Path) -> Path:
+    """Save library funcs to library directory"""
+    for func in lib.functions:
+        save_file(func.source, out_dir, f"{func.function_name}.mlir")
+    
+    return out_dir
 
 
 def _extract_module_body(mlir: str) -> str:

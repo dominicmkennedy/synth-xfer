@@ -31,7 +31,7 @@ Return a JSON object with a `functions` array. Each element has three fields:
 
 - `function_name` — `snake_case` name matching the `@name` in the MLIR (e.g., `"maybe_zero"`)
 - `docstring` — one sentence describing what the function computes semantically (e.g., `"Returns the mask of bits that might be 0: complement of known-one."`)
-- `function_code` — the complete `func.func` definition in valid MLIR, using SSA form, one allowed operation per line, with arguments typed as `!transfer.integer` or `!transfer.abs_value<[!transfer.integer, !transfer.integer]>` as appropriate
+- `source` — the complete `func.func` definition in valid MLIR, using SSA form, one allowed operation per line, with arguments typed as `!transfer.integer` or `!transfer.abs_value<[!transfer.integer, !transfer.integer]>` as appropriate
 
 Example output shape (illustrative, do not copy verbatim):
 
@@ -41,7 +41,7 @@ Example output shape (illustrative, do not copy verbatim):
     {
       "function_name": "maybe_zero",
       "docstring": "Returns the mask of bits that might be 0: complement of known-one.",
-      "function_code": "func.func @maybe_zero(%kb : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer {\n  %known1 = \"transfer.get\"(%kb) {index = 1} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer\n  %all_ones = \"transfer.get_all_ones\"(%known1) : (!transfer.integer) -> !transfer.integer\n  %res = \"transfer.xor\"(%known1, %all_ones) : (!transfer.integer, !transfer.integer) -> !transfer.integer\n  func.return %res : !transfer.integer\n}"
+      "source": "func.func @maybe_zero(%kb : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer {\n  %known1 = \"transfer.get\"(%kb) {index = 1} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer\n  %all_ones = \"transfer.get_all_ones\"(%known1) : (!transfer.integer) -> !transfer.integer\n  %res = \"transfer.xor\"(%known1, %all_ones) : (!transfer.integer, !transfer.integer) -> !transfer.integer\n  func.return %res : !transfer.integer\n}"
     }
   ]
 }
