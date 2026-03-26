@@ -67,9 +67,54 @@ def extract_op_name(op_file_path: str) -> str:
 
 def load_initial_library(library_file: Path | None) -> LibraryState:
     """Load initial library text for round 0."""
+
     if library_file is None:
-        return LibraryState("builtin.module {}")
-    return LibraryState(library_file.read_text())
+        return LibraryState(functions=[])
+
+    text = Path(library_file).read_text()
+
+    if "builtin.module" not in text:
+        raise ValueError(f"Ill-formed MLIR: missing 'builtin.module' in {library_file}")
+
+    func_pattern = re.compile(r"func\.func\s+@(\w+)\s*\(")
+    functions = []
+
+    for match in func_pattern.finditer(text):
+        func_name = match.group(1)
+
+        brace_pos = text.find("{", match.end())
+        if brace_pos == -1:
+            raise ValueError(f"Ill-formed MLIR: no opening brace for function '{func_name}'")
+
+        depth = 1
+        i = brace_pos + 1
+        while i < len(text) and depth > 0:
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+            i += 1
+
+        if depth != 0:
+            raise ValueError(f"Ill-formed MLIR: unmatched braces in function '{func_name}'")
+
+        source = text[match.start():i].strip()
+
+        docstring = ""
+        body = text[brace_pos + 1:i - 1]
+        for line in body.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("//"):
+                docstring = stripped[2:].strip()
+                break
+
+        functions.append(LibraryFunction(
+            function_name=func_name,
+            docstring=docstring,
+            source=source,
+        ))
+
+    return LibraryState(functions=functions)
 
 
 def read_prompt_template() -> str:
@@ -145,15 +190,6 @@ def _extract_module_body(mlir: str) -> str:
     inner = mlir[start : i - 1]
     lines = [line[2:] if line.startswith("  ") else line for line in inner.splitlines()]
     return "\n".join(lines).strip()
-
-
-def library_output_to_mlir(output: "LibraryOutput") -> str:
-    """Reconstruct a builtin.module MLIR string from structured LibraryOutput."""
-    bodies = "\n\n".join(f.function_code.strip() for f in output.functions)
-    indented = "\n".join(
-        "  " + line if line.strip() else "" for line in bodies.splitlines()
-    )
-    return f"builtin.module {{\n{indented}\n}}"
 
 
 def merge_library_text(mod1: str, mod2: str) -> str:
