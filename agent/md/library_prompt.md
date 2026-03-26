@@ -31,7 +31,7 @@ Return a JSON object with a `functions` array. Each element has three fields:
 
 - `function_name` — `snake_case` name matching the `@name` in the MLIR (e.g., `"maybe_zero"`)
 - `docstring` — one sentence describing what the function computes semantically (e.g., `"Returns the mask of bits that might be 0: complement of known-one."`)
-- `source` — the complete `func.func` definition in valid MLIR, using SSA form, one allowed operation per line, with arguments typed as `!transfer.integer` or `!transfer.abs_value<[!transfer.integer, !transfer.integer]>` as appropriate
+- `source` — the complete `func.func` definition in valid MLIR, using SSA form, one allowed operation per line, with arguments typed as `!transfer.integer` or `!transfer.abs_value<[!transfer.integer, !transfer.integer]>` as appropriate. The first line inside the function body must be a `//` comment containing the docstring verbatim.
 
 Example output shape (illustrative, do not copy verbatim):
 
