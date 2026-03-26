@@ -41,7 +41,7 @@ Example output shape (illustrative, do not copy verbatim):
     {
       "function_name": "maybe_zero",
       "docstring": "Returns the mask of bits that might be 0: complement of known-one.",
-      "source": "func.func @maybe_zero(%kb : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer {\n  %known1 = \"transfer.get\"(%kb) {index = 1} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer\n  %all_ones = \"transfer.get_all_ones\"(%known1) : (!transfer.integer) -> !transfer.integer\n  %res = \"transfer.xor\"(%known1, %all_ones) : (!transfer.integer, !transfer.integer) -> !transfer.integer\n  func.return %res : !transfer.integer\n}"
+      "source": "func.func @maybe_zero(%kb : !transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer {\n  //Returns the mask of bits that might be 0: complement of known-one.\n  %known1 = \"transfer.get\"(%kb) {index = 1} : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer\n  %all_ones = \"transfer.get_all_ones\"(%known1) : (!transfer.integer) -> !transfer.integer\n  %res = \"transfer.xor\"(%known1, %all_ones) : (!transfer.integer, !transfer.integer) -> !transfer.integer\n  func.return %res : !transfer.integer\n}"
     }
   ]
 }
