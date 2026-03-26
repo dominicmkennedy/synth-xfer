@@ -10,12 +10,12 @@ from .util import (
     LibraryState,
     SynthesisResult,
     SynthesisTask,
+    dump_library,
     extract_op_name,
     get_api_key,
     load_initial_library,
     print_token_usage,
     save_file,
-    dump_library,
 )
 
 
@@ -100,10 +100,12 @@ def run_library_learn_task(
         print(f"Agent run dump: {dump_path}")
 
     existing_names = {f.function_name for f in previous_library.functions}
-    new_functions = [f for f in llm_output.functions if f.function_name not in existing_names]
+    new_functions = [
+        f for f in llm_output.functions if f.function_name not in existing_names
+    ]
     merged = LibraryState(functions=previous_library.functions + new_functions)
 
-    lib_dir = (output_dir / f"library{version}")
+    lib_dir = output_dir / f"library{version}"
     dump_library(merged, lib_dir)
     print(f"Library: {lib_dir}")
 

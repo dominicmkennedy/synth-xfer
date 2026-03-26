@@ -35,8 +35,7 @@ def run_library_learning_loop(
 
     # Create one persistent agent per task (agent + tools built once).
     synth_agents = {
-        task.op_name: SynthesisAgent(task, args, api_key, library)
-        for task in tasks
+        task.op_name: SynthesisAgent(task, args, api_key, library) for task in tasks
     }
 
     # Round 0 is synthesis-only (single-shot equivalent).
