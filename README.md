@@ -59,7 +59,7 @@ sxf --op mlir/Operations/And.mlir \
     --num-iters 2                 \
     --num-steps 100               \
     --num-mcmc 50                 \
-    --random-seed 2333
+    --seed 2333
 ```
 
 Output:
@@ -96,7 +96,7 @@ sxf --op mlir/Operations/Add.mlir     \
 | `--op <path>`                    | Path to a concrete operation or pattern (`.mlir` file) to synthesize an abstract transformer for.                                                                                    |
 | `--benchmark <path>`             | Path to a benchmark YAML file. Runs multiple synthesis jobs in parallel using the per-domain, per-arity settings from the file.                                                      |
 | `-o <path>`                      | Output directory where synthesized results and intermediate outputs will be written.                                                                                                 |
-| `--random-seed <int>`            | Seed for the random number generator to make runs reproducible.                                                                                                                      |
+| `--seed <int>`                   | Seed for the random number generator to make runs reproducible.                                                                                                                      |
 | `--domain <Name>`                | Abstract domain to evaluate (e.g., `KnownBits`, `UConstRange`, `SConstRange`).                                                                                                       |
 | `--num-iters <int>`              | Number of iterations for the synthesizer (default: `10`).                                                                                                                            |
 | `--num-steps <int>`              | Number of mutation steps in one iteration (default: `1500`).                                                                                                                         |

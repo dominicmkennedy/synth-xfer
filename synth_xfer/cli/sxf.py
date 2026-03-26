@@ -2,7 +2,6 @@ from argparse import (
     ArgumentDefaultsHelpFormatter,
     ArgumentParser,
     BooleanOptionalAction,
-    FileType,
     Namespace,
 )
 from pathlib import Path
@@ -99,8 +98,7 @@ def run(
     num_iters: int,
     condition_length: int,
     num_abd_procs: int,
-    random_seed: int | None,
-    random_number_file: str | None,
+    seed: int | None,
     transformer_file: Path,
     dsl_ops_path: Path | None,
     weighted_dsl: bool,
@@ -117,10 +115,8 @@ def run(
 
     logger.debug("Round_ID\tSound%\tUExact%\tDisReduce\tCost")
 
-    random = Random(random_seed)
-    random_seed = random.randint(0, 1_000_000) if random_seed is None else random_seed
-    if random_number_file is not None:
-        random.read_from_file(random_number_file)
+    random = Random(seed)
+    seed = random.randint(0, 2**32 - 1) if seed is None else seed
 
     helper_funcs = get_helper_funcs(transformer_file, domain)
     all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
@@ -130,7 +126,7 @@ def run(
     context_cond = _setup_context(random, True, dsl_ops)
 
     start_time = perf_counter()
-    to_eval = enum(lbw, mbw, hbw, random_seed, helper_funcs, sampler)
+    to_eval = enum(lbw, mbw, hbw, seed, helper_funcs, sampler)
     run_time = perf_counter() - start_time
     logger.perf(f"Enum engine took {run_time:.4f}s")
 
@@ -248,8 +244,7 @@ def run(
 def _build_arg_parser() -> Namespace:
     p = ArgumentParser(prog="sxf", formatter_class=ArgumentDefaultsHelpFormatter)
 
-    p.add_argument("--op", type=Path, help="path to transfer function")
-    p.add_argument("--random-file", type=FileType("r"), help="file for preset rng")
+    p.add_argument("--op", type=Path, help="path to op or pattern")
     p.add_argument(
         "-d",
         "--domain",
@@ -275,7 +270,7 @@ def _build_arg_parser() -> Namespace:
         default=False,
         help="Run e-graph-based rewrite optimizer on synthesized candidates",
     )
-    p.add_argument("--random-seed", type=int, help="seed for synthesis")
+    p.add_argument("--seed", type=int, help="seed for synthesis")
     p.add_argument(
         "--program-length",
         type=int,
@@ -374,8 +369,6 @@ def _validate_args(args: Namespace) -> None:
         invalid_flags: list[str] = []
         if args.domain is not None:
             invalid_flags.append("--domain")
-        if args.random_file is not None:
-            invalid_flags.append("--random-file")
         if args.lbw != [4]:
             invalid_flags.append("--lbw")
         if args.mbw != []:

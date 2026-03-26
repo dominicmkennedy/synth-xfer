@@ -28,7 +28,7 @@ class _Readable(Protocol):
     def read_text(self) -> str: ...
 
 
-def parse_mlir(p: _Readable | str) -> Operation:
+def parse_mlir(p: _Readable) -> Operation:
     func_str = p if isinstance(p, str) else p.read_text()
     func_name = "<text>" if isinstance(p, str) else p.name
 

@@ -52,7 +52,7 @@ def _reg_args():
         type=Path,
         help="directory of solutions (with config.log) or a single transformer file",
     )
-    p.add_argument("--random-seed", type=int, help="seed for synthesis")
+    p.add_argument("--seed", type=int, help="seed for synthesis")
     p.add_argument(
         "--exact-bw",
         type=_int_tuple,
@@ -149,7 +149,7 @@ def run(
     op_path: Path,
     solution_path: Path,
     xfer_name: str,
-    random_seed: int | None,
+    seed: int | None,
     sampler: Sampler,
     unsound_ex: int = 0,
     imprecise_ex: int = 0,
@@ -158,8 +158,8 @@ def run(
     helpers = get_helper_funcs(op_path, domain)
     sol_module = parse_mlir_mod(solution_path)
 
-    random = Random(random_seed)
-    random_seed = random.randint(0, 1_000_000) if random_seed is None else random_seed
+    random = Random(seed)
+    seed = random.randint(0, 2**32 - 1) if seed is None else seed
 
     lowerer = LowerToLLVM(all_bws)
     top_mlir = top_as_xfer(helpers.transfer_func)
@@ -168,7 +168,7 @@ def run(
     top_xfer = lowerer.add_fn(top_mlir, shim=True)
     lowerer.add_mod(sol_module, [xfer_name])
 
-    to_eval = enum(lbw, mbw, hbw, random_seed, helpers, sampler)
+    to_eval = enum(lbw, mbw, hbw, seed, helpers, sampler)
     with Jit() as jit:
         jit.add_mod(lowerer)
 
@@ -198,7 +198,7 @@ class EvalJob:
     op_path: Path
     solution_path: Path
     xfer_name: str
-    random_seed: int | None
+    seed: int | None
     bw_args: tuple[list[int], list[tuple[int, int]], list[tuple[int, int, int]]]
     unsound_ex: int
     imprecise_ex: int
@@ -216,7 +216,7 @@ def _run_job(job: EvalJob) -> tuple[EvalResult, EvalResult]:
         op_path=job.op_path,
         solution_path=job.solution_path,
         xfer_name=job.xfer_name,
-        random_seed=job.random_seed,
+        seed=job.seed,
         sampler=sampler,
         unsound_ex=job.unsound_ex,
         imprecise_ex=job.imprecise_ex,
@@ -282,7 +282,7 @@ def _make_job(
         op_path=op_path,
         solution_path=solution_path,
         xfer_name=xfer_name,
-        random_seed=args.random_seed,
+        seed=args.seed,
         bw_args=bw_args,
         unsound_ex=unsound_ex,
         imprecise_ex=imprecise_ex,

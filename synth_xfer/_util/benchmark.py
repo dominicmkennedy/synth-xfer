@@ -155,10 +155,7 @@ def _execute_job(
             num_iters=args.num_iters,
             condition_length=args.condition_length,
             num_abd_procs=args.num_abd_procs,
-            random_seed=args.random_seed,
-            random_number_file=(
-                None if args.random_file is None else args.random_file.name
-            ),
+            seed=args.seed,
             transformer_file=bench.op_path,
             dsl_ops_path=args.dsl_ops,
             weighted_dsl=args.weighted_dsl,
