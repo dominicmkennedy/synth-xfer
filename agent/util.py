@@ -31,22 +31,17 @@ class SynthesisResult:
 
 
 @dataclass
-class LibraryState:
-    """Current learned library state passed to synthesis prompts."""
-
-    functions_text: str
-
-
-class LibraryFunction(BaseModel):
-    """A single extracted helper function from the library learning agent."""
+class LibraryFunction:
+    """A single library function"""
 
     function_name: str
     docstring: str
-    function_code: str
+    source: str
 
 
-class LibraryOutput(BaseModel):
-    """Structured output from the library learning agent."""
+@dataclass
+class LibraryState:
+    """Current learned library state passed to synthesis prompts."""
 
     functions: list[LibraryFunction]
 
