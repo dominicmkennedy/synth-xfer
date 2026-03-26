@@ -32,17 +32,20 @@ pytest -vv
 
 ## Usage
 
-The project provides six executables,
+The project provides nine executables,
 these executables depend on paths in the repo the should be run from the project root.
 
-| Executable      | Description                                                                                           |
-|-----------------|-------------------------------------------------------------------------------------------------------|
-| `sxf`           | Given an abstract domain and a concrete function, synthesizes an abstract transformer (the main tool) |
-| `benchmark`     | Runs multiple synthesis experiments in parallel across available CPU cores                            |
-| `eval-final`    | Measures the precision of a previously synthesized transformer                                        |
-| `verify`        | Checks the soundness of a previously synthesized transformer                                          |
-| `lower-to-llvm` | Lowers a synthesized transformer from MLIR to LLVM IR                                                 |
-| `simplifier`    | Applies a peephole optimizer to simplify synthesized transformer code                                 |
+| Executable      | Description                                                                                               |
+|-----------------|-----------------------------------------------------------------------------------------------------------|
+| `sxf`           | Given either a concrete function or a benchmark config, synthesizes abstract transformers (the main tool) |
+| `eval-final`    | Measures the precision of a previously synthesized transformer                                            |
+| `run-xfer`      | Runs a synthesized transformer on explicit inputs or evaluation datasets                                  |
+| `verify`        | Checks the soundness of a previously synthesized transformer                                              |
+| `lower-to-llvm` | Lowers a synthesized transformer from MLIR to LLVM IR                                                     |
+| `simplifier`    | Applies a peephole optimizer to simplify synthesized transformer code                                     |
+| `enum`          | Samples an abstract input space and enumerates the optimal output for a concrete operation                |
+| `max-precise`   | Computes the most precise abstract result for a concrete operation and abstract inputs using z3           |
+| `pattern`       | Analyzes pattern completeness and generates pattern input datasets                                        |
 
 ## Example Synthesis Runs
 
@@ -51,11 +54,11 @@ these executables depend on paths in the repo the should be run from the project
 Here's a simple invocation of the `sxf` program for quick testing (should take ~60s):
 
 ```bash
-sxf mlir/Operations/And.mlir  \
-    --domain KnownBits        \
-    --num-iters 2             \
-    --num-steps 100           \
-    --num-mcmc 50             \
+sxf --op mlir/Operations/And.mlir \
+    --domain KnownBits            \
+    --num-iters 2                 \
+    --num-steps 100               \
+    --num-mcmc 50                 \
     --random-seed 2333
 ```
 
@@ -76,7 +79,7 @@ The command reads the MLIR program `mlir/Operations/And.mlir` and writes addtion
 This is a more comprehensive invocation closer to the experiment setup used in the paper (this can take up to an hour depending on your machine):
 
 ```bash
-sxf mlir/Operations/Add.mlir          \
+sxf --op mlir/Operations/Add.mlir     \
     --domain KnownBits                \
     --num-iters 5                     \
     --num-steps 1000                  \
@@ -90,14 +93,15 @@ sxf mlir/Operations/Add.mlir          \
 
 | CLI flag                         | Description                                                                                                                                                                          |
 |----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `<input_path>`                   | Path to a concrete operation (`.mlir` file) to sythesize an abstract transformer for.                                                                                                |
+| `--op <path>`                    | Path to a concrete operation or pattern (`.mlir` file) to synthesize an abstract transformer for.                                                                                    |
+| `--benchmark <path>`             | Path to a benchmark YAML file. Runs multiple synthesis jobs in parallel using the per-domain, per-arity settings from the file.                                                      |
 | `-o <path>`                      | Output directory where synthesized results and intermediate outputs will be written.                                                                                                 |
 | `--random-seed <int>`            | Seed for the random number generator to make runs reproducible.                                                                                                                      |
 | `--domain <Name>`                | Abstract domain to evaluate (e.g., `KnownBits`, `UConstRange`, `SConstRange`).                                                                                                       |
 | `--num-iters <int>`              | Number of iterations for the synthesizer (default: `10`).                                                                                                                            |
 | `--num-steps <int>`              | Number of mutation steps in one iteration (default: `1500`).                                                                                                                         |
 | `--num-mcmc <int>`               | Number of MCMC processes that run in parallel (default: `100`).                                                                                                                      |
-| `--program_length <int>`         | Length of one single synthesized transformer (default: `28`).                                                                                                                        |
+| `--program-length <int>`         | Length of one single synthesized transformer (default: `28`).                                                                                                                        |
 | `--vbw <list[int]>`              | Bitwidths to verify at. Accepts ranges (e.g., `4-64`) or comma-separated values (e.g., `8,16,32,64`). (default: `4-64`).                                                             |
 | `--lbw <list[int]>`              | Low-bitwidths to evaluate exhaustively (default: `4`).                                                                                                                               |
 | `--mbw <list[int,int]>`          | Mid-bitwidths to sample abstract values with, but enumerate the concretizations of each of them exhaustively. Format: `bitwidth,num_samples` (e.g., `8,5000`).                       |
@@ -107,6 +111,49 @@ sxf mlir/Operations/Add.mlir          \
 | `--num-unsound-candidates <int>` | Number of unsound candidates considered for abduction (default: `15`).                                                                                                               |
 | `--optimize`                     | Run e-graph-based rewrite optimizer on synthesized candidates.                                                                                                                       |
 | `--quiet`                        | Suppress verbose output.                                                                                                                                                             |
+
+Exactly one of `--op` or `--benchmark` must be provided.
+
+When using `--benchmark`, the bitwidth controls come from the YAML file rather than the command line.
+
+### Benchmark Configs
+
+The `--benchmark` flag accepts a YAML file whose top-level keys are domains.
+Each domain contains a list of `patterns` and bitwidth settings per pattern arity.
+Entries under `patterns` may be either operation names like `Add` or integer pattern ids like `017`.
+
+Example:
+
+```yaml
+KnownBits:
+  patterns: [Add, 017]
+  arity:
+    2:
+      lbw: [4]
+      mbw: [[8, 1000]]
+      hbw: [[64, 1000, 1000]]
+    3:
+      lbw: []
+      mbw: [[4, 1000], [8, 1000]]
+      hbw: [[64, 1000, 1000]]
+
+UConstRange:
+  patterns: [008, 081]
+  arity:
+    4:
+      lbw: []
+      mbw: [[4, 1000]]
+      hbw: [[8, 1000, 1000]]
+```
+
+And run it with:
+
+```bash
+sxf --benchmark bench.yaml \
+    --num-iters 5          \
+    --num-steps 1000       \
+    --num-mcmc 100
+```
 
 ## Important CLI Options for `verify`
 
@@ -169,20 +216,19 @@ Norm bw:  (64, 5000, 5000)
 
 ## Important CLI Options for `simplifier`
 
-| CLI flag              | Description                                                                                                 |
-|-----------------------|-------------------------------------------------------------------------------------------------------------|
-| `<input_path>`        | Path to a transformer `.mlir` file. Accepts a single function or a module (defaults to the `solution` function). |
-| `--rewrite-meet`      | Rewrite the meet of all rewritten functions instead of individual functions.                                |
-| `--quiet` / `--no-quiet` | Suppress or enable console output from the optimizer (default: quiet).                                   |
-
+| CLI flag                 | Description                                                                                                      |
+|--------------------------|------------------------------------------------------------------------------------------------------------------|
+| `<input_path>`           | Path to a transformer `.mlir` file. Accepts a single function or a module (defaults to the `solution` function). |
+| `--rewrite-meet`         | Rewrite the meet of all rewritten functions instead of individual functions.                                     |
+| `--quiet` / `--no-quiet` | Suppress or enable console output from the optimizer (default: quiet).                                           |
 
 ## Important CLI Options for `max-precise`
 
 Example usage: `max-precise ./mlir/Operations/Or.mlir --domain KnownBits --args "00??,11??" --bitwidth=4`
 
-| CLI flag              | Description                                                                                                 |
-|-----------------------|-------------------------------------------------------------------------------------------------------------|
-| `<input_path>`        | Path to a transformer `.mlir` file. Accepts a single function or a module (defaults to the `solution` function). |
-| `--args`      | The string representation of abstract value inputs. It only supports KnownBits for now                                |
-| `--bitwidth` | One concrete bitW wdth        |
-| `--domain` | The domain name        |
+| CLI flag       | Description                                                                                                      |
+|----------------|------------------------------------------------------------------------------------------------------------------|
+| `<input_path>` | Path to a transformer `.mlir` file. Accepts a single function or a module (defaults to the `solution` function). |
+| `--args`       | The string representation of abstract value inputs. It only supports KnownBits for now                           |
+| `--bitwidth`   | The bitwidth of `args`                                                                                           |
+| `--domain`     | The domain                                                                                                       |
