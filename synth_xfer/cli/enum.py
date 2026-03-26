@@ -1,16 +1,13 @@
 from argparse import ArgumentParser, Namespace
-from dataclasses import dataclass
-from io import StringIO
 from pathlib import Path
-from typing import TextIO
 
 import pandas as pd
-import yaml
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import enum
 from synth_xfer._util.parse_mlir import get_helper_funcs
 from synth_xfer._util.random import Random
+from synth_xfer._util.tsv import EnumData, EnumMetaData
 from synth_xfer.cli.args import get_sampler, int_triple, int_tuple, make_sampler_parser
 
 
@@ -54,88 +51,6 @@ def _register_parser() -> Namespace:
     return p.parse_args()
 
 
-@dataclass(frozen=True)
-class EnumMetaData:
-    domain: AbstractDomain
-    op: str
-    arity: int
-    seed: int
-    lbw: list[int]
-    mbw: list[tuple[int, int]]
-    hbw: list[tuple[int, int, int]]
-
-    def dump(self) -> str:
-        return yaml.safe_dump(
-            {
-                "domain": str(self.domain),
-                "op": self.op,
-                "arity": self.arity,
-                "seed": self.seed,
-                "lbw": self.lbw,
-                "mbw": self.mbw,
-                "hbw": self.hbw,
-            },
-            sort_keys=False,
-            default_flow_style=None,
-        ).rstrip("\n")
-
-    def dump_commented(self) -> str:
-        body = self.dump().splitlines()
-        return "\n".join("# " + line for line in body)
-
-    @classmethod
-    def parse(cls, text: str) -> "EnumMetaData":
-        obj = yaml.safe_load(text) or {}
-
-        mbw = [tuple(map(int, t)) for t in obj["mbw"]]
-        hbw = [tuple(map(int, t)) for t in obj["hbw"]]
-        return cls(
-            domain=AbstractDomain[obj["domain"]],
-            op=str(obj["op"]),
-            arity=int(obj["arity"]),
-            seed=int(obj["seed"]),
-            lbw=[int(a) for a in obj["lbw"]],
-            mbw=[(a, b) for (a, b) in mbw],
-            hbw=[(a, b, c) for (a, b, c) in hbw],
-        )
-
-    @classmethod
-    def parse_commented(cls, commented_text: str) -> "EnumMetaData":
-        lines = []
-        for ln in commented_text.splitlines():
-            assert ln.startswith("# ")
-            lines.append(ln[2:])
-
-        return cls.parse("\n".join(lines))
-
-
-def write_tsv(md: EnumMetaData, to_eval: pd.DataFrame, path: Path):
-    frontmatter = f"# ---\n{md.dump_commented()}\n# ---\n"
-
-    with path.open("w") as f:
-        f.write(frontmatter)
-        to_eval.to_csv(
-            f,
-            sep="\t",
-            index=False,
-            header=True,
-            lineterminator="\n",
-        )
-
-
-def read_tsv(f: TextIO) -> tuple[EnumMetaData, pd.DataFrame]:
-    lines = f.read().splitlines()
-
-    assert lines and lines[0].strip() == "# ---"
-    end = next(i for i in range(1, len(lines)) if lines[i].strip() == "# ---")
-    md = EnumMetaData.parse_commented("\n".join(lines[1:end]))
-
-    tsv_text = "\n".join(lines[end + 1 :]) + "\n"
-    df = pd.read_csv(StringIO(tsv_text), sep="\t")
-
-    return md, df
-
-
 def main() -> None:
     args = _register_parser()
 
@@ -166,7 +81,7 @@ def main() -> None:
         hbw=args.hbw,
     )
 
-    write_tsv(metadata, df, args.output)
+    EnumData(metadata, df).write_tsv(args.output)
 
 
 if __name__ == "__main__":

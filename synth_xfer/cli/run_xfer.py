@@ -17,7 +17,7 @@ from synth_xfer._util.eval import (
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
-from synth_xfer.cli.enum import read_tsv
+from synth_xfer._util.tsv import EnumData
 from synth_xfer.cli.eval_final import resolve_xfer_name
 
 
@@ -86,12 +86,13 @@ def parse_eval_df(df: pd.DataFrame, domain: AbstractDomain, arity: int, bw: int)
 def _parse_inputs(args: Namespace, arity: int):
     if args.input:
         with open(args.input, "r") as f:
-            md, df = read_tsv(f)
+            data = EnumData.read_tsv(f)
+            df = data.enumdata
 
-        domain = md.domain
+        domain = data.metadata.domain
         parse_fn = parse_eval_df if args.eval else parse_enum_df
         to_eval: dict[int, Any] = {
-            bw: parse_fn(v, domain, md.arity, bw)  # type: ignore
+            bw: parse_fn(v, domain, data.metadata.arity, bw)  # type: ignore
             for bw, v in df.groupby("bw")
         }
     else:
