@@ -20,14 +20,24 @@ def _parse_bw_spec(text: str) -> tuple[int, int | None]:
 
 def _format_report(report: CompletenessReport) -> str:
     lines = [
-        f"Pattern: {report.dag.expression}",
-        f"Coincide: {'True' if report.coincides else 'False'}",
+        f"Pattern:   {report.dag.expression}",
+        f"Coincide:  {'True' if report.coincides else 'False'}",
         f"SSA Reuse: {'True' if report.reuse else 'False'}",
         "Complete Edges:",
     ]
-    edge_width = max((len(edge) for edge, _ in report.edges), default=0)
-    for edge, is_complete in report.edges:
-        lines.append(f"  {edge:<{edge_width}} : {'True' if is_complete else 'False'}")
+    edge_map = dict(report.edges)
+    for i, node in enumerate(report.dag.nodes):
+        if i:
+            lines.append("")
+        lines.append(f"  n{i} = {node.operation}({', '.join(node.operands)})")
+        for operand in node.operands:
+            if not operand.startswith("n"):
+                continue
+            producer_idx = int(operand.removeprefix("n"))
+            producer = report.dag.nodes[producer_idx]
+            edge = f"n{producer_idx}({producer.operation}) -> n{i}({node.operation})"
+            is_complete = edge_map[edge]
+            lines.append(f"    {operand} : {'complete' if is_complete else 'incomplete'}")
     return "\n".join(lines)
 
 

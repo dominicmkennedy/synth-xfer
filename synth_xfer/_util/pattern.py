@@ -131,14 +131,12 @@ _COMPLETENESS_TABLE: dict[str, dict[AbstractDomain, tuple[bool, bool]]] = {
 
 @dataclass(frozen=True)
 class DagNode:
-    result: str
     operation: str
     operands: tuple[str, ...]
 
 
 @dataclass(frozen=True)
 class PatternDag:
-    source: str
     args: tuple[str, ...]
     nodes: tuple[DagNode, ...]
     result: str
@@ -156,12 +154,12 @@ class CompletenessReport:
         return all(is_complete for _, is_complete in self.edges) and not self.reuse
 
 
-def _render_expr(ref: str, nodes_by_result: dict[str, DagNode]) -> str:
-    node = nodes_by_result.get(ref)
-    if node is None:
+def _render_expr(ref: str, nodes: tuple[DagNode, ...]) -> str:
+    if not ref.startswith("n"):
         return ref
+    node = nodes[int(ref.removeprefix("n"))]
     operands = ", ".join(
-        _render_expr(operand, nodes_by_result) for operand in node.operands
+        _render_expr(operand, nodes) for operand in node.operands
     )
     return f"{node.operation}({operands})"
 
@@ -302,7 +300,6 @@ def load_pattern(pattern_path: Path) -> PatternDag:
             raise ValueError("Expected concrete_op instructions to produce one result.")
         nodes.append(
             DagNode(
-                result=f"n{i}",
                 operation=operation,
                 operands=tuple(_value_ref(operand, node_ids) for operand in op.operands),
             )
@@ -314,9 +311,8 @@ def load_pattern(pattern_path: Path) -> PatternDag:
     result = _value_ref(returns[0].arguments[0], node_ids)
 
     nodes_tuple = tuple(nodes)
-    expr = _render_expr(result, {node.result: node for node in nodes_tuple})
+    expr = _render_expr(result, nodes_tuple)
     return PatternDag(
-        source=str(pattern_path),
         args=tuple(f"arg{i}" for i, _ in enumerate(concrete_op.args)),
         nodes=nodes_tuple,
         result=result,
@@ -333,7 +329,7 @@ def _completeness(op: str, domain: AbstractDomain) -> tuple[bool, bool]:
 def _has_reuse(dag: PatternDag) -> bool:
     consumers: dict[str, int] = {
         **{arg: 0 for arg in dag.args},
-        **{node.result: 0 for node in dag.nodes},
+        **{f"n{i}": 0 for i, _ in enumerate(dag.nodes)},
     }
     for node in dag.nodes:
         for operand in node.operands:
@@ -354,18 +350,18 @@ def analyze_pattern(
         raise NotImplementedError(f"analze not implemented for domain '{domain}'.")
 
     dag = load_pattern(pattern_path)
-    nodes_by_result = {node.result: node for node in dag.nodes}
     edges: list[tuple[str, bool]] = []
 
-    for node in dag.nodes:
+    for i, node in enumerate(dag.nodes):
         _completeness(node.operation, domain)
         for operand in node.operands:
-            producer = nodes_by_result.get(operand)
-            if producer is None:
+            if not operand.startswith("n"):
                 continue
+            producer_idx = int(operand.removeprefix("n"))
+            producer = dag.nodes[producer_idx]
             producer_forward, _ = _completeness(producer.operation, domain)
             _, consumer_backward = _completeness(node.operation, domain)
-            edge = f"{producer.result}({producer.operation}) -> {node.result}({node.operation})"
+            edge = f"n{producer_idx}({producer.operation}) -> n{i}({node.operation})"
             is_complete = producer_forward or consumer_backward
             edges.append((edge, is_complete))
 
@@ -378,15 +374,13 @@ def analyze_pattern(
 
 def _load_op_data(
     data_dir: Path, domain: AbstractDomain, op: str, bw: int
-) -> tuple[EnumMetaData, pd.DataFrame]:
+) -> tuple[int, pd.DataFrame]:
     path = data_dir / str(domain) / f"{op}.tsv"
     if not path.exists():
         raise FileNotFoundError(f"Missing data file '{path}'.")
     with path.open() as f:
         data = EnumData.read_tsv(f)
-    return data.metadata, cast(
-        pd.DataFrame, data.enumdata[data.enumdata["bw"] == bw].copy()
-    )
+    return data.metadata.arity, cast(pd.DataFrame, data.enumdata[data.enumdata["bw"] == bw].copy())
 
 
 def _append_unique(dst: list[str], src: pd.Series) -> None:
@@ -399,19 +393,19 @@ def _append_unique(dst: list[str], src: pd.Series) -> None:
 
 def _collect_pattern_arg_values(
     dag: PatternDag,
-    op_tables: dict[str, tuple[EnumMetaData, pd.DataFrame]],
+    op_tables: dict[str, tuple[int, pd.DataFrame]],
 ) -> dict[str, list[str]]:
     arg_values = {arg: [] for arg in dag.args}
 
     for node in dag.nodes:
-        metadata, frame = op_tables[node.operation]
+        arity, frame = op_tables[node.operation]
         for operand_index, operand in enumerate(node.operands):
             if operand not in arg_values:
                 continue
             # A pattern arg may appear in multiple operand positions across the DAG.
             # We intentionally use the union of all matching operand domains here.
             positions = (
-                range(metadata.arity)
+                range(arity)
                 if node.operation in _COMMUTATIVE_OPS
                 else (operand_index,)
             )
