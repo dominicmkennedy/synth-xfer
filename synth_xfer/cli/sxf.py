@@ -1,3 +1,10 @@
+from argparse import (
+    ArgumentDefaultsHelpFormatter,
+    ArgumentParser,
+    BooleanOptionalAction,
+    FileType,
+    Namespace,
+)
 from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING
@@ -8,7 +15,7 @@ from synth_xfer._util.dsl_operators import DslOpSet, load_dsl_ops
 from synth_xfer._util.eval import enum, eval_transfer_func
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.jit import Jit
-from synth_xfer._util.log import get_logger, init_logging, write_log_file
+from synth_xfer._util.log import get_logger, write_log_file
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.mcmc_sampler import setup_mcmc
 from synth_xfer._util.one_iter import synthesize_one_iteration
@@ -16,7 +23,12 @@ from synth_xfer._util.parse_mlir import HelperFuncs, get_helper_funcs, top_as_xf
 from synth_xfer._util.random import Random, Sampler
 from synth_xfer._util.solution_set import EvalFn, UnsizedSolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
-from synth_xfer.cli.args import build_parser, get_sampler
+from synth_xfer.cli.args import (
+    int_list,
+    int_triple,
+    int_tuple,
+    make_sampler_parser,
+)
 
 if TYPE_CHECKING:
     from synth_xfer._eval_engine import ToEval
@@ -233,45 +245,160 @@ def run(
     return solution_result
 
 
-def main() -> None:
-    args = build_parser("synth_xfer")
+def _build_arg_parser() -> Namespace:
+    p = ArgumentParser(prog="sxf", formatter_class=ArgumentDefaultsHelpFormatter)
 
-    domain = AbstractDomain[args.domain]
-    op_path = Path(args.transfer_function)
-
-    if args.output is None:
-        outputs_folder = Path("outputs", f"{domain}_{op_path.stem}")
-    else:
-        outputs_folder = Path(args.output)
-
-    if not outputs_folder.is_dir():
-        outputs_folder.mkdir(parents=True)
-
-    sampler = get_sampler(args)
-
-    logger = init_logging(outputs_folder, not args.quiet)
-    max_len = max(len(k) for k in vars(args))
-    [logger.config(f"{k:<{max_len}} | {v}") for k, v in vars(args).items()]
-
-    run(
-        domain=domain,
-        num_mcmc=args.num_mcmc,
-        num_steps=args.num_steps,
-        program_length=args.program_length,
-        inv_temp=args.inv_temp,
-        vbw=args.vbw,
-        lbw=args.lbw,
-        mbw=args.mbw,
-        hbw=args.hbw,
-        num_iters=args.num_iters,
-        condition_length=args.condition_length,
-        num_abd_procs=args.num_abd_procs,
-        random_seed=args.random_seed,
-        random_number_file=args.random_file,
-        transformer_file=op_path,
-        dsl_ops_path=args.dsl_ops,
-        weighted_dsl=args.weighted_dsl,
-        num_unsound_candidates=args.num_unsound_candidates,
-        optimize=args.optimize,
-        sampler=sampler,
+    p.add_argument("--op", type=Path, help="path to transfer function")
+    p.add_argument("--random-file", type=FileType("r"), help="file for preset rng")
+    p.add_argument(
+        "-d",
+        "--domain",
+        type=str,
+        choices=[str(x) for x in AbstractDomain],
+        help="Abstract Domain to evaluate",
     )
+    p.add_argument(
+        "--benchmark",
+        type=Path,
+        help="YAML config specifying benchmark inputs and per-arity settings",
+    )
+    p.add_argument(
+        "--dsl-ops",
+        type=Path,
+        help="Path to DSL op-set JSON (e.g., dsl/ops_set_0.json)",
+    )
+    p.add_argument("-o", "--output", type=Path, help="Output dir")
+    make_sampler_parser(p)
+    p.add_argument(
+        "--optimize",
+        action=BooleanOptionalAction,
+        default=False,
+        help="Run e-graph-based rewrite optimizer on synthesized candidates",
+    )
+    p.add_argument("--random-seed", type=int, help="seed for synthesis")
+    p.add_argument(
+        "--program-length",
+        type=int,
+        help="length of one single synthed transformer",
+        default=28,
+    )
+    p.add_argument(
+        "--num-steps",
+        type=int,
+        help="number of mutation steps in one iteration",
+        default=1500,
+    )
+    p.add_argument(
+        "--num-mcmc",
+        type=int,
+        help="number of mcmc processes that run in parallel",
+        default=100,
+    )
+    p.add_argument(
+        "--inv-temp",
+        type=int,
+        help="Inverse temperature for MCMC. The larger the value is, the lower the probability of accepting a program with a higher cost.",
+        default=200,
+    )
+    p.add_argument(
+        "--vbw",
+        type=int_list,
+        default=list(range(4, 65)),
+        help="bws to verify at",
+    )
+    p.add_argument(
+        "--lbw",
+        nargs="*",
+        type=int,
+        default=[4],
+        help="Low-bitwidths to evaluate exhaustively",
+    )
+    p.add_argument(
+        "--mbw",
+        nargs="*",
+        type=int_tuple,
+        default=[],
+        help="Mid-bitwidths to sample abstract values with, but enumerate the concretizations of each of them exhaustively",
+    )
+    p.add_argument(
+        "--hbw",
+        nargs="*",
+        type=int_triple,
+        default=[],
+        help="High-bitwidths to sample abstract values with, and sample the concretizations of each of them",
+    )
+    p.add_argument(
+        "--num-iters",
+        type=int,
+        help="number of iterations for the synthesizer",
+        default=10,
+    )
+    p.add_argument(
+        "--no-weighted-dsl",
+        dest="weighted_dsl",
+        action="store_false",
+        help="Disable learning weights for each DSL operation from previous for future iterations",
+    )
+    p.set_defaults(weighted_dsl=True)
+    p.add_argument(
+        "--condition-length", type=int, help="length of synthd abduction", default=10
+    )
+    p.add_argument(
+        "--num-abd-procs",
+        type=int,
+        help="number of mcmc processes used for abduction. Must be less than num_mcmc",
+        default=30,
+    )
+    p.add_argument(
+        "--num-unsound-candidates",
+        type=int,
+        help="number of unsound candidates considered for abduction",
+        default=15,
+    )
+    p.add_argument("-q", "--quiet", action="store_true")
+
+    return p.parse_args()
+
+
+def _validate_args(args: Namespace) -> None:
+    has_op = args.op is not None
+    has_benchmark = args.benchmark is not None
+
+    if has_op == has_benchmark:
+        raise ValueError("Specify exactly one of --op or --benchmark")
+
+    if has_op and args.domain is None:
+        raise ValueError("--domain is required when using --op")
+
+    if has_benchmark:
+        invalid_flags: list[str] = []
+        if args.domain is not None:
+            invalid_flags.append("--domain")
+        if args.random_file is not None:
+            invalid_flags.append("--random-file")
+        if args.lbw != [4]:
+            invalid_flags.append("--lbw")
+        if args.mbw != []:
+            invalid_flags.append("--mbw")
+        if args.hbw != []:
+            invalid_flags.append("--hbw")
+        if invalid_flags:
+            raise ValueError(
+                f"{', '.join(invalid_flags)} are only valid with --op, not --benchmark"
+            )
+
+
+def main() -> None:
+    from synth_xfer._util.benchmark import run_benchmark, run_single_synth
+
+    args = _build_arg_parser()
+    _validate_args(args)
+
+    if args.op is not None:
+        run_single_synth(args)
+    else:
+        run_benchmark(args)
+
+
+if __name__ == "__main__":
+    main()
