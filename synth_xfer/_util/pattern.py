@@ -158,9 +158,7 @@ def _render_expr(ref: str, nodes: tuple[DagNode, ...]) -> str:
     if not ref.startswith("n"):
         return ref
     node = nodes[int(ref.removeprefix("n"))]
-    operands = ", ".join(
-        _render_expr(operand, nodes) for operand in node.operands
-    )
+    operands = ", ".join(_render_expr(operand, nodes) for operand in node.operands)
     return f"{node.operation}({operands})"
 
 
@@ -380,7 +378,9 @@ def _load_op_data(
         raise FileNotFoundError(f"Missing data file '{path}'.")
     with path.open() as f:
         data = EnumData.read_tsv(f)
-    return data.metadata.arity, cast(pd.DataFrame, data.enumdata[data.enumdata["bw"] == bw].copy())
+    return data.metadata.arity, cast(
+        pd.DataFrame, data.enumdata[data.enumdata["bw"] == bw].copy()
+    )
 
 
 def _append_unique(dst: list[str], src: pd.Series) -> None:
@@ -405,9 +405,7 @@ def _collect_pattern_arg_values(
             # A pattern arg may appear in multiple operand positions across the DAG.
             # We intentionally use the union of all matching operand domains here.
             positions = (
-                range(arity)
-                if node.operation in _COMMUTATIVE_OPS
-                else (operand_index,)
+                range(arity) if node.operation in _COMMUTATIVE_OPS else (operand_index,)
             )
             for position in positions:
                 column = f"arg_{position}"
