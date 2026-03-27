@@ -90,7 +90,8 @@ class EnumData:
         end = next(i for i in range(1, len(lines)) if lines[i].strip() == "# ---")
         metadata = EnumMetaData.parse_commented("\n".join(lines[1:end]))
 
-        tsv_text = "\n".join(lines[end + 1 :]) + "\n"
+        data_lines = [line for line in lines[end + 1 :] if not line.startswith("# ")]
+        tsv_text = "\n".join(data_lines) + "\n"
         frame = pd.read_csv(StringIO(tsv_text), sep="\t")
 
         return cls(metadata, frame)

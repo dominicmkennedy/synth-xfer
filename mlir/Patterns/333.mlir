@@ -9,9 +9,8 @@ module {
     %ssa_0_con_0_z = func.call @mul_nuw(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> i1
     %0 = "transfer.mul"(%arg1, %arg2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %ssa_1_con_0_z = func.call @shift_lt_bw(%0, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %ssa_1_con_0_z, %ssa_1_con_1_z : i1
-    %and_1 = arith.andi %and_0, %ssa_0_con_0_z : i1
-    return %and_1 : i1
+    %and_0 = arith.andi %ssa_0_con_0_z, %ssa_1_con_0_z : i1
+    return %and_0 : i1
   }
   func.func @mul_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.umul_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
