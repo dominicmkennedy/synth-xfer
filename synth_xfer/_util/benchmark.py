@@ -5,6 +5,7 @@ from multiprocessing import Pool
 from pathlib import Path
 from typing import Any
 
+from setproctitle import setproctitle
 import yaml
 
 from synth_xfer._util.domain import AbstractDomain
@@ -25,7 +26,7 @@ class BenchmarkInput:
     hbw: list[tuple[int, int, int]]
 
 
-def _prepare_output_dir(output_dir: Path, *, allow_existing: bool) -> None:
+def _prepare_output_dir(output_dir: Path, allow_existing: bool) -> None:
     if output_dir.exists():
         if not output_dir.is_dir():
             raise FileExistsError(f'Output path "{output_dir}" already exists.')
@@ -120,7 +121,6 @@ def _execute_job(
     bench: BenchmarkInput,
     args: Namespace,
     output_folder: Path,
-    *,
     allow_existing: bool,
 ) -> dict[str, Any]:
     sampler = get_sampler(args)
@@ -168,7 +168,6 @@ def _execute_job(
             "Domain": str(bench.domain),
             "Function": bench.name,
             "Arity": bench.arity,
-            "Transfer Function": str(bench.op_path),
             "lbw": bench.lbw,
             "mbw": [list(item) for item in bench.mbw],
             "hbw": [list(item) for item in bench.hbw],
@@ -181,27 +180,36 @@ def _execute_job(
                 }
                 for per_bit_res in res.per_bit_res
             ],
+            "Success": True,
         }
     except Exception as e:
+        if isinstance(e, ZeroDivisionError):
+            e = "Top coincides with ideal transformer"
         return {
             "Domain": str(bench.domain),
             "Function": bench.name,
             "Arity": bench.arity,
-            "Transfer Function": str(bench.op_path),
-            "Notes": f"Run was terminated: {e}",
+            "Success": False,
+            "Termanation Error": str(e),
         }
 
 
 def _execute_benchmark_job(x: tuple[BenchmarkInput, Namespace]) -> dict[str, Any]:
-    bench = x[0]
-    args = x[1]
+    bench, args = x
     assert args.output is not None
-    return _execute_job(
-        bench,
-        args,
-        args.output / f"{bench.domain}_{bench.name}",
-        allow_existing=False,
-    )
+
+    proc_name = f"sxf:{bench.domain} {bench.name}"
+    setproctitle(proc_name)
+
+    try:
+        return _execute_job(
+            bench,
+            args,
+            args.output / f"{bench.domain}_{bench.name}",
+            allow_existing=False,
+        )
+    finally:
+        setproctitle("sxf:idle")
 
 
 def run_single_synth(args: Namespace) -> None:
@@ -227,7 +235,9 @@ def run_single_synth(args: Namespace) -> None:
         else Path(args.output)
     )
 
-    _execute_job(bench, args, output_folder, allow_existing=True)
+    ret = _execute_job(bench, args, output_folder, allow_existing=True)
+    if not ret["Success"]:
+        print(f"Error: {ret['Termanation Error']}")
 
 
 def run_benchmark(args: Namespace) -> None:
