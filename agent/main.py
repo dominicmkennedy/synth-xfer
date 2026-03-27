@@ -33,14 +33,9 @@ def run_library_learning_loop(
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write initial library to disk so get_library_text() has a file on round 0.
-    current_lib_path = output_dir / "library_current.mlir"
-    current_lib_path.write_text(library.functions_text, encoding="utf-8")
-
     # Create one persistent agent per task (agent + tools built once).
     synth_agents = {
-        task.op_name: SynthesisAgent(task, args, api_key, current_lib_path)
-        for task in tasks
+        task.op_name: SynthesisAgent(task, args, api_key, library) for task in tasks
     }
 
     # Round 0 is synthesis-only (single-shot equivalent).
@@ -56,6 +51,8 @@ def run_library_learning_loop(
                 args=args,
                 api_key=api_key,
             )
+            for agent in synth_agents.values():
+                agent.update_library(library)
         if not args.no_compress:
             new_results: list[SynthesisResult] = []
             for result in latest_results:

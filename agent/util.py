@@ -5,6 +5,8 @@ import os
 from pathlib import Path
 import re
 
+from pydantic import BaseModel
+
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.random import Sampler
 from synth_xfer.cli.eval_final import _parse_bw_args, run
@@ -28,11 +30,29 @@ class SynthesisResult:
     eval_summary: str | None = None
 
 
-@dataclass
-class LibraryState:
+class LibraryFunction(BaseModel):
+    """A single library function"""
+
+    function_name: str
+    docstring: str
+    source: str
+
+
+class LibraryState(BaseModel):
     """Current learned library state passed to synthesis prompts."""
 
-    functions_text: str
+    functions: list[LibraryFunction]
+
+    @property
+    def functions_text(self) -> str:
+        """Render all functions as a builtin.module MLIR string."""
+        if not self.functions:
+            return ""
+        body = "\n\n".join(f.source for f in self.functions)
+        indented = "\n".join(
+            "  " + line if line.strip() else "" for line in body.splitlines()
+        )
+        return f"builtin.module {{\n{indented}\n}}"
 
 
 def get_api_key() -> str:
@@ -56,9 +76,60 @@ def extract_op_name(op_file_path: str) -> str:
 
 def load_initial_library(library_file: Path | None) -> LibraryState:
     """Load initial library text for round 0."""
+
     if library_file is None:
-        return LibraryState("builtin.module {}")
-    return LibraryState(library_file.read_text())
+        return LibraryState(functions=[])
+
+    text = Path(library_file).read_text()
+
+    if "builtin.module" not in text:
+        raise ValueError(f"Ill-formed MLIR: missing 'builtin.module' in {library_file}")
+
+    func_pattern = re.compile(r"func\.func\s+@(\w+)\s*\(")
+    functions = []
+
+    for match in func_pattern.finditer(text):
+        func_name = match.group(1)
+
+        brace_pos = text.find("{", match.end())
+        if brace_pos == -1:
+            raise ValueError(
+                f"Ill-formed MLIR: no opening brace for function '{func_name}'"
+            )
+
+        depth = 1
+        i = brace_pos + 1
+        while i < len(text) and depth > 0:
+            if text[i] == "{":
+                depth += 1
+            elif text[i] == "}":
+                depth -= 1
+            i += 1
+
+        if depth != 0:
+            raise ValueError(
+                f"Ill-formed MLIR: unmatched braces in function '{func_name}'"
+            )
+
+        source = text[match.start() : i].strip()
+
+        docstring = ""
+        body = text[brace_pos + 1 : i - 1]
+        for line in body.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("//"):
+                docstring = stripped[2:].strip()
+                break
+
+        functions.append(
+            LibraryFunction(
+                function_name=func_name,
+                docstring=docstring,
+                source=source,
+            )
+        )
+
+    return LibraryState(functions=functions)
 
 
 def read_prompt_template() -> str:
@@ -116,6 +187,14 @@ def save_file(content: str, dir: Path, file_name: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content)
     return path
+
+
+def dump_library(lib: LibraryState, out_dir: Path) -> Path:
+    """Save library funcs to library directory"""
+    for func in lib.functions:
+        save_file(func.source, out_dir, f"{func.function_name}.mlir")
+
+    return out_dir
 
 
 def _extract_module_body(mlir: str) -> str:

@@ -10,11 +10,10 @@ from .util import (
     LibraryState,
     SynthesisResult,
     SynthesisTask,
-    clean_llm_output,
+    dump_library,
     extract_op_name,
     get_api_key,
     load_initial_library,
-    merge_library_text,
     print_token_usage,
     save_file,
 )
@@ -28,16 +27,14 @@ def _run_agent_learn(
     model: str,
     ops_path: Path,
     instructions_path: Path,
-) -> tuple[str, object]:
-    """Run agent to learn library functions. Returns (final_output, run_result)."""
+) -> tuple[LibraryState, object]:
+    """Run agent to learn library functions. Returns (LibraryState, run_result)."""
     del api_key  # Reserved for future model/provider auth parity.
 
     @function_tool
     def get_corpus_functions() -> str:
         """Return the corpus MLIR programs to learn library funcs from"""
-        corpus = "\n".join([result.solution_text for result in synthesis_results])
-
-        return corpus
+        return "\n".join(result.solution_text for result in synthesis_results)
 
     @function_tool
     def get_available_primitives() -> str:
@@ -58,6 +55,7 @@ def _run_agent_learn(
             get_library_text,
         ],
         model=model,
+        output_type=LibraryState,
     )
 
     result = Runner.run_sync(agent, prompt)
@@ -101,15 +99,17 @@ def run_library_learn_task(
         )
         print(f"Agent run dump: {dump_path}")
 
-    lib_text = merge_library_text(
-        previous_library.functions_text,
-        clean_llm_output(llm_output),
-    )
-    save_file(lib_text, output_dir, "library_current.mlir")
-    library_file = save_file(lib_text, output_dir, f"library_v{version}.mlir")
-    print(f"Library: {library_file}")
+    existing_names = {f.function_name for f in previous_library.functions}
+    new_functions = [
+        f for f in llm_output.functions if f.function_name not in existing_names
+    ]
+    merged = LibraryState(functions=previous_library.functions + new_functions)
 
-    return LibraryState(lib_text)
+    lib_dir = output_dir / f"library{version}"
+    dump_library(merged, lib_dir)
+    print(f"Library: {lib_dir}")
+
+    return merged
 
 
 def main():

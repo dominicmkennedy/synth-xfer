@@ -47,14 +47,19 @@ class SynthesisAgent:
         task: SynthesisTask,
         args,
         api_key: str,
-        current_lib_path: Path,
+        current_lib: LibraryState,
     ) -> None:
         self._task = task
         self._args = args
+        self._library = current_lib
         self._history: list[Any] | None = None
-        self._agent = self._build_agent(args, api_key, current_lib_path)
+        self._agent = self._build_agent(args, api_key)
 
-    def _build_agent(self, args, api_key: str, current_lib_path: Path) -> Agent:
+    def update_library(self, new_lib: LibraryState) -> None:
+        """Update the library used by this agent's tools."""
+        self._library = new_lib
+
+    def _build_agent(self, args, api_key: str) -> Agent:
         del api_key  # Reserved for future model/provider auth parity.
         task = self._task
         template_path: Path = args.template
@@ -86,7 +91,7 @@ class SynthesisAgent:
         @function_tool
         def get_library_text() -> str:
             """Return the library (in MLIR) containing reusable helper functions mined from previous synthesis rounds. Prefer calling these functions in your solution to keep the program short."""
-            return current_lib_path.read_text(encoding="utf-8")
+            return "\n".join(func.source for func in self._library.functions)
 
         @function_tool
         def list_examples() -> str:
@@ -146,7 +151,7 @@ class SynthesisAgent:
             - Exact %: the percentage of inputs for which the output abstract value is exactly the same the optimal transfer function (perfect precision)
             - Norm: ignore for now
             """
-            lib_text = current_lib_path.read_text(encoding="utf-8")
+            lib_text = "\n".join(func.source for func in self._library.functions)
             full_soln = merge_library_text(lib_text, transformer_mlir)
             return eval_transformer(
                 solution_path=full_soln,
