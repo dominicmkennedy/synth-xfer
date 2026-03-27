@@ -1,13 +1,8 @@
 from argparse import ArgumentParser, Namespace
 from pathlib import Path
 
-import pandas as pd
-
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval import enum
-from synth_xfer._util.parse_mlir import get_helper_funcs
-from synth_xfer._util.random import Random
-from synth_xfer._util.tsv import EnumData, EnumMetaData
+from synth_xfer._util.tsv import build_enum_data
 from synth_xfer.cli.args import get_sampler, int_triple, int_tuple, make_sampler_parser
 
 
@@ -53,35 +48,15 @@ def _register_parser() -> Namespace:
 
 def main() -> None:
     args = _register_parser()
-
-    sampler = get_sampler(args)
-    domain = AbstractDomain[args.domain]
-    helpers = get_helper_funcs(args.op, domain)
-    random = Random(args.seed)
-    seed = random.randint(0, 2**32 - 1) if args.seed is None else args.seed
-    arity = len(helpers.conc_arg_ty)
-
-    to_eval = enum(args.lbw, args.mbw, args.hbw, seed, helpers, sampler)
-
-    rows = []
-    for bw, xs in to_eval.items():
-        for fn_args, ideal in xs:
-            rows.append((bw, *fn_args, ideal))
-
-    cols = ["bw"] + [f"arg_{i}" for i in range(arity)] + ["ideal"]
-    df = pd.DataFrame.from_records(rows, columns=cols)
-
-    metadata = EnumMetaData(
-        domain=domain,
-        op=args.op.stem,
-        arity=arity,
-        seed=seed,
+    build_enum_data(
+        domain=AbstractDomain[args.domain],
+        op_path=args.op,
         lbw=args.lbw,
         mbw=args.mbw,
         hbw=args.hbw,
-    )
-
-    EnumData(metadata, df).write_tsv(args.output)
+        seed=args.seed,
+        sampler=get_sampler(args),
+    ).write_tsv(args.output)
 
 
 if __name__ == "__main__":

@@ -221,27 +221,29 @@ def parse_to_eval_inputs(
     return to_eval_cls(inputs)
 
 
-def run_xfer_fn(
+def run_xfer_fns(
     domain: AbstractDomain,
-    bw: int,
-    input_args: "ArgsVec",
+    to_eval: dict[int, "ArgsVec"],
     mlir_mod: ModuleOp,
-    xfer_name: str,
+    xfer_names: list[str],
 ):
-    lowerer = LowerToLLVM([bw])
-    lowerer.add_mod(mlir_mod, [xfer_name])
-
-    fn_name = f"run_transformer_{str(domain).lower()}"
-    for _ in range(len(input_args[0]) + 1):
-        fn_name += f"_{bw}"
-
-    run_fn = _get_ee_fn_dyn(fn_name)
+    lowerer = LowerToLLVM(list(to_eval.keys()))
+    lowerer.add_mod(mlir_mod, xfer_names)
+    outputs: list[list] = [[] for _ in xfer_names]
 
     with Jit() as jit:
         jit.add_mod(lowerer)
-        fn_ptr = jit.get_fn_ptr(f"{xfer_name}_{bw}_shim")
+        for bw, input_args in to_eval.items():
+            fn_name = f"run_transformer_{str(domain).lower()}"
+            for _ in range(len(input_args[0]) + 1):
+                fn_name += f"_{bw}"
+            run_fn = _get_ee_fn_dyn(fn_name)
 
-        return run_fn(input_args, fn_ptr.addr)
+            for i, xfer_name in enumerate(xfer_names):
+                fn_ptr = jit.get_fn_ptr(f"{xfer_name}_{bw}_shim")
+                outputs[i].extend(run_fn(input_args, fn_ptr.addr))
+
+    return outputs
 
 
 def run_concrete_fn(

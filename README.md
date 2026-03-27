@@ -32,14 +32,13 @@ pytest -vv
 
 ## Usage
 
-The project provides nine executables,
+The project provides eight executables,
 these executables depend on paths in the repo the should be run from the project root.
 
 | Executable      | Description                                                                                               |
 |-----------------|-----------------------------------------------------------------------------------------------------------|
 | `sxf`           | Given either a concrete function or a benchmark config, synthesizes abstract transformers (the main tool) |
-| `eval-final`    | Measures the precision of a previously synthesized transformer                                            |
-| `run-xfer`      | Runs a synthesized transformer on explicit inputs or evaluation datasets                                  |
+| `run-xfer`      | Runs synthesized transformer(s) on explicit inputs or evaluates them on datasets / generated workloads    |
 | `verify`        | Checks the soundness of a previously synthesized transformer                                              |
 | `lower-to-llvm` | Lowers a synthesized transformer from MLIR to LLVM IR                                                     |
 | `simplifier`    | Applies a peephole optimizer to simplify synthesized transformer code                                     |
@@ -184,35 +183,38 @@ Should produce:
 32 bits | sound   | took 0.0282s
 ```
 
-## Important CLI Options for `eval-final`
+## Important CLI Options for `run-xfer`
 
-| CLI flag              | Description                                                                                                                                         |
-|-----------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
-| `<input_path>`        | Path to a solutions directory (with `config.log`) or a single transformer `.mlir` file.                                                             |
-| `--domain <Name>`     | Abstract domain (required only when `<input_path>` is a single transformer file).                                                                   |
-| `--op <Path>`         | Path to the concrete operation (`.mlir` file) (required only when `<input_path>` is a single transformer file).                                     |
-| `--xfer-name <str>`   | Name of the transformer function to evaluate (defaults to `solution`, or the only function in the file if there's just one).                        |
-| `--exact-bw <tuple>`  | Bitwidth for exact percent reporting. Accepts `bw` or `bw,num_samples` (e.g. `4`, or `8,5000`).                                                     |
-| `--norm-bw <tuple>`   | Bitwidth for norm score reporting. Accepts `bw`, `bw,num_samples`, or `bw,num_abs_samples,num_conc_samples` (e.g. `4`, `8,5000` or `64,5000,5000`). |
-| `-o, --output <Path>` | Write results as CSV to the given path.                                                                                                             |
+| CLI flag                    | Description                                                                                                                                   |
+|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| `--xfer-file <Path>`        | One or more transformer `.mlir` files, or solution directories containing `solution.mlir` and `config.log`.                                   |
+| `--xfer-name <str>`         | Name of the transformer function to evaluate (defaults to `solution`, or the only function in the file if there's just one).                  |
+| `-i, --input <Path>`        | Existing enum TSV dataset. In apply mode, adds transformer outputs to the dataset. In `--eval` mode, compares transformer(s) against `ideal`. |
+| `--eval`                    | Switch from apply mode to evaluation mode.                                                                                                    |
+| `--domain <Name>`           | Abstract domain for stdin apply mode or generated eval mode.                                                                                  |
+| `--op <Path>`               | Concrete operation used to generate an eval workload on the fly.                                                                              |
+| `--lbw <list[int]>`         | Low bitwidths for generated eval workloads.                                                                                                   |
+| `--mbw <list[int,int]>`     | Mid bitwidth sampling settings for generated eval workloads.                                                                                  |
+| `--hbw <list[int,int,int]>` | High bitwidth sampling settings for generated eval workloads.                                                                                 |
+| `-o, --output <Path>`       | Write the resulting table as TSV in apply mode or CSV in eval mode.                                                                           |
 
-For example:
+Generated eval example:
 ```bash
-eval-final tests/data/kb_and.mlir        \
-           --domain KnownBits            \
-           --op mlir/Operations/And.mlir \
-           --exact-bw 8,5000             \
-           --norm-bw 64,5000,5000
-```
-Should produce:
-```
-Exact bw: (8, 5000)
-Norm bw:  (64, 5000, 5000)
-      Domain   Op  Top Exact %  Synth Exact %  Top Norm  Synth Norm
-0  KnownBits  And         4.02          100.0   2494.34           0
+run-xfer --xfer-file tests/data/kb_and.mlir tests/data/kb_or.mlir \
+         --eval                                                   \
+         --domain KnownBits                                       \
+         --op mlir/Operations/And.mlir                            \
+         --lbw 4
 ```
 
-(With small differences due to RNG).
+Should produce:
+
+```
+   Domain  Op Candidate  Bitwidth  Cases    Sound %    Exact %  Dist  Base Dist  Sound Dist
+KnownBits And       top         4   6561 100.000000   1.234568  4374     4374.0        4374
+KnownBits And    kb_and         4   6561 100.000000 100.000000     0     4374.0           0
+KnownBits And     kb_or         4   6561   9.525987   1.234568  5832     4374.0        4124
+```
 
 ## Important CLI Options for `simplifier`
 

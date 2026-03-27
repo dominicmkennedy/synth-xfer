@@ -7,6 +7,9 @@ import pandas as pd
 import yaml
 
 from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.eval import enum
+from synth_xfer._util.parse_mlir import get_helper_funcs
+from synth_xfer._util.random import Random, Sampler
 
 
 @dataclass(frozen=True)
@@ -95,3 +98,40 @@ class EnumData:
         frame = pd.read_csv(StringIO(tsv_text), sep="\t")
 
         return cls(metadata, frame)
+
+
+def build_enum_data(
+    domain: AbstractDomain,
+    op_path: Path,
+    lbw: list[int],
+    mbw: list[tuple[int, int]],
+    hbw: list[tuple[int, int, int]],
+    seed: int | None,
+    sampler: Sampler,
+) -> EnumData:
+    helpers = get_helper_funcs(op_path, domain)
+    random = Random(seed)
+    resolved_seed = random.randint(0, 2**32 - 1) if seed is None else seed
+    arity = len(helpers.conc_arg_ty)
+
+    to_eval = enum(lbw, mbw, hbw, resolved_seed, helpers, sampler)
+
+    rows = []
+    for bw, xs in to_eval.items():
+        for fn_args, ideal in xs:
+            rows.append((bw, *fn_args, ideal))
+
+    cols = ["bw"] + [f"arg_{i}" for i in range(arity)] + ["ideal"]
+    df = pd.DataFrame.from_records(rows, columns=cols)
+
+    metadata = EnumMetaData(
+        domain=domain,
+        op=op_path.stem,
+        arity=arity,
+        seed=resolved_seed,
+        lbw=lbw,
+        mbw=mbw,
+        hbw=hbw,
+    )
+
+    return EnumData(metadata, df)

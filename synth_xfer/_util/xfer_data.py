@@ -1,0 +1,190 @@
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+from xdsl.dialects.builtin import ModuleOp, StringAttr, SymbolRefAttr
+from xdsl.dialects.func import CallOp, FuncOp
+
+from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.eval import parse_to_eval_inputs, parse_to_run_inputs
+from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
+from synth_xfer._util.tsv import EnumData
+
+
+def resolve_xfer_name(
+    xfer_fns: dict[str, FuncOp],
+    requested_name: str | None,
+) -> str:
+    if requested_name is not None:
+        xfer_name = requested_name
+    elif len(xfer_fns) == 1:
+        xfer_name = list(xfer_fns.keys())[0]
+    else:
+        xfer_name = "solution"
+
+    if xfer_name not in xfer_fns:
+        raise ValueError(f"Function {xfer_name}, not found in MLIR module")
+
+    return xfer_name
+
+
+@dataclass(frozen=True)
+class XferCandidate:
+    label: str
+    solution_path: Path
+    mlir_mod: ModuleOp
+    xfer_name: str
+    arity: int
+    domain: AbstractDomain | None = None
+    op_path: Path | None = None
+
+
+def namespace_module(mod: ModuleOp, prefix: str) -> ModuleOp:
+    cloned = mod.clone()
+    rename_map: dict[str, str] = {}
+
+    for op in cloned.ops:
+        assert isinstance(op, FuncOp)
+        old_name = op.sym_name.data
+        new_name = f"{prefix}_{old_name}"
+        op.sym_name = StringAttr(new_name)
+        rename_map[old_name] = new_name
+
+    for op in cloned.walk():
+        if isinstance(op, CallOp):
+            callee = op.callee.string_value()
+            if callee in rename_map:
+                op.callee = SymbolRefAttr(rename_map[callee])
+
+    return cloned
+
+
+def _parse_config(config_path: Path) -> tuple[Path, AbstractDomain]:
+    transfer_path: Path | None = None
+    domain: AbstractDomain | None = None
+
+    with config_path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if not line.strip() or "|" not in line:
+                continue
+
+            key, value = line.split("|", 1)
+            key = key.strip()
+            value = value.strip()
+
+            if key == "transfer_functions":
+                transfer_path = Path(value)
+
+            if key == "domain":
+                domain = AbstractDomain[value]
+
+    if transfer_path is None:
+        raise ValueError("Missing 'transfer_functions' entry in config.")
+    if domain is None:
+        raise ValueError("Missing 'domain' entry in config.")
+
+    return transfer_path, domain
+def load_candidate(
+    solution_path: Path,
+    requested_name: str | None,
+    namespace: str,
+    domain: AbstractDomain | None = None,
+    op_path: Path | None = None,
+) -> XferCandidate:
+    raw_mod = parse_mlir_mod(solution_path)
+    raw_fns = get_fns(raw_mod)
+    xfer_name = resolve_xfer_name(raw_fns, requested_name)
+    mlir_mod = namespace_module(raw_mod, namespace)
+    xfer_name = f"{namespace}_{xfer_name}"
+    xfer_fns = get_fns(mlir_mod)
+
+    return XferCandidate(
+        label=str(solution_path.parent)
+        if solution_path.name == "solution.mlir"
+        else str(solution_path),
+        solution_path=solution_path,
+        mlir_mod=mlir_mod,
+        xfer_name=xfer_name,
+        arity=len(xfer_fns[xfer_name].args),
+        domain=domain,
+        op_path=op_path,
+    )
+
+
+def load_candidates(
+    xfer_paths: list[Path],
+    requested_name: str | None,
+    domain: AbstractDomain | None = None,
+    op_path: Path | None = None,
+) -> list[XferCandidate]:
+    candidates: list[XferCandidate] = []
+    next_id = 0
+
+    for xfer_path in xfer_paths:
+        if xfer_path.is_dir():
+            for solution_path in sorted(xfer_path.rglob("solution.mlir")):
+                config_path = solution_path.with_name("config.log")
+                if not config_path.is_file():
+                    raise ValueError(f"Missing config.log for solution: {solution_path}")
+                cfg_op_path, cfg_domain = _parse_config(config_path)
+                candidates.append(
+                    load_candidate(
+                        solution_path,
+                        requested_name,
+                        namespace=f"cand{next_id}",
+                        domain=cfg_domain,
+                        op_path=cfg_op_path,
+                    )
+                )
+                next_id += 1
+        elif xfer_path.is_file():
+            candidates.append(
+                load_candidate(
+                    xfer_path,
+                    requested_name,
+                    namespace=f"cand{next_id}",
+                    domain=domain,
+                    op_path=op_path,
+                )
+            )
+            next_id += 1
+        else:
+            raise ValueError(f"Transformer path not found: {xfer_path}")
+
+    return candidates
+
+
+def parse_enum_df(df: pd.DataFrame, domain: AbstractDomain, arity: int, bw: int):
+    if all(f"arg_{i}" in df.columns for i in range(arity)):
+        df = df[[f"arg_{i}" for i in range(arity)]]  # type: ignore
+    else:
+        raise ValueError(f"Input header missing columns, for {arity}-ary transformer")
+
+    in_strs = [tuple(x) for x in df.astype(str).itertuples(index=False, name=None)]
+
+    return parse_to_run_inputs(domain, bw, arity, in_strs)
+
+
+def parse_eval_df(df: pd.DataFrame, domain: AbstractDomain, arity: int, bw: int):
+    if all(f"arg_{i}" in df.columns for i in range(arity)) and "ideal" in df.columns:
+        args = (
+            df[[f"arg_{i}" for i in range(arity)]]
+            .astype(str)
+            .itertuples(index=False, name=None)
+        )
+        ret = df[["ideal"]].astype(str).itertuples(index=False, name=None)
+    else:
+        raise ValueError(f"Input header missing columns, for {arity}-ary transformer")
+
+    in_strs = [(tuple(x), y[0]) for x, y in zip(args, ret)]
+
+    return parse_to_eval_inputs(domain, bw, arity, in_strs)
+def enumdata_to_inputs(
+    data: EnumData,
+    parse_fn,
+) -> dict[int, Any]:
+    return {
+        bw: parse_fn(v, data.metadata.domain, data.metadata.arity, bw)  # type: ignore
+        for bw, v in data.enumdata.groupby("bw")
+    }
