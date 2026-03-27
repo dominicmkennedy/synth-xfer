@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from ctypes import CFUNCTYPE, c_bool, c_int64
 from typing import Callable, Protocol, TypeAlias, cast, runtime_checkable
 
@@ -12,39 +13,48 @@ from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.random import Sampler
 
-type ToEval = object
-
 
 @runtime_checkable
-class AbstractValueLike(Protocol):
+class AbstractValue(Protocol):
     def arity(self) -> int: ...
-    def bottom(self) -> "AbstractValueLike": ...
+    def bottom(self) -> "AbstractValue": ...
     def bw(self) -> int: ...
-    def distance(self, other: "AbstractValueLike") -> float: ...
+    def distance(self, other: "AbstractValue") -> float: ...
     def size(self) -> int: ...
-    def top(self) -> "AbstractValueLike": ...
+    def top(self) -> "AbstractValue": ...
     def __str__(self) -> str: ...
 
 
+type EvalRow = tuple[tuple[AbstractValue, ...], AbstractValue]
+
+
 @runtime_checkable
-class ArgsVecLike(Protocol):
+class ArgsVec(Protocol):
     def __len__(self) -> int: ...
-    def __getitem__(self, idx: int) -> tuple[AbstractValueLike, ...]: ...
+    def __getitem__(self, idx: int) -> tuple[AbstractValue, ...]: ...
+    def __iter__(self) -> Iterator[tuple[AbstractValue, ...]]: ...
 
 
 @runtime_checkable
-class ResultsLike(Protocol):
-    type ExampleTuple = tuple[tuple[str, ...], str, str, float]
+class ToEval(Protocol):
+    def __len__(self) -> int: ...
+    def __getitem__(self, idx: int) -> EvalRow: ...
+    def __iter__(self) -> Iterator[EvalRow]: ...
+
+
+@runtime_checkable
+class Results(Protocol):
+    ExampleTuple: TypeAlias = tuple[tuple[str, ...], str, str, float]
 
     def __str__(self) -> str: ...
-    def get_unsound_examples(self) -> list[list[ExampleTuple]]: ...
-    def get_imprecise_examples(self) -> list[list[ExampleTuple]]: ...
+    def get_unsound_examples(self) -> list[list["Results.ExampleTuple"]]: ...
+    def get_imprecise_examples(self) -> list[list["Results.ExampleTuple"]]: ...
 
 
 EvalInput: TypeAlias = tuple[ToEval, list[FnPtr], list[FnPtr]]
 EvalInputMap: TypeAlias = dict[int, EvalInput]
-RunInputMap: TypeAlias = dict[int, ArgsVecLike]
-RunOutputs: TypeAlias = list[list[AbstractValueLike]]
+RunInputMap: TypeAlias = dict[int, ArgsVec]
+RunOutputs: TypeAlias = list[list[AbstractValue]]
 
 
 def _get_ee_fn_dyn(fn_name: str) -> Callable:
@@ -64,8 +74,8 @@ def _get_ee_fn_dyn(fn_name: str) -> Callable:
 
 
 def _get_run_transformer_fn(
-    domain: AbstractDomain, bw: int, input_args: ArgsVecLike
-) -> Callable[[ArgsVecLike, int], list[AbstractValueLike]]:
+    domain: AbstractDomain, bw: int, input_args: ArgsVec
+) -> Callable[[ArgsVec, int], list[AbstractValue]]:
     def _run_transformer_engine_name(domain: AbstractDomain, bw: int, arity: int) -> str:
         fn_name = f"run_transformer_{str(domain).lower()}"
         for _ in range(arity + 1):
@@ -73,25 +83,25 @@ def _get_run_transformer_fn(
         return fn_name
 
     return cast(
-        Callable[[ArgsVecLike, int], list[AbstractValueLike]],
+        Callable[[ArgsVec, int], list[AbstractValue]],
         _get_ee_fn_dyn(_run_transformer_engine_name(domain, bw, len(input_args[0]))),
     )
 
 
 def _get_eval_fn(
     to_eval: ToEval,
-) -> Callable[[ToEval, list[int], list[int], int, int], ResultsLike]:
+) -> Callable[[ToEval, list[int], list[int], int, int], Results]:
     def _eval_engine_name(to_eval: ToEval) -> str:
         suffix = to_eval.__class__.__name__.lower()[6:]
         return f"eval_{suffix}"
 
     return cast(
-        Callable[[ToEval, list[int], list[int], int, int], ResultsLike],
+        Callable[[ToEval, list[int], list[int], int, int], Results],
         _get_ee_fn_dyn(_eval_engine_name(to_eval)),
     )
 
 
-def get_per_bit(a: ResultsLike) -> list[PerBitRes]:
+def get_per_bit(a: Results) -> list[PerBitRes]:
     x = str(a).split("\n")
 
     def get[T](in_str: str, to_match: str, parser: Callable[[str], T]) -> T:
@@ -242,7 +252,7 @@ def eval_transfer_func(
 
 def parse_to_run_inputs(
     domain: AbstractDomain, bw: int, arity: int, inputs: list[tuple[str, ...]]
-) -> ArgsVecLike:
+) -> ArgsVec:
     cls_name = f"Args{domain}"
     for _ in range(arity):
         cls_name += f"_{bw}"

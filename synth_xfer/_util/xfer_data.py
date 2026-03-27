@@ -8,7 +8,7 @@ from xdsl.dialects.func import CallOp, FuncOp
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import (
-    ArgsVecLike,
+    ArgsVec,
     RunInputMap,
     ToEval,
     parse_to_eval_inputs,
@@ -165,7 +165,7 @@ def load_candidates(
 
 def parse_enum_df(
     df: pd.DataFrame, domain: AbstractDomain, arity: int, bw: int
-) -> ArgsVecLike:
+) -> ArgsVec:
     if all(f"arg_{i}" in df.columns for i in range(arity)):
         df = df[[f"arg_{i}" for i in range(arity)]]  # type: ignore
     else:
