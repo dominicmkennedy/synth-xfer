@@ -1,13 +1,19 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Callable
 
 import pandas as pd
 from xdsl.dialects.builtin import ModuleOp, StringAttr, SymbolRefAttr
 from xdsl.dialects.func import CallOp, FuncOp
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval import parse_to_eval_inputs, parse_to_run_inputs
+from synth_xfer._util.eval import (
+    ArgsVecLike,
+    RunInputMap,
+    ToEval,
+    parse_to_eval_inputs,
+    parse_to_run_inputs,
+)
 from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
 from synth_xfer._util.tsv import EnumData
 
@@ -85,6 +91,8 @@ def _parse_config(config_path: Path) -> tuple[Path, AbstractDomain]:
         raise ValueError("Missing 'domain' entry in config.")
 
     return transfer_path, domain
+
+
 def load_candidate(
     solution_path: Path,
     requested_name: str | None,
@@ -155,7 +163,9 @@ def load_candidates(
     return candidates
 
 
-def parse_enum_df(df: pd.DataFrame, domain: AbstractDomain, arity: int, bw: int):
+def parse_enum_df(
+    df: pd.DataFrame, domain: AbstractDomain, arity: int, bw: int
+) -> ArgsVecLike:
     if all(f"arg_{i}" in df.columns for i in range(arity)):
         df = df[[f"arg_{i}" for i in range(arity)]]  # type: ignore
     else:
@@ -166,7 +176,9 @@ def parse_enum_df(df: pd.DataFrame, domain: AbstractDomain, arity: int, bw: int)
     return parse_to_run_inputs(domain, bw, arity, in_strs)
 
 
-def parse_eval_df(df: pd.DataFrame, domain: AbstractDomain, arity: int, bw: int):
+def parse_eval_df(
+    df: pd.DataFrame, domain: AbstractDomain, arity: int, bw: int
+) -> ToEval:
     if all(f"arg_{i}" in df.columns for i in range(arity)) and "ideal" in df.columns:
         args = (
             df[[f"arg_{i}" for i in range(arity)]]
@@ -180,11 +192,21 @@ def parse_eval_df(df: pd.DataFrame, domain: AbstractDomain, arity: int, bw: int)
     in_strs = [(tuple(x), y[0]) for x, y in zip(args, ret)]
 
     return parse_to_eval_inputs(domain, bw, arity, in_strs)
-def enumdata_to_inputs(
+
+
+def _enumdata_to_inputs(
     data: EnumData,
-    parse_fn,
-) -> dict[int, Any]:
+    parse_fn: Callable[[pd.DataFrame, AbstractDomain, int, int], object],
+) -> dict[int, object]:
     return {
         bw: parse_fn(v, data.metadata.domain, data.metadata.arity, bw)  # type: ignore
         for bw, v in data.enumdata.groupby("bw")
     }
+
+
+def enumdata_to_run_inputs(data: EnumData) -> RunInputMap:
+    return _enumdata_to_inputs(data, parse_enum_df)  # type: ignore
+
+
+def enumdata_to_eval_inputs(data: EnumData) -> dict[int, ToEval]:
+    return _enumdata_to_inputs(data, parse_eval_df)

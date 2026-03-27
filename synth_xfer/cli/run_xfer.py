@@ -4,28 +4,30 @@ from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
 from sys import stdin, stdout
-from typing import Any, Callable
+from typing import Callable
 
 import pandas as pd
 from xdsl.dialects.builtin import ModuleOp
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import (
+    EvalInputMap,
+    RunInputMap,
+    ToEval,
     eval_transfer_func,
     parse_to_run_inputs,
     run_xfer_fns,
 )
 from synth_xfer._util.eval_result import EvalResult, PerBitRes
-from synth_xfer._util.jit import Jit
+from synth_xfer._util.jit import FnPtr, Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import get_helper_funcs, top_as_xfer
 from synth_xfer._util.tsv import EnumData, build_enum_data
 from synth_xfer._util.xfer_data import (
     XferCandidate,
-    enumdata_to_inputs,
+    enumdata_to_eval_inputs,
+    enumdata_to_run_inputs,
     load_candidates,
-    parse_enum_df,
-    parse_eval_df,
 )
 from synth_xfer.cli.args import get_sampler, int_triple, int_tuple, make_sampler_parser
 
@@ -153,7 +155,11 @@ def _validate_eval_mode(args: Namespace, p: ArgumentParser) -> None:
         p.error("--op requires --domain in generated eval mode")
     if args.domain is not None and args.op is None:
         p.error("--domain requires --op in generated eval mode")
-    if args.domain is not None and args.op is not None and not (args.lbw or args.mbw or args.hbw):
+    if (
+        args.domain is not None
+        and args.op is not None
+        and not (args.lbw or args.mbw or args.hbw)
+    ):
         p.error("generated eval requires at least one of --lbw/--mbw/--hbw")
 
 
@@ -199,7 +205,9 @@ def _candidate_keys(candidates: list[XferCandidate]) -> list[str]:
 def _ensure_same_arity(candidates: list[XferCandidate]) -> int:
     arities = {cand.arity for cand in candidates}
     if len(arities) != 1:
-        raise ValueError(f"All candidates must have the same arity, got: {sorted(arities)}")
+        raise ValueError(
+            f"All candidates must have the same arity, got: {sorted(arities)}"
+        )
     return next(iter(arities))
 
 
@@ -208,7 +216,9 @@ def _prepare_candidates(candidates: list[XferCandidate]) -> PreparedCandidates:
         arity=_ensure_same_arity(candidates),
         labels=_candidate_keys(candidates),
         xfer_names=[cand.xfer_name for cand in candidates],
-        merged_mod=ModuleOp([op.clone() for cand in candidates for op in cand.mlir_mod.ops]),
+        merged_mod=ModuleOp(
+            [op.clone() for cand in candidates for op in cand.mlir_mod.ops]
+        ),
     )
 
 
@@ -223,7 +233,9 @@ def _check_domain(candidates: list[XferCandidate], domain: AbstractDomain) -> No
         if cand.domain is not None and cand.domain != domain
     ]
     if bad:
-        raise ValueError(f"Candidate domains do not match workload domain {domain}: {bad}")
+        raise ValueError(
+            f"Candidate domains do not match workload domain {domain}: {bad}"
+        )
 
 
 def _parse_stdin_inputs(args: Namespace, arity: int):
@@ -232,14 +244,14 @@ def _parse_stdin_inputs(args: Namespace, arity: int):
     domain = AbstractDomain[args.domain]
     df = pd.read_csv(StringIO(stdin.read()), sep="\t")
     in_strs = [tuple(x) for x in df.astype(str).itertuples(index=False, name=None)]
-    to_eval = {args.bw: parse_to_run_inputs(domain, args.bw, arity, in_strs)}
+    to_eval: RunInputMap = {args.bw: parse_to_run_inputs(domain, args.bw, arity, in_strs)}
     return domain, to_eval, df
 
 
 def _run_apply(
     prepared: PreparedCandidates,
     domain: AbstractDomain,
-    to_eval: dict[int, Any],
+    to_eval: RunInputMap,
     df: pd.DataFrame,
     output: Path | None,
 ) -> None:
@@ -330,16 +342,16 @@ def _print_examples(
 
 
 def _eval_with_lowerer(
-    to_eval: dict[int, Any],
+    to_eval: dict[int, ToEval],
     lowerer: LowerToLLVM,
     xfer_names: list[str],
     unsound_ex: int,
     imprecise_ex: int,
-    extra_ptrs: Callable[[Jit, int], list[Any]] | None = None,
+    extra_ptrs: Callable[[Jit, int], list[FnPtr]] | None = None,
 ) -> list[EvalResult]:
     with Jit() as jit:
         jit.add_mod(lowerer)
-        eval_input = {
+        eval_input: EvalInputMap = {
             bw: (
                 values,
                 ([] if extra_ptrs is None else extra_ptrs(jit, bw))
@@ -367,7 +379,7 @@ def _run_eval_from_dataset(
         )
 
     domain = data.metadata.domain
-    to_eval = enumdata_to_inputs(data, parse_eval_df)
+    to_eval = enumdata_to_eval_inputs(data)
     _check_domain(candidates, domain)
 
     lowerer = LowerToLLVM(list(to_eval.keys()))
@@ -424,7 +436,7 @@ def _run_eval_generated_group(
             f"Candidate arity {prepared.arity} does not match generated arity {generated.metadata.arity}"
         )
 
-    to_eval = enumdata_to_inputs(generated, parse_eval_df)
+    to_eval = enumdata_to_eval_inputs(generated)
     _check_domain(candidates, domain)
 
     helpers = get_helper_funcs(op_path, domain)
@@ -539,7 +551,7 @@ def main() -> None:
                 f"Candidate arity {prepared.arity} does not match dataset arity {data.metadata.arity}"
             )
         domain = data.metadata.domain
-        to_eval = enumdata_to_inputs(data, parse_enum_df)
+        to_eval = enumdata_to_run_inputs(data)
         df = data.enumdata
         _check_domain(candidates, domain)
     else:

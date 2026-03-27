@@ -180,9 +180,7 @@ def _print_counterexample(
         conc_output = None
     else:
         try:
-            input_args = parse_to_run_inputs(
-                domain, bw, func_arity, [tuple(abst_args)]
-            )
+            input_args = parse_to_run_inputs(domain, bw, func_arity, [tuple(abst_args)])
             abst_output = run_xfer_fns(
                 domain,
                 {bw: input_args},

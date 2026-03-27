@@ -6,12 +6,11 @@ from argparse import (
 )
 from pathlib import Path
 from time import perf_counter
-from typing import TYPE_CHECKING
 
 from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.dsl_operators import DslOpSet, load_dsl_ops
-from synth_xfer._util.eval import enum, eval_transfer_func
+from synth_xfer._util.eval import EvalInputMap, ToEval, enum, eval_transfer_func
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.log import get_logger, write_log_file
@@ -22,19 +21,11 @@ from synth_xfer._util.parse_mlir import HelperFuncs, get_helper_funcs, top_as_xf
 from synth_xfer._util.random import Random, Sampler
 from synth_xfer._util.solution_set import EvalFn, UnsizedSolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
-from synth_xfer.cli.args import (
-    int_list,
-    int_triple,
-    int_tuple,
-    make_sampler_parser,
-)
-
-if TYPE_CHECKING:
-    from synth_xfer._eval_engine import ToEval
+from synth_xfer.cli.args import int_list, int_triple, int_tuple, make_sampler_parser
 
 
 def _eval_helper(
-    to_eval: dict[int, "ToEval"], bws: list[int], helper_funcs: HelperFuncs
+    to_eval: dict[int, ToEval], bws: list[int], helper_funcs: HelperFuncs
 ) -> EvalFn:
     def helper(
         xfer: list[FunctionWithCondition],
@@ -63,7 +54,7 @@ def _eval_helper(
                 bw: [jit.get_fn_ptr(x) for x in base_names[bw]] for bw in base_names
             }
 
-            input = {
+            input: EvalInputMap = {
                 bw: (to_eval[bw], xfer_fns.get(bw, []), base_fns.get(bw, []))
                 for bw in to_eval
             }

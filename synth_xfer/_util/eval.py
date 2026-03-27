@@ -1,5 +1,5 @@
 from ctypes import CFUNCTYPE, c_bool, c_int64
-from typing import TYPE_CHECKING, Callable
+from typing import Callable, Protocol, TypeAlias, cast, runtime_checkable
 
 from xdsl.parser import IntegerType, ModuleOp
 from xdsl_smt.dialects.transfer import TransIntegerType
@@ -12,8 +12,39 @@ from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.random import Sampler
 
-if TYPE_CHECKING:
-    from synth_xfer._eval_engine import ArgsVec, Results, ToEval
+type ToEval = object
+
+
+@runtime_checkable
+class AbstractValueLike(Protocol):
+    def arity(self) -> int: ...
+    def bottom(self) -> "AbstractValueLike": ...
+    def bw(self) -> int: ...
+    def distance(self, other: "AbstractValueLike") -> float: ...
+    def size(self) -> int: ...
+    def top(self) -> "AbstractValueLike": ...
+    def __str__(self) -> str: ...
+
+
+@runtime_checkable
+class ArgsVecLike(Protocol):
+    def __len__(self) -> int: ...
+    def __getitem__(self, idx: int) -> tuple[AbstractValueLike, ...]: ...
+
+
+@runtime_checkable
+class ResultsLike(Protocol):
+    type ExampleTuple = tuple[tuple[str, ...], str, str, float]
+
+    def __str__(self) -> str: ...
+    def get_unsound_examples(self) -> list[list[ExampleTuple]]: ...
+    def get_imprecise_examples(self) -> list[list[ExampleTuple]]: ...
+
+
+EvalInput: TypeAlias = tuple[ToEval, list[FnPtr], list[FnPtr]]
+EvalInputMap: TypeAlias = dict[int, EvalInput]
+RunInputMap: TypeAlias = dict[int, ArgsVecLike]
+RunOutputs: TypeAlias = list[list[AbstractValueLike]]
 
 
 def _get_ee_fn_dyn(fn_name: str) -> Callable:
@@ -32,7 +63,35 @@ def _get_ee_fn_dyn(fn_name: str) -> Callable:
     return ee_fn
 
 
-def get_per_bit(a: "Results") -> list[PerBitRes]:
+def _get_run_transformer_fn(
+    domain: AbstractDomain, bw: int, input_args: ArgsVecLike
+) -> Callable[[ArgsVecLike, int], list[AbstractValueLike]]:
+    def _run_transformer_engine_name(domain: AbstractDomain, bw: int, arity: int) -> str:
+        fn_name = f"run_transformer_{str(domain).lower()}"
+        for _ in range(arity + 1):
+            fn_name += f"_{bw}"
+        return fn_name
+
+    return cast(
+        Callable[[ArgsVecLike, int], list[AbstractValueLike]],
+        _get_ee_fn_dyn(_run_transformer_engine_name(domain, bw, len(input_args[0]))),
+    )
+
+
+def _get_eval_fn(
+    to_eval: ToEval,
+) -> Callable[[ToEval, list[int], list[int], int, int], ResultsLike]:
+    def _eval_engine_name(to_eval: ToEval) -> str:
+        suffix = to_eval.__class__.__name__.lower()[6:]
+        return f"eval_{suffix}"
+
+    return cast(
+        Callable[[ToEval, list[int], list[int], int, int], ResultsLike],
+        _get_ee_fn_dyn(_eval_engine_name(to_eval)),
+    )
+
+
+def get_per_bit(a: ResultsLike) -> list[PerBitRes]:
     x = str(a).split("\n")
 
     def get[T](in_str: str, to_match: str, parser: Callable[[str], T]) -> T:
@@ -58,17 +117,9 @@ def get_per_bit(a: "Results") -> list[PerBitRes]:
     num_unsolved_exact_cases = get(x[7], "num unsolved exact", get_ints)
     sound_distance = get(x[8], "sound distance", get_floats)
 
-    # Fetch unsound/imprecise examples from C++ bindings
     unsound_examples = a.get_unsound_examples()
     imprecise_examples = a.get_imprecise_examples()
 
-    # for (uex, iex) in zip(unsound_examples, imprecise_examples):
-    #     print("unsound results of ith:")
-    #     for ex in uex:
-    #         print(ex)
-    #     print("imprecise results of ith:")
-    #     for ex in iex:
-    #         print(ex)
     assert len(sound) > 0, "No output from EvalEngine"
     assert (
         len(sound)
@@ -105,7 +156,7 @@ def enum(
     seed: int,
     helper_funcs: HelperFuncs,
     sampler: Sampler,
-) -> dict[int, "ToEval"]:
+) -> dict[int, ToEval]:
     all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
     lowerer = LowerToLLVM(all_bws)
     crt = lowerer.add_fn(helper_funcs.crt_func, shim=True)
@@ -129,7 +180,7 @@ def enum(
 
     with Jit() as jit:
         jit.add_mod(lowerer)
-        low_to_evals: dict[int, "ToEval"] = {
+        low_to_evals: dict[int, ToEval] = {
             bw: get_enum_f("low", bw)(
                 jit.get_fn_ptr(crt[bw].name).addr,
                 jit.get_fn_ptr(op_constraint[bw].name).addr if op_constraint else None,
@@ -137,7 +188,7 @@ def enum(
             for bw in lbw
         }
 
-        mid_to_evals: dict[int, "ToEval"] = {
+        mid_to_evals: dict[int, ToEval] = {
             bw: get_enum_f("mid", bw)(
                 jit.get_fn_ptr(crt[bw].name).addr,
                 jit.get_fn_ptr(op_constraint[bw].name).addr if op_constraint else None,
@@ -148,7 +199,7 @@ def enum(
             for bw, samples in mbw
         }
 
-        high_to_evals: dict[int, "ToEval"] = {
+        high_to_evals: dict[int, ToEval] = {
             bw: get_enum_f("high", bw)(
                 jit.get_fn_ptr(crt[bw].name).addr,
                 jit.get_fn_ptr(op_constraint[bw].name).addr if op_constraint else None,
@@ -173,23 +224,15 @@ def get_eval_res(per_bits: list[list[PerBitRes]]) -> list[EvalResult]:
 
 
 def eval_transfer_func(
-    x: dict[int, tuple["ToEval", list[FnPtr], list[FnPtr]]],
+    x: EvalInputMap,
     unsound_ex: int = 0,
     imprecise_ex: int = 0,
 ) -> list[EvalResult]:
-    def get_eval_f(
-        x: "ToEval",
-    ) -> Callable[["ToEval", list[int], list[int], int, int], "Results"]:
-        suffix = x.__class__.__name__.lower()[6:]
-        func_name = f"eval_{suffix}"
-
-        return _get_ee_fn_dyn(func_name)
-
     per_bits = []
     for to_eval, xs, bs in x.values():
         xs_addrs = [x.addr for x in xs]
         bs_addrs = [b.addr for b in bs]
-        result = get_eval_f(to_eval)(
+        result = _get_eval_fn(to_eval)(
             to_eval, xs_addrs, bs_addrs, unsound_ex, imprecise_ex
         )
         per_bits.append(get_per_bit(result))
@@ -199,7 +242,7 @@ def eval_transfer_func(
 
 def parse_to_run_inputs(
     domain: AbstractDomain, bw: int, arity: int, inputs: list[tuple[str, ...]]
-) -> "ArgsVec":
+) -> ArgsVecLike:
     cls_name = f"Args{domain}"
     for _ in range(arity):
         cls_name += f"_{bw}"
@@ -211,7 +254,7 @@ def parse_to_run_inputs(
 
 def parse_to_eval_inputs(
     domain: AbstractDomain, bw: int, arity: int, inputs: list[tuple[tuple[str, ...], str]]
-) -> "ToEval":
+) -> ToEval:
     cls_name = f"ToEval{domain}"
     for _ in range(arity + 1):
         cls_name += f"_{bw}"
@@ -223,21 +266,18 @@ def parse_to_eval_inputs(
 
 def run_xfer_fns(
     domain: AbstractDomain,
-    to_eval: dict[int, "ArgsVec"],
+    to_eval: RunInputMap,
     mlir_mod: ModuleOp,
     xfer_names: list[str],
-):
+) -> RunOutputs:
     lowerer = LowerToLLVM(list(to_eval.keys()))
     lowerer.add_mod(mlir_mod, xfer_names)
-    outputs: list[list] = [[] for _ in xfer_names]
+    outputs: RunOutputs = [[] for _ in xfer_names]
 
     with Jit() as jit:
         jit.add_mod(lowerer)
         for bw, input_args in to_eval.items():
-            fn_name = f"run_transformer_{str(domain).lower()}"
-            for _ in range(len(input_args[0]) + 1):
-                fn_name += f"_{bw}"
-            run_fn = _get_ee_fn_dyn(fn_name)
+            run_fn = _get_run_transformer_fn(domain, bw, input_args)
 
             for i, xfer_name in enumerate(xfer_names):
                 fn_ptr = jit.get_fn_ptr(f"{xfer_name}_{bw}_shim")
