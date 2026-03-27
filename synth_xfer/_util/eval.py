@@ -25,9 +25,6 @@ class AbstractValue(Protocol):
     def __str__(self) -> str: ...
 
 
-type EvalRow = tuple[tuple[AbstractValue, ...], AbstractValue]
-
-
 @runtime_checkable
 class ArgsVec(Protocol):
     def __len__(self) -> int: ...
@@ -37,9 +34,11 @@ class ArgsVec(Protocol):
 
 @runtime_checkable
 class ToEval(Protocol):
+    type EvalRow = tuple[tuple[AbstractValue, ...], AbstractValue]
+
     def __len__(self) -> int: ...
-    def __getitem__(self, idx: int) -> EvalRow: ...
-    def __iter__(self) -> Iterator[EvalRow]: ...
+    def __getitem__(self, idx: int) -> "ToEval.EvalRow": ...
+    def __iter__(self) -> Iterator["ToEval.EvalRow"]: ...
 
 
 @runtime_checkable
