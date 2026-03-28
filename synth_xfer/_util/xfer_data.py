@@ -209,4 +209,4 @@ def enumdata_to_run_inputs(data: EnumData) -> RunInputMap:
 
 
 def enumdata_to_eval_inputs(data: EnumData) -> dict[int, ToEval]:
-    return _enumdata_to_inputs(data, parse_eval_df)
+    return _enumdata_to_inputs(data, parse_eval_df)  # type: ignore
