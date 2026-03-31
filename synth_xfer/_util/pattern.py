@@ -166,6 +166,8 @@ def _render_expr(ref: str, nodes: tuple[DagNode, ...]) -> str:
     node = nodes[int(ref.removeprefix("n"))]
     operands = ", ".join(_render_expr(operand, nodes) for operand in node.operands)
     return f"{node.operation}({operands})"
+
+
 def _value_ref(value: SSAValue, node_ids: dict[Operation, int]) -> str:
     if isinstance(value, BlockArgument):
         return f"arg{value.index}"
@@ -419,16 +421,6 @@ def generate_inputs(
     data_dir: Path,
     rng: Random,
 ) -> EnumData:
-    # TODO don't need
-    if domain not in (
-        AbstractDomain.KnownBits,
-        AbstractDomain.UConstRange,
-        AbstractDomain.SConstRange,
-    ):
-        raise NotImplementedError(
-            f"generate input not implemented for domain '{domain}'."
-        )
-
     dag = _load_pattern(path)
     rows: list[tuple[object, ...]] = []
     hbw: list[tuple[int, int, int]] = []

@@ -89,7 +89,7 @@ def main() -> None:
         required=True,
         help="Directory containing per-domain input TSVs",
     )
-    seq_parser.add_argument("-o", "--output", type=Path, required=True, help="Output")
+    seq_parser.add_argument("-o", "--output", type=Path, help="Output mlir function")
 
     gen_parser = subparsers.add_parser(
         "generate-input",
