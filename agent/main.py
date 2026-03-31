@@ -72,7 +72,7 @@ def main():
         SynthesisTask(op_file=op_file, op_name=extract_op_name(op_file))
         for op_file in args.op_file
     ]
-    initial_library = load_initial_library(args.library)
+    initial_library = load_initial_library(args.library_dir)
 
     final_library, latest_results = run_library_learning_loop(
         tasks, args.rounds, initial_library, args, api_key

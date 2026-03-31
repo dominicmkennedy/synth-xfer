@@ -74,16 +74,15 @@ def extract_op_name(op_file_path: str) -> str:
     return Path(op_file_path).stem
 
 
-def load_initial_library(library_file: Path | None) -> LibraryState:
+def load_initial_library(library_dir: Path | None) -> LibraryState:
     """Load initial library text for round 0."""
 
-    if library_file is None:
+    if library_dir is None:
         return LibraryState(functions=[])
 
-    text = Path(library_file).read_text()
-
-    if "builtin.module" not in text:
-        raise ValueError(f"Ill-formed MLIR: missing 'builtin.module' in {library_file}")
+    text = "builtin.module {}"
+    for entry in library_dir.iterdir():
+        text = merge_library_text(text, entry.read_text())
 
     func_pattern = re.compile(r"func\.func\s+@(\w+)\s*\(")
     functions = []

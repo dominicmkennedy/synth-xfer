@@ -147,10 +147,10 @@ def main():
         help="Path to ops.md file (default: agent/ops.md)",
     )
     parser.add_argument(
-        "--library",
+        "--library-dir",
         type=Path,
         default=None,
-        help="Optional initial library file for library-learning workflow",
+        help="Optional initial library directory for library-learning workflow",
     )
     parser.add_argument(
         "--rounds",
@@ -177,8 +177,8 @@ def main():
         if not path.exists():
             parser.error(f"{name}: path does not exist: {path}")
 
-    if args.library is not None and not args.library.exists():
-        parser.error(f"--library: path does not exist: {args.library}")
+    if args.library_dir is not None and not args.library_dir.is_dir():
+        parser.error(f"--library-dir: not a directory: {args.library_dir}")
 
     # Parse input files
     corpus = []
@@ -193,7 +193,7 @@ def main():
         corpus.append(result)
 
     api_key = get_api_key()
-    lib = load_initial_library(args.library)
+    lib = load_initial_library(args.library_dir)
 
     for rnd in range(args.rounds):
         lib = run_library_learn_task(

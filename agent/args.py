@@ -20,8 +20,8 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
     if not args.examples_dir.is_dir():
         parser.error(f"--examples-dir: not a directory: {args.examples_dir}")
 
-    if args.library is not None and not args.library.exists():
-        parser.error(f"--library: path does not exist: {args.library}")
+    if args.library_dir is not None and not args.library_dir.is_dir():
+        parser.error(f"--library-dir: not a directory: {args.library_dir}")
 
     for op_file in args.op_file:
         if not Path(op_file).exists():
@@ -101,10 +101,10 @@ def parse_args() -> argparse.Namespace:
         help="Path to template.mlir file (default: agent/template.mlir)",
     )
     parser.add_argument(
-        "--library",
+        "--library-dir",
         type=Path,
         default=None,
-        help="Optional initial library file for library-learning workflow",
+        help="Optional initial library directory for library-learning workflow",
     )
     parser.add_argument(
         "--rounds",
