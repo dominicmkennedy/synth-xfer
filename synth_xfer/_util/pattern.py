@@ -6,11 +6,17 @@ import re
 from typing import cast
 
 import pandas as pd
+from xdsl.dialects.builtin import ModuleOp, StringAttr
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 from xdsl.ir import BlockArgument, Operation, OpResult, SSAValue
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
+from synth_xfer._util.parse_mlir import (
+    get_fns,
+    get_solution,
+    inline_mod,
+    parse_mlir_mod,
+)
 from synth_xfer._util.tsv import EnumData, EnumMetaData
 
 _BASE_CONSTRAINTS: dict[str, frozenset[str]] = {
@@ -160,50 +166,6 @@ def _render_expr(ref: str, nodes: tuple[DagNode, ...]) -> str:
     node = nodes[int(ref.removeprefix("n"))]
     operands = ", ".join(_render_expr(operand, nodes) for operand in node.operands)
     return f"{node.operation}({operands})"
-
-
-def _camel_to_snake(name: str) -> str:
-    pieces: list[str] = []
-    for i, ch in enumerate(name):
-        cond = not name[i - 1].isupper() or (i + 1 < len(name) and name[i + 1].islower())
-        if i and ch.isupper() and cond:
-            pieces.append("_")
-        pieces.append(ch.lower())
-    return "".join(pieces)
-
-
-def _infer_variant_constraints(transfer_op: str, stem: str) -> frozenset[str]:
-    snake = _camel_to_snake(stem)
-    if snake.endswith("_nsw_nuw"):
-        return frozenset({f"{transfer_op}_nsw", f"{transfer_op}_nuw"})
-    if snake.endswith(("_disjoint", "_exact", "_nsw", "_nuw")):
-        return frozenset({snake})
-    return frozenset()
-
-
-def _build_op_resolver(
-    operations_dir: Path,
-) -> dict[tuple[str, frozenset[str]], str]:
-    resolver: dict[tuple[str, frozenset[str]], str] = {}
-    for path in sorted(operations_dir.glob("*.mlir")):
-        mod = parse_mlir_mod(path)
-        concrete_op = get_fns(mod).get("concrete_op")
-        if concrete_op is None:
-            continue
-        ops = [op for op in concrete_op.body.block.ops if not isinstance(op, ReturnOp)]
-        if len(ops) != 1:
-            continue
-        op = ops[0]
-        if not op.name.startswith("transfer."):
-            continue
-        transfer_op = op.name.removeprefix("transfer.")
-        constraints = _infer_variant_constraints(
-            transfer_op, path.stem
-        ) | _BASE_CONSTRAINTS.get(transfer_op, frozenset())
-        resolver[(transfer_op, constraints)] = path.stem
-    return resolver
-
-
 def _value_ref(value: SSAValue, node_ids: dict[Operation, int]) -> str:
     if isinstance(value, BlockArgument):
         return f"arg{value.index}"
@@ -242,7 +204,6 @@ def _extract_constraints(op_constraint: FuncOp, num_nodes: int) -> dict[int, set
 def _resolve_operation(
     transfer_op: str,
     constraints: set[str],
-    resolver: dict[tuple[str, frozenset[str]], str],
 ) -> str:
     base_name = _TRANSFER_BASE_TO_OP.get(transfer_op)
     if base_name is None:
@@ -255,21 +216,20 @@ def _resolve_operation(
             f"{sorted(base_constraints - constraints)}."
         )
 
-    op_name = resolver.get((transfer_op, frozenset(constraints)))
-    if op_name is not None:
-        return op_name
-
     remaining = frozenset(constraints - base_constraints)
-    expected = _TRANSFER_FLAG_TO_OP.get((transfer_op, remaining), base_name)
-    raise ValueError(
-        f"Could not resolve transfer op '{transfer_op}' with constraints "
-        f"{sorted(constraints)} to '{expected}'."
-    )
+    if not remaining:
+        return base_name
+
+    op_name = _TRANSFER_FLAG_TO_OP.get((transfer_op, remaining))
+    if op_name is None:
+        raise ValueError(
+            f"Could not resolve transfer op '{transfer_op}' with constraints "
+            f"{sorted(constraints)}."
+        )
+    return op_name
 
 
-def load_pattern(pattern_path: Path) -> PatternDag:
-    operations_dir = Path(__file__).resolve().parents[2] / "mlir" / "Operations"
-
+def _load_pattern(pattern_path: Path) -> PatternDag:
     pattern_mod = parse_mlir_mod(pattern_path)
     fns = get_fns(pattern_mod)
     concrete_op = fns.get("concrete_op")
@@ -285,15 +245,12 @@ def load_pattern(pattern_path: Path) -> PatternDag:
         if op_constraint is not None
         else {}
     )
-    resolver = _build_op_resolver(operations_dir)
     node_ids = {op: i for i, op in enumerate(concrete_ops)}
 
     nodes: list[DagNode] = []
     for i, op in enumerate(concrete_ops):
         transfer_op = op.name.removeprefix("transfer.")
-        operation = _resolve_operation(
-            transfer_op, constraints_by_node.get(i, set()), resolver
-        )
+        operation = _resolve_operation(transfer_op, constraints_by_node.get(i, set()))
         if len(op.results) != 1:
             raise ValueError("Expected concrete_op instructions to produce one result.")
         nodes.append(
@@ -347,7 +304,7 @@ def analyze_pattern(
     ):
         raise NotImplementedError(f"analze not implemented for domain '{domain}'.")
 
-    dag = load_pattern(pattern_path)
+    dag = _load_pattern(pattern_path)
     edges: list[tuple[str, bool]] = []
 
     for i, node in enumerate(dag.nodes):
@@ -462,6 +419,7 @@ def generate_inputs(
     data_dir: Path,
     rng: Random,
 ) -> EnumData:
+    # TODO don't need
     if domain not in (
         AbstractDomain.KnownBits,
         AbstractDomain.UConstRange,
@@ -471,7 +429,7 @@ def generate_inputs(
             f"generate input not implemented for domain '{domain}'."
         )
 
-    dag = load_pattern(path)
+    dag = _load_pattern(path)
     rows: list[tuple[object, ...]] = []
     hbw: list[tuple[int, int, int]] = []
     seen: set[int] = set()
@@ -499,3 +457,54 @@ def generate_inputs(
     )
 
     return EnumData(metadata, df)
+
+
+def _get_pattern_solutions(
+    dag: PatternDag, xfer_dir: Path, d: AbstractDomain
+) -> dict[str, FuncOp]:
+    concrete_ops: dict[str, FuncOp] = {}
+    for n in dag.nodes:
+        f_path = xfer_dir / f"{d}_{n.operation}" / "solution.mlir"
+        sol = get_solution(f_path, d)
+        sol.sym_name = StringAttr(n.operation)
+        concrete_ops[n.operation] = sol
+
+    return concrete_ops
+
+
+def construct_pattern_solution(
+    pattern_path: Path, xfer_dir: Path, d: AbstractDomain
+) -> FuncOp:
+    dag = _load_pattern(pattern_path)
+    xfers = _get_pattern_solutions(dag, xfer_dir, d)
+
+    first_xfer = xfers[dag.nodes[0].operation]
+    input_ty = first_xfer.function_type.inputs.data[0]
+    output_tys = first_xfer.function_type.outputs.data
+
+    solution = FuncOp.from_region(
+        "solution",
+        [input_ty for _ in dag.args],
+        output_tys,
+    )
+    value_map: dict[str, SSAValue] = {
+        arg_name: solution.args[i] for i, arg_name in enumerate(dag.args)
+    }
+
+    lowered_xfers: list[FuncOp] = []
+    for op_name, func in xfers.items():
+        lowered = func.clone()
+        lowered.sym_name = StringAttr(op_name)
+        lowered_xfers.append(lowered)
+
+    for i, node in enumerate(dag.nodes):
+        xfer = xfers[node.operation]
+        operands = [value_map[operand] for operand in node.operands]
+        call = CallOp(node.operation, operands, xfer.function_type.outputs.data)
+        solution.body.block.add_op(call)
+        value_map[f"n{i}"] = call.results[0]
+
+    solution.body.block.add_op(ReturnOp(value_map[dag.result]))
+    mod = ModuleOp([*lowered_xfers, solution])
+    inline_mod(mod)
+    return get_fns(mod)["solution"]

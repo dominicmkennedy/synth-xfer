@@ -3,7 +3,12 @@ from pathlib import Path
 from random import Random, SystemRandom
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.pattern import CompletenessReport, analyze_pattern, generate_inputs
+from synth_xfer._util.pattern import (
+    CompletenessReport,
+    analyze_pattern,
+    construct_pattern_solution,
+    generate_inputs,
+)
 
 
 def _parse_bw_spec(text: str) -> tuple[int, int | None]:
@@ -64,6 +69,28 @@ def main() -> None:
         help="Abstract Domain to evaluate",
     )
 
+    seq_parser = subparsers.add_parser(
+        "make-sequential", formatter_class=ArgumentDefaultsHelpFormatter
+    )
+    seq_parser.add_argument(
+        "--pattern", type=Path, required=True, help="Pattern MLIR file to analyze"
+    )
+    seq_parser.add_argument(
+        "-d",
+        "--domain",
+        type=str,
+        choices=[str(x) for x in AbstractDomain],
+        required=True,
+        help="Abstract Domain",
+    )
+    seq_parser.add_argument(
+        "--xfer-dir",
+        type=Path,
+        required=True,
+        help="Directory containing per-domain input TSVs",
+    )
+    seq_parser.add_argument("-o", "--output", type=Path, required=True, help="Output")
+
     gen_parser = subparsers.add_parser(
         "generate-input",
         formatter_class=ArgumentDefaultsHelpFormatter,
@@ -115,6 +142,15 @@ def main() -> None:
             rng=rng,
         )
         generated_inputs.write_tsv(args.output)
+
+    if args.command == "make-sequential":
+        fn = construct_pattern_solution(
+            args.pattern, args.xfer_dir, AbstractDomain[args.domain]
+        )
+        if args.output:
+            args.output.write_text(str(fn))
+        else:
+            print(fn)
 
 
 if __name__ == "__main__":
