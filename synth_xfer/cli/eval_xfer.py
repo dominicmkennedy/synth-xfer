@@ -305,9 +305,7 @@ def _dataset_groups(candidates: list[XferCandidate], args: Namespace) -> list[Ev
     with args.input.open("r", encoding="utf-8") as f:
         data = EnumData.read_tsv(f)
     op_path = _resolve_dataset_op_path(data)
-    return [
-        EvalGroup.from_candidates(data.metadata.domain, op_path, candidates, data)
-    ]
+    return [EvalGroup.from_candidates(data.metadata.domain, op_path, candidates, data)]
 
 
 def _generate_groups(candidates: list[XferCandidate], args: Namespace) -> list[EvalGroup]:
