@@ -144,7 +144,10 @@ class LowerToLLVM:
             fn_arg_types = (lower_type(x.type, bw) for x in mlir_fn.args)
             fn_type = ir.FunctionType(fn_ret_type, fn_arg_types)
 
-            llvm_fn = ir.Function(self.llvm_mod, fn_type, name=bw_fn_name)
+            if bw_fn_name in self.fns:
+                llvm_fn = self.fns[bw_fn_name]
+            else:
+                llvm_fn = ir.Function(self.llvm_mod, fn_type, name=bw_fn_name)
             llvm_fn = self.add_attrs(llvm_fn)
 
             self.fns[bw_fn_name] = _LowerFuncToLLVM(
