@@ -1,6 +1,10 @@
 from argparse import ArgumentParser, ArgumentTypeError, Namespace
+from dataclasses import dataclass
+
+from xdsl.dialects.builtin import ModuleOp
 
 from synth_xfer._util.random import Sampler
+from synth_xfer._util.xfer_data import XferCandidate
 
 
 def int_tuple(s: str) -> tuple[int, int]:
@@ -66,6 +70,50 @@ def int_list(s: str) -> list[int]:
         raise ArgumentTypeError("Empty list of integers")
 
     return result
+
+
+@dataclass(frozen=True)
+class PreparedCandidates:
+    arity: int
+    labels: list[str]
+    xfer_names: list[str]
+    merged_mod: ModuleOp
+
+    @classmethod
+    def from_candidates(cls, candidates: list[XferCandidate]) -> "PreparedCandidates":
+        def candidate_keys(candidates: list[XferCandidate]) -> list[str]:
+            seen: dict[str, int] = {}
+            result: list[str] = []
+
+            for cand in candidates:
+                base = cand.solution_path.parent.name
+                if cand.solution_path.name != "solution.mlir":
+                    base = cand.solution_path.stem
+                if not base:
+                    base = cand.xfer_name
+
+                count = seen.get(base, 0)
+                seen[base] = count + 1
+                result.append(base if count == 0 else f"{base}_{count + 1}")
+
+            return result
+
+        def ensure_same_arity(candidates: list[XferCandidate]) -> int:
+            arities = {cand.arity for cand in candidates}
+            if len(arities) != 1:
+                raise ValueError(
+                    f"All candidates must have the same arity, got: {sorted(arities)}"
+                )
+            return next(iter(arities))
+
+        return cls(
+            arity=ensure_same_arity(candidates),
+            labels=candidate_keys(candidates),
+            xfer_names=[cand.xfer_name for cand in candidates],
+            merged_mod=ModuleOp(
+                [op.clone() for cand in candidates for op in cand.mlir_mod.ops]
+            ),
+        )
 
 
 def make_sampler_parser(p: ArgumentParser):

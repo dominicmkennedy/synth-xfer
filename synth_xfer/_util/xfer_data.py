@@ -131,6 +131,11 @@ def load_candidates(
 
     for xfer_path in xfer_paths:
         if xfer_path.is_dir():
+            if domain is not None or op_path is not None:
+                raise ValueError(
+                    "Do not pass --domain/--op when using solution directories; "
+                    "candidate metadata must come from config.log"
+                )
             for solution_path in sorted(xfer_path.rglob("solution.mlir")):
                 config_path = solution_path.with_name("config.log")
                 if not config_path.is_file():

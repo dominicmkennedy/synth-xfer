@@ -32,13 +32,14 @@ pytest -vv
 
 ## Usage
 
-The project provides eight executables,
+The project provides nine executables,
 these executables depend on paths in the repo the should be run from the project root.
 
 | Executable      | Description                                                                                               |
 |-----------------|-----------------------------------------------------------------------------------------------------------|
 | `sxf`           | Given either a concrete function or a benchmark config, synthesizes abstract transformers (the main tool) |
-| `run-xfer`      | Runs synthesized transformer(s) on explicit inputs or evaluates them on datasets / generated workloads    |
+| `run-xfer`      | Runs synthesized transformer(s) on explicit inputs from stdin or enum TSV datasets                        |
+| `eval-xfer`     | Evaluates synthesized transformer(s) against enum TSV datasets or generate workloads                      |
 | `verify`        | Checks the soundness of a previously synthesized transformer                                              |
 | `lower-to-llvm` | Lowers a synthesized transformer from MLIR to LLVM IR                                                     |
 | `simplifier`    | Applies a peephole optimizer to simplify synthesized transformer code                                     |
@@ -185,35 +186,40 @@ Should produce:
 
 ## Important CLI Options for `run-xfer`
 
-| CLI flag                    | Description                                                                                                                                   |
-|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| `--xfer-file <Path>`        | One or more transformer `.mlir` files, or solution directories containing `solution.mlir` and `config.log`.                                   |
-| `--xfer-name <str>`         | Name of the transformer function to evaluate (defaults to `solution`, or the only function in the file if there's just one).                  |
-| `-i, --input <Path>`        | Existing enum TSV dataset. In apply mode, adds transformer outputs to the dataset. In `--eval` mode, compares transformer(s) against `ideal`. |
-| `--eval`                    | Switch from apply mode to evaluation mode.                                                                                                    |
-| `--domain <Name>`           | Abstract domain for stdin apply mode or generated eval mode.                                                                                  |
-| `--op <Path>`               | Concrete operation used to generate an eval workload on the fly.                                                                              |
-| `--lbw <list[int]>`         | Low bitwidths for generated eval workloads.                                                                                                   |
-| `--mbw <list[int,int]>`     | Mid bitwidth sampling settings for generated eval workloads.                                                                                  |
-| `--hbw <list[int,int,int]>` | High bitwidth sampling settings for generated eval workloads.                                                                                 |
-| `-o, --output <Path>`       | Write the resulting table as TSV in apply mode or CSV in eval mode.                                                                           |
+| CLI flag              | Description                                                                                                                 |
+|-----------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| `--xfer-file <Path>`  | One or more transformer `.mlir` files, or solution directories containing `solution.mlir` and `config.log`.                 |
+| `--xfer-name <str>`   | Name of the transformer function to evaluate (defaults to `solution`, or the only function in the file if there's just one) |
+| `-i, --input <Path>`  | Existing enum TSV dataset. If omitted, `run-xfer` reads a TSV from stdin.                                                   |
+| `--bw <int>`          | Bitwidth for stdin apply mode. Required when `--input` is omitted.                                                          |
+| `--domain <Name>`     | Abstract domain for stdin apply mode. Required when `--input` is omitted.                                                   |
+| `-o, --output <Path>` | Write the resulting table as TSV.                                                                                           |
 
-Generated eval example:
+Example invocation:
 ```bash
-run-xfer --xfer-file tests/data/kb_and.mlir tests/data/kb_or.mlir \
-         --eval                                                   \
-         --domain KnownBits                                       \
-         --op mlir/Operations/And.mlir                            \
-         --lbw 4
+run-xfer --xfer-file tests/data/kb_and.mlir --bw 4 --domain KnownBits
 ```
 
-Should produce:
+## Important CLI Options for `eval-xfer`
 
-```
-   Domain  Op Candidate  Bitwidth  Cases    Sound %    Exact %  Dist  Base Dist  Sound Dist
-KnownBits And       top         4   6561 100.000000   1.234568  4374     4374.0        4374
-KnownBits And    kb_and         4   6561 100.000000 100.000000     0     4374.0           0
-KnownBits And     kb_or         4   6561   9.525987   1.234568  5832     4374.0        4124
+| CLI flag              | Description                                                                                                                 |
+|-----------------------|-----------------------------------------------------------------------------------------------------------------------------|
+| `--xfer-file <Path>`  | One or more transformer `.mlir` files, or solution directories containing `solution.mlir` and `config.log`.                 |
+| `--xfer-name <str>`   | Name of the transformer function to evaluate (defaults to `solution`, or the only function in the file if there's just one) |
+| `-i, --input <Path>`  | Existing enum TSV dataset to evaluate against.                                                                              |
+| `--domain <Name>`     | Abstract domain for generate eval mode.                                                                                     |
+| `--op <Path>`         | Concrete operation used to generate an eval workload on the fly.                                                            |
+| `--exact-bw <spec>`   | Exact-scoring workload. Accepts `bw` or `bw,samples`. Default: `8,1000`.                                                    |
+| `--dist-bw <spec>`    | Distance-scoring workload. Accepts `bw`, `bw,samples`, or `bw,lat_samples,crt_samples`. Default: `64,1000,100000`.          |
+| `-o, --output <Path>` | Write the evaluation table as CSV.                                                                                          |
+
+Eval example:
+```bash
+eval-xfer --xfer-file tests/data/kb_and.mlir tests/data/kb_or.mlir \
+          --domain KnownBits                                       \
+          --op mlir/Operations/And.mlir                            \
+          --exact-bw 8,1000                                        \
+          --dist-bw 64,1000,100000
 ```
 
 ## Important CLI Options for `simplifier`
