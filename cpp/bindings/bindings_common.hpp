@@ -56,7 +56,8 @@ using EnumHighThunk = py::object (*)(std::uintptr_t,
                                      unsigned int, unsigned int, unsigned int,
                                      std::shared_ptr<rngdist::Sampler>);
 using EvalThunk = Results (*)(py::handle, const std::vector<std::uintptr_t> &,
-                              const std::vector<std::uintptr_t> &, unsigned int, unsigned int);
+                              const std::vector<std::uintptr_t> &, unsigned int,
+                              unsigned int);
 using RunThunk = py::object (*)(py::handle, std::uintptr_t);
 using LenThunk = std::size_t (*)(py::handle);
 using GetItemThunk = py::object (*)(py::handle, std::size_t);
@@ -89,10 +90,10 @@ void register_domain_class(py::module_ &m) {
   cls.def_static("top", []() { return D<BW>::top(); });
   cls.def_static("bottom", []() { return D<BW>::bottom(); });
   cls.def(py::init([](const std::string &s) { return D<BW>::parse(s); }));
-  cls.def("size", [](const D<BW> &self) { return self.size(); });
+  cls.def("norm", [](const D<BW> &self) { return self.norm(); });
   cls.def(
-      "distance",
-      [](const D<BW> &self, const D<BW> &rhs) { return self.distance(rhs); },
+      "dist",
+      [](const D<BW> &self, const D<BW> &rhs) { return dist(self, rhs); },
       py::arg("rhs"));
   cls.def("__eq__",
           [](const D<BW> &self, const D<BW> &rhs) { return self == rhs; });
