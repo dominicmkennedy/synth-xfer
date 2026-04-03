@@ -11,7 +11,7 @@ from synth_xfer._util.eval import RunInputMap, parse_to_run_inputs, run_xfer_fns
 from synth_xfer._util.tsv import EnumData
 from synth_xfer._util.xfer_data import (
     enumdata_to_run_inputs,
-    load_candidates,
+    load_file_candidates,
 )
 from synth_xfer.cli.args import PreparedCandidates
 
@@ -24,7 +24,7 @@ def _register_parser() -> Namespace:
         type=Path,
         nargs="+",
         required=True,
-        help="Transformer file(s) or solution directory/directories",
+        help="Transformer MLIR file(s)",
     )
     p.add_argument("--xfer-name", type=str, help="Transformer to evaluate")
     p.add_argument("-i", "--input", type=Path, default=None)
@@ -45,6 +45,10 @@ def _register_parser() -> Namespace:
 
 
 def _validate_args(args: Namespace, p: ArgumentParser) -> None:
+    for f in args.xfer_file:
+        if not f.is_file():
+            p.error(f"--xfer-file expects files, got: {f}")
+
     using_input = args.input is not None
     using_stdin = args.input is None
 
@@ -104,10 +108,9 @@ def _parse_stdin_inputs(
 
 def main() -> None:
     args = _register_parser()
-    candidates = load_candidates(
+    candidates = load_file_candidates(
         args.xfer_file,
         args.xfer_name,
-        domain=AbstractDomain[args.domain] if args.input is None else None,
     )
     prepared = PreparedCandidates.from_candidates(candidates)
 

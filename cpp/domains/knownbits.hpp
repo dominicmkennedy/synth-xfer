@@ -91,7 +91,7 @@ public:
     if (isTop())
       return APInt<BW>::getMaxValue().getZExtValue();
 
-    uint32_t unknown_bits = (~zero() | ~one()).popcount();
+    uint32_t unknown_bits = (~zero() & ~one()).popcount();
     return (1ULL << unknown_bits) - 1;
   }
 
@@ -99,7 +99,7 @@ public:
     if (isBottom())
       return 0.0;
 
-    uint32_t unknown_bits = (~zero() | ~one()).popcount();
+    uint32_t unknown_bits = (~zero() & ~one()).popcount();
     return static_cast<double>(unknown_bits + 1) / static_cast<double>(BW + 1);
   }
 

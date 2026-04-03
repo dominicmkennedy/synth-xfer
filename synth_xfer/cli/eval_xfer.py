@@ -16,13 +16,15 @@ from synth_xfer._util.tsv import EnumData, build_enum_data
 from synth_xfer._util.xfer_data import (
     XferCandidate,
     enumdata_to_eval_inputs,
-    load_candidates,
+    load_file_candidates,
+    load_solution_dir_candidates,
 )
 from synth_xfer.cli.args import PreparedCandidates, get_sampler, make_sampler_parser
 
 ExactBw: TypeAlias = int | tuple[int, int]
 DistBw: TypeAlias = int | tuple[int, int] | tuple[int, int, int]
 OutputRow: TypeAlias = tuple[str, str, str, float, float]
+GroupItem: TypeAlias = tuple[tuple[AbstractDomain, Path], list[XferCandidate]]
 
 
 @dataclass(frozen=True)
@@ -52,20 +54,24 @@ class EvalGroup:
 
 def _register_parser() -> Namespace:
     p = ArgumentParser()
+    xfer_group = p.add_mutually_exclusive_group(required=True)
 
-    p.add_argument(
+    xfer_group.add_argument(
         "--xfer-file",
         type=Path,
         nargs="+",
-        required=True,
-        help="Transformer file(s) or solution directory/directories",
+        help="Transformer MLIR file(s)",
     )
-    p.add_argument("--xfer-name", type=str, help="Transformer to evaluate")
+    xfer_group.add_argument(
+        "--solution-dir",
+        type=Path,
+        help="Path to sxf solution directory",
+    )
+    p.add_argument(
+        "--xfer-name", type=str, help="Name of transformer function to evaluate"
+    )
     p.add_argument("-i", "--input", type=Path, default=None)
     p.add_argument("-o", "--output", type=Path, default=None)
-    p.add_argument(
-        "--seq-dir", type=Path, help="Sequential transfer directory for pattern eval"
-    )
     p.add_argument(
         "-d",
         "--domain",
@@ -78,16 +84,13 @@ def _register_parser() -> Namespace:
         "--exact-bw",
         type=_parse_exact_bw,
         default=(8, 1000),
-        help="Exact workload as 'bw' or 'bw,samples' (default: 8,10000)",
+        help="Exact bw to eval as 'bw' or 'bw,samples'",
     )
     p.add_argument(
         "--dist-bw",
         type=_parse_dist_bw,
         default=(64, 1000, 100000),
-        help=(
-            "Distance workload as 'bw', 'bw,samples', or "
-            "'bw,lat_samples,crt_samples' (default: 64,10000,100000)"
-        ),
+        help=("dist bw to eval 'bw', 'bw,samples', or 'bw,lat_samples,crt_samples'"),
     )
     p.add_argument("--seed", type=int, help="Evaluation seed")
     p.add_argument(
@@ -105,14 +108,34 @@ def _register_parser() -> Namespace:
     make_sampler_parser(p)
 
     args = p.parse_args()
+    _validate_args(args, p)
+
+    return args
+
+
+def _validate_args(args: Namespace, p: ArgumentParser):
     if args.input is not None:
+        if args.solution_dir is not None:
+            p.error("--solution-dir cannot be combined with --input")
         if args.domain is not None or args.op is not None:
             p.error("--input cannot be combined with --domain/--op")
     else:
-        if args.domain is None or args.op is None:
-            p.error("generated eval requires both --domain and --op")
+        if args.solution_dir is not None:
+            if args.domain is not None or args.op is not None:
+                p.error(
+                    "--solution-dir cannot be combined with --domain/--op; "
+                    "candidate metadata comes from config.log"
+                )
+        elif args.domain is None or args.op is None:
+            p.error("generated eval with --xfer-file requires both --domain and --op")
 
-    return args
+    if args.xfer_file is not None:
+        for f in args.xfer_file:
+            if not f.is_file():
+                p.error(f"--xfer-file expects files, got: {f}")
+    elif args.solution_dir is not None:
+        if not args.solution_dir.is_dir():
+            p.error(f"--solution-dir expects a directory, got: {args.solution_dir}")
 
 
 def _parse_exact_bw(s: str) -> ExactBw:
@@ -140,16 +163,10 @@ def _parse_dist_bw(s: str) -> DistBw:
     )
 
 
-def _bw(spec: ExactBw | DistBw) -> int:
-    return spec[0] if isinstance(spec, tuple) else spec
-
-
 def _workload_lists(
     exact_bw: ExactBw, dist_bw: DistBw
 ) -> tuple[list[int], list[tuple[int, int]], list[tuple[int, int, int]]]:
-    lbw: list[int] = []
-    mbw: list[tuple[int, int]] = []
-    hbw: list[tuple[int, int, int]] = []
+    lbw, mbw, hbw = [], [], []
     for spec in (exact_bw, dist_bw):
         if isinstance(spec, int):
             if spec not in lbw:
@@ -160,19 +177,8 @@ def _workload_lists(
         else:
             if spec not in hbw:
                 hbw.append(spec)
+
     return lbw, mbw, hbw
-
-
-def _resolve_dataset_op_path(data: EnumData) -> Path:
-    op_path = (
-        Path(__file__).resolve().parents[2]
-        / "mlir"
-        / "Operations"
-        / f"{data.metadata.op}.mlir"
-    )
-    if not op_path.is_file():
-        raise ValueError(f"Could not resolve op file for dataset op {data.metadata.op}")
-    return op_path
 
 
 def _print_examples(
@@ -212,7 +218,7 @@ def _print_examples(
 def _print_summary(
     domain: AbstractDomain, op_name: str, rows: list[tuple[str, float, float]]
 ) -> None:
-    print(f"{domain} | {op_name}")
+    print(f"{domain} {op_name}")
     candidate_width = max(len("Candidate"), *(len(row[0]) for row in rows))
     exact_header = "Exact %"
     exact_width = max(len(exact_header), *(len(f"{row[1]:.6f}") for row in rows))
@@ -223,18 +229,21 @@ def _print_summary(
         f"{exact_header:>{exact_width}} | "
         f"{dist_header:>{dist_width}}"
     )
+    print(f"{'-' * candidate_width}-|-{'-' * exact_width}-|-{'-' * dist_width}")
     for row in rows:
         print(
             f"{row[0]:<{candidate_width}} | "
             f"{row[1]:>{exact_width}.6f} | "
             f"{row[2]:>{dist_width}.6f}"
         )
+    print("")
 
 
 def _eval_group(group: EvalGroup, args: Namespace) -> list[OutputRow]:
-    exact_bw = _bw(args.exact_bw)
-    dist_bw = _bw(args.dist_bw)
+    exact_bw = args.exact_bw[0] if isinstance(args.exact_bw, tuple) else args.exact_bw
+    dist_bw = args.dist_bw[0] if isinstance(args.dist_bw, tuple) else args.dist_bw
     to_eval = enumdata_to_eval_inputs(group.data)
+
     if exact_bw not in to_eval:
         raise ValueError(f"Dataset does not contain bw={exact_bw} for exact scoring")
     if dist_bw not in to_eval:
@@ -301,31 +310,24 @@ def _eval_group(group: EvalGroup, args: Namespace) -> list[OutputRow]:
     return output_rows
 
 
-def _dataset_groups(candidates: list[XferCandidate], args: Namespace) -> list[EvalGroup]:
-    with args.input.open("r", encoding="utf-8") as f:
+def _dataset_groups(candidates: list[XferCandidate], args: Namespace) -> EvalGroup:
+    with args.input.open("r") as f:
         data = EnumData.read_tsv(f)
-    op_path = _resolve_dataset_op_path(data)
-    return [EvalGroup.from_candidates(data.metadata.domain, op_path, candidates, data)]
+
+    mlir_dir = Path(__file__).resolve().parents[2] / "mlir"
+    mid_dir = "Patterns" if str(data.metadata.op).isnumeric() else "Operations"
+    fname = f"{data.metadata.op}.mlir"
+    op_path = mlir_dir / mid_dir / fname
+
+    if not op_path.is_file():
+        raise FileNotFoundError(f"Could not find mlir op: {op_path}")
+    return EvalGroup.from_candidates(data.metadata.domain, op_path, candidates, data)
 
 
-def _generate_groups(candidates: list[XferCandidate], args: Namespace) -> list[EvalGroup]:
-    grouped: dict[tuple[AbstractDomain, Path], list[XferCandidate]] = {}
-    default_domain = AbstractDomain[args.domain]
-    for cand in candidates:
-        domain = cand.domain if cand.domain is not None else default_domain
-        op_path = cand.op_path if cand.op_path is not None else args.op
-        if domain is None or op_path is None:
-            raise ValueError(
-                "Generated eval requires candidate metadata or explicit --domain/--op"
-            )
-        grouped.setdefault((domain, op_path), []).append(cand)
-
+def _build_generated_groups(items: list[GroupItem], args: Namespace) -> list[EvalGroup]:
     lbw, mbw, hbw = _workload_lists(args.exact_bw, args.dist_bw)
-    items = list(grouped.items())
 
-    def build_one(
-        item: tuple[tuple[AbstractDomain, Path], list[XferCandidate]],
-    ) -> EvalGroup:
+    def build_one(item: GroupItem) -> EvalGroup:
         (domain, op_path), group_cands = item
         data = build_enum_data(
             domain=domain,
@@ -341,45 +343,37 @@ def _generate_groups(candidates: list[XferCandidate], args: Namespace) -> list[E
     if len(items) > 1:
         with ThreadPoolExecutor(max_workers=len(items)) as pool:
             return list(pool.map(build_one, items))
-    return [build_one(item) for item in items]
 
-
-def _run_pattern_placeholder(args: Namespace) -> None:
-    mode = "dataset" if args.input is not None else "generated"
-    print("Pattern eval not implemented yet.")
-    print(f"mode={mode}")
-    print(f"xfer_file={[str(path) for path in args.xfer_file]}")
-    print(f"xfer_name={args.xfer_name}")
-    print(f"input={None if args.input is None else str(args.input)}")
-    print(f"domain={args.domain}")
-    print(f"op={None if args.op is None else str(args.op)}")
-    print(f"seq_dir={args.seq_dir}")
-    print(f"exact_bw={args.exact_bw}")
-    print(f"dist_bw={args.dist_bw}")
-    print(f"seed={args.seed}")
-    print(f"unsound_ex={args.unsound_ex}")
-    print(f"imprecise_ex={args.imprecise_ex}")
+    return [build_one(items[0])]
 
 
 def main() -> None:
     args = _register_parser()
 
-    if args.seq_dir is not None:
-        _run_pattern_placeholder(args)
-        return
+    if args.solution_dir is not None:
+        if not args.solution_dir.is_dir():
+            raise ValueError(f"Solution directory not found: {args.solution_dir}")
+        if args.xfer_name is not None:
+            raise ValueError("--xfer-name cannot be used with --solution-dir")
 
-    candidates = load_candidates(
-        args.xfer_file,
-        args.xfer_name,
-        domain=None if args.input is not None else AbstractDomain[args.domain],
-        op_path=None if args.input is not None else args.op,
-    )
-
-    groups = (
-        _dataset_groups(candidates, args)
-        if args.input is not None
-        else _generate_groups(candidates, args)
-    )
+        groups = _build_generated_groups(
+            list(load_solution_dir_candidates(args.solution_dir).items()),
+            args,
+        )
+    else:
+        assert args.xfer_file is not None
+        candidates = load_file_candidates(
+            args.xfer_file,
+            args.xfer_name,
+        )
+        groups = (
+            [_dataset_groups(candidates, args)]
+            if args.input is not None
+            else _build_generated_groups(
+                [((AbstractDomain[args.domain], args.op), candidates)],
+                args,
+            )
+        )
 
     output_rows: list[OutputRow] = []
     for group in groups:

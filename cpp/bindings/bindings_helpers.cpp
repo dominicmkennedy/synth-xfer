@@ -95,6 +95,12 @@ void bind_eval_func(py::module_ &m, const std::string &fn_name,
         py::arg("bases"), py::arg("unsound_ex") = 0, py::arg("imprecise_ex") = 0);
 }
 
+void bind_eval_pattern_func(py::module_ &m, const std::string &fn_name,
+                            EvalPatternThunk eval) {
+  m.def(fn_name.c_str(), eval, py::arg("rows"), py::arg("weights"),
+        py::arg("sequential"), py::arg("composite"));
+}
+
 void bind_run_func(py::module_ &m, const std::string &fn_name, RunThunk run) {
   m.def(fn_name.c_str(), run, py::arg("to_run"), py::arg("xfer_addr"));
 }

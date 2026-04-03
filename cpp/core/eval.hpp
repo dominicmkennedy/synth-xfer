@@ -143,7 +143,8 @@ public:
 private:
   [[nodiscard]] static ResultD eval_one(const XferFn &fn, const ArgsT &args) {
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) -> ResultD {
-      return fn(pack<Dom, BWs>(std::get<Is>(args).v)...);
+      return ResultD(
+          unpack<Dom, ResBw>(fn(pack<Dom, BWs>(std::get<Is>(args).v)...)));
     }(std::make_index_sequence<num_args>{});
   }
 

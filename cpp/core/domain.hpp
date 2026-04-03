@@ -114,8 +114,9 @@ bool constexpr isSuperset(const D<BW> &lhs, const D<BW> &rhs) {
 template <template <std::size_t> class D, std::size_t BW>
   requires Domain<D, BW>
 constexpr double dist(const D<BW> &lhs, const D<BW> &rhs) noexcept {
-  assert(isSuperset(lhs, rhs));
-  return lhs.norm() - rhs.norm();
+  if (isSuperset(lhs, rhs))
+    return lhs.norm() - rhs.norm();
+  return rhs.norm() - lhs.norm();
 }
 
 template <template <std::size_t> class D, std::size_t BW>

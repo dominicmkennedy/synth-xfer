@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Callable
 
 import pandas as pd
+from pandas._config import config
 from xdsl.dialects.builtin import ModuleOp, StringAttr, SymbolRefAttr
 from xdsl.dialects.func import CallOp, FuncOp
 
@@ -42,8 +43,30 @@ class XferCandidate:
     mlir_mod: ModuleOp
     xfer_name: str
     arity: int
-    domain: AbstractDomain | None = None
-    op_path: Path | None = None
+
+    @classmethod
+    def load(
+        cls,
+        solution_path: Path,
+        requested_name: str | None,
+        namespace: str,
+    ) -> "XferCandidate":
+        raw_mod = parse_mlir_mod(solution_path)
+        raw_fns = get_fns(raw_mod)
+        xfer_name = resolve_xfer_name(raw_fns, requested_name)
+        mlir_mod = namespace_module(raw_mod, namespace)
+        xfer_name = f"{namespace}_{xfer_name}"
+        xfer_fns = get_fns(mlir_mod)
+
+        return cls(
+            label=str(solution_path.parent)
+            if solution_path.name == "solution.mlir"
+            else str(solution_path),
+            solution_path=solution_path,
+            mlir_mod=mlir_mod,
+            xfer_name=xfer_name,
+            arity=len(xfer_fns[xfer_name].args),
+        )
 
 
 def namespace_module(mod: ModuleOp, prefix: str) -> ModuleOp:
@@ -86,6 +109,7 @@ def _parse_config(config_path: Path) -> tuple[Path, AbstractDomain]:
                 domain = AbstractDomain[value]
 
     if transfer_path is None:
+        print(config_path)
         raise ValueError("Missing 'transfer_functions' entry in config.")
     if domain is None:
         raise ValueError("Missing 'domain' entry in config.")
@@ -93,77 +117,41 @@ def _parse_config(config_path: Path) -> tuple[Path, AbstractDomain]:
     return transfer_path, domain
 
 
-def load_candidate(
-    solution_path: Path,
-    requested_name: str | None,
-    namespace: str,
-    domain: AbstractDomain | None = None,
-    op_path: Path | None = None,
-) -> XferCandidate:
-    raw_mod = parse_mlir_mod(solution_path)
-    raw_fns = get_fns(raw_mod)
-    xfer_name = resolve_xfer_name(raw_fns, requested_name)
-    mlir_mod = namespace_module(raw_mod, namespace)
-    xfer_name = f"{namespace}_{xfer_name}"
-    xfer_fns = get_fns(mlir_mod)
-
-    return XferCandidate(
-        label=str(solution_path.parent)
-        if solution_path.name == "solution.mlir"
-        else str(solution_path),
-        solution_path=solution_path,
-        mlir_mod=mlir_mod,
-        xfer_name=xfer_name,
-        arity=len(xfer_fns[xfer_name].args),
-        domain=domain,
-        op_path=op_path,
-    )
-
-
-def load_candidates(
+def load_file_candidates(
     xfer_paths: list[Path],
     requested_name: str | None,
-    domain: AbstractDomain | None = None,
-    op_path: Path | None = None,
 ) -> list[XferCandidate]:
     candidates: list[XferCandidate] = []
-    next_id = 0
-
-    for xfer_path in xfer_paths:
-        if xfer_path.is_dir():
-            if domain is not None or op_path is not None:
-                raise ValueError(
-                    "Do not pass --domain/--op when using solution directories; "
-                    "candidate metadata must come from config.log"
-                )
-            for solution_path in sorted(xfer_path.rglob("solution.mlir")):
-                config_path = solution_path.with_name("config.log")
-                if not config_path.is_file():
-                    raise ValueError(f"Missing config.log for solution: {solution_path}")
-                cfg_op_path, cfg_domain = _parse_config(config_path)
-                candidates.append(
-                    load_candidate(
-                        solution_path,
-                        requested_name,
-                        namespace=f"cand{next_id}",
-                        domain=cfg_domain,
-                        op_path=cfg_op_path,
-                    )
-                )
-                next_id += 1
-        elif xfer_path.is_file():
-            candidates.append(
-                load_candidate(
-                    xfer_path,
-                    requested_name,
-                    namespace=f"cand{next_id}",
-                    domain=domain,
-                    op_path=op_path,
-                )
+    for i, xfer_path in enumerate(xfer_paths):
+        candidates.append(
+            XferCandidate.load(
+                xfer_path,
+                requested_name,
+                namespace=f"cand{i}",
             )
-            next_id += 1
-        else:
-            raise ValueError(f"Transformer path not found: {xfer_path}")
+        )
+
+    return candidates
+
+
+def load_solution_dir_candidates(
+    solutions: Path,
+) -> dict[tuple[AbstractDomain, Path], list[XferCandidate]]:
+    candidates: dict[tuple[AbstractDomain, Path], list[XferCandidate]] = {}
+    solution_paths = sorted(solutions.rglob("solution.mlir"))
+
+    for i, solution_path in enumerate(solution_paths):
+        config_path = solution_path.with_name("config.log")
+        if not config_path.is_file():
+            raise ValueError(f"Missing config.log for solution: {solution_path}")
+        cfg_op_path, cfg_domain = _parse_config(config_path)
+        candidates.setdefault((cfg_domain, cfg_op_path), []).append(
+            XferCandidate.load(
+                solution_path,
+                None,
+                namespace=f"cand{i}",
+            )
+        )
 
     return candidates
 

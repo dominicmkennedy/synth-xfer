@@ -100,6 +100,32 @@ def _get_eval_fn(
     )
 
 
+def _get_eval_pattern_exact_fn(
+    to_eval: ToEval,
+) -> Callable[[ToEval, list[int], int, int], tuple[float, float]]:
+    def _eval_engine_name(to_eval: ToEval) -> str:
+        suffix = to_eval.__class__.__name__.lower()[6:]
+        return f"eval_pattern_exact_{suffix}"
+
+    return cast(
+        Callable[[ToEval, list[int], int, int], tuple[float, float]],
+        _get_ee_fn_dyn(_eval_engine_name(to_eval)),
+    )
+
+
+def _get_eval_pattern_norm_fn(
+    to_run: ArgsVec,
+) -> Callable[[ArgsVec, list[int], int, int], tuple[float, float]]:
+    def _eval_engine_name(to_run: ArgsVec) -> str:
+        suffix = to_run.__class__.__name__.lower()[4:]
+        return f"eval_pattern_norm_{suffix}"
+
+    return cast(
+        Callable[[ArgsVec, list[int], int, int], tuple[float, float]],
+        _get_ee_fn_dyn(_eval_engine_name(to_run)),
+    )
+
+
 def get_per_bit(a: Results) -> list[PerBitRes]:
     x = str(a).split("\n")
 
@@ -271,6 +297,22 @@ def parse_to_eval_inputs(
     to_eval_cls = _get_ee_fn_dyn(cls_name)
 
     return to_eval_cls(inputs)
+
+
+def eval_pattern_exact(
+    to_eval: ToEval, weights: list[int], sequential: FnPtr, composite: FnPtr
+) -> tuple[float, float]:
+    return _get_eval_pattern_exact_fn(to_eval)(
+        to_eval, weights, sequential.addr, composite.addr
+    )
+
+
+def eval_pattern_norm(
+    to_run: ArgsVec, weights: list[int], sequential: FnPtr, composite: FnPtr
+) -> tuple[float, float]:
+    return _get_eval_pattern_norm_fn(to_run)(
+        to_run, weights, sequential.addr, composite.addr
+    )
 
 
 def run_xfer_fns(

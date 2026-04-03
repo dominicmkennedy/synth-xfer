@@ -71,17 +71,13 @@ private:
   unsigned int maxUnsoundExamples = 0;
   unsigned int maxImpreciseExamples = 0;
 
-  void printMember(std::ostream &os, std::string_view name,
-                   const std::function<unsigned long(const Result &x)> &getter,
-                   bool md) const {
+  void print_member(
+      std::ostream &os, std::string_view name,
+      const std::function<unsigned long(const Result &x)> &getter) const {
     os << std::left << std::setw(20) << name;
     os << "[";
     for (auto it = r.begin(); it != r.end(); ++it) {
-      os << std::right << std::setw(8);
-      if (md)
-        os << static_cast<double>(getter(*it)) / static_cast<double>(maxDist());
-      else
-        os << getter(*it);
+      os << std::right << std::setw(8) << getter(*it);
       if (std::next(it) != r.end())
         os << ", ";
       else
@@ -119,23 +115,17 @@ public:
     os << std::left << std::setw(20) << "num cases:" << x.cases << "\n";
     os << std::left << std::setw(20) << "num unsolved:" << x.unsolvedCases
        << "\n";
-    os << std::left << std::setw(20) << "base distance:"
-       << static_cast<double>(x.base_distance) /
-              static_cast<double>(x.maxDist())
+    os << std::left << std::setw(20) << "base distance:" << x.base_distance
        << "\n";
-    x.printMember(
-        os, "num sound:", [](const Result &x) { return x.sound; }, false);
-    x.printMember(
-        os, "distance:", [](const Result &x) { return x.distance; }, true);
-    x.printMember(
-        os, "num exact:", [](const Result &x) { return x.exact; }, false);
-    x.printMember(
-        os,
-        "num unsolved exact:", [](const Result &x) { return x.unsolved_exact; },
-        false);
-    x.printMember(
-        os, "sound distance:", [](const Result &x) { return x.sound_distance; },
-        true);
+    x.print_member(os, "num sound:", [](const Result &x) { return x.sound; });
+    x.print_member(os, "distance:", [](const Result &x) { return x.distance; });
+    x.print_member(os, "num exact:", [](const Result &x) { return x.exact; });
+    x.print_member(os, "num unsolved exact:", [](const Result &x) {
+      return x.unsolved_exact;
+    });
+    x.print_member(os, "sound distance:", [](const Result &x) {
+      return x.sound_distance;
+    });
 
     return os << "\n";
   }
