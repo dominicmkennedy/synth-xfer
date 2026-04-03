@@ -27,6 +27,9 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         if not Path(op_file).exists():
             parser.error(f"op_file: path does not exist: {op_file}")
 
+    if args.max_turns <= 0:
+        parser.error("--max-turns: must be greater than 0")
+
 
 def parse_args() -> argparse.Namespace:
     """Parse and validate command-line arguments."""

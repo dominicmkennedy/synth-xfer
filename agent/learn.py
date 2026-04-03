@@ -27,6 +27,7 @@ def _run_agent_learn(
     model: str,
     ops_path: Path,
     instructions_path: Path,
+    max_turns: int,
 ) -> tuple[LibraryState, object]:
     """Run agent to learn library functions. Returns (LibraryState, run_result)."""
     del api_key  # Reserved for future model/provider auth parity.
@@ -58,7 +59,7 @@ def _run_agent_learn(
         output_type=LibraryState,
     )
 
-    result = Runner.run_sync(agent, prompt)
+    result = Runner.run_sync(agent, prompt, max_turns=max_turns)
 
     return (result.final_output, result)
 
@@ -87,6 +88,7 @@ def run_library_learn_task(
         model=args.model,
         ops_path=args.ops,
         instructions_path=args.library_instructions,
+        max_turns=args.max_turns,
     )
 
     print_token_usage(run_result)
@@ -158,6 +160,12 @@ def main():
         default=1,
         help="Number of library-learn rounds to run (default: 1)",
     )
+    parser.add_argument(
+        "--max-turns",
+        type=int,
+        default=20,
+        help="Max iterations for agent (default: 20, use 2-3 for fast dev)",
+    )
 
     args = parser.parse_args()
 
@@ -179,6 +187,9 @@ def main():
 
     if args.library_dir is not None and not args.library_dir.is_dir():
         parser.error(f"--library-dir: not a directory: {args.library_dir}")
+
+    if args.max_turns <= 0:
+        parser.error("--max-turns: must be greater than 0")
 
     # Parse input files
     corpus = []

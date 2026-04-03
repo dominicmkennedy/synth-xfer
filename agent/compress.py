@@ -27,6 +27,7 @@ def _run_agent_compress(
     model: str,
     ops_path: Path,
     instructions_path: Path,
+    max_turns: int,
 ) -> tuple[str, object]:
     """Run agent to compress a target file. Returns (final_output, run_result)."""
     del api_key  # Reserved for future model/provider auth parity.
@@ -121,7 +122,7 @@ def _run_agent_compress(
         model=model,
     )
 
-    result = Runner.run_sync(agent, prompt)
+    result = Runner.run_sync(agent, prompt, max_turns=max_turns)
 
     return (result.final_output, result)
 
@@ -152,6 +153,7 @@ def run_compress_task(
         model=args.model,
         ops_path=args.ops,
         instructions_path=args.compress_instructions,
+        max_turns=args.max_turns,
     )
     print_token_usage(run_result)
 
