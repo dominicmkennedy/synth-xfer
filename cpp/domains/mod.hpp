@@ -128,7 +128,7 @@ template <std::size_t X_> struct ModT {
       if (isTop())
         return 1.0;
 
-      return std::log2l(static_cast<double>(size())) / static_cast<double>(BW);
+      return std::log2(static_cast<double>(size())) / static_cast<double>(BW);
     }
 
     static constexpr Mod fromConcrete(const APInt<BW> &x) noexcept {

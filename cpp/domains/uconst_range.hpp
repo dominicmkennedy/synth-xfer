@@ -86,7 +86,7 @@ public:
       return 1.0;
 
     const uint64_t diff = APIntOps::abdu(lower(), upper()).getZExtValue() + 1;
-    return std::log2l(static_cast<double>(diff)) / static_cast<double>(BW);
+    return std::log2(static_cast<double>(diff)) / static_cast<double>(BW);
   }
 
   static constexpr UConstRange fromConcrete(const APInt<BW> &x) noexcept {
