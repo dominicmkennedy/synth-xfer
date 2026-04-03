@@ -3,7 +3,6 @@ from pathlib import Path
 from typing import Callable
 
 import pandas as pd
-from pandas._config import config
 from xdsl.dialects.builtin import ModuleOp, StringAttr, SymbolRefAttr
 from xdsl.dialects.func import CallOp, FuncOp
 
