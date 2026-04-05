@@ -116,7 +116,11 @@ template <template <std::size_t> class D, std::size_t BW>
 constexpr double dist(const D<BW> &lhs, const D<BW> &rhs) noexcept {
   if (isSuperset(lhs, rhs))
     return lhs.norm() - rhs.norm();
-  return rhs.norm() - lhs.norm();
+  if (isSuperset(rhs, lhs))
+    return rhs.norm() - lhs.norm();
+  // assert False
+  assert(false && "Can't compute distance between incomparable elements");
+  __builtin_unreachable();
 }
 
 template <template <std::size_t> class D, std::size_t BW>

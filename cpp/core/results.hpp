@@ -67,13 +67,13 @@ private:
   unsigned int cases = {};
   unsigned int unsolvedCases = {};
   double base_distance = {};
-  std::uint64_t (*maxDist)() = {};
   unsigned int maxUnsoundExamples = 0;
   unsigned int maxImpreciseExamples = 0;
 
+  template <typename Getter>
   void print_member(
       std::ostream &os, std::string_view name,
-      const std::function<unsigned long(const Result &x)> &getter) const {
+      Getter getter) const {
     os << std::left << std::setw(20) << name;
     os << "[";
     for (auto it = r.begin(); it != r.end(); ++it) {
@@ -96,8 +96,7 @@ private:
       for (const auto &ex : examples) {
         converted.emplace_back(std::get<0>(ex), std::get<1>(ex),
                                std::get<2>(ex),
-                               static_cast<double>(std::get<3>(ex)) /
-                                   static_cast<double>(maxDist()));
+                               static_cast<double>(std::get<3>(ex)));
       }
       out.push_back(std::move(converted));
     }
@@ -105,9 +104,9 @@ private:
   }
 
 public:
-  Results(unsigned int numFns, unsigned int bw_, std::uint64_t (*_maxDist)(),
+  Results(unsigned int numFns, unsigned int bw_,
           unsigned int maxUnsound = 0, unsigned int maxImprecise = 0)
-      : bw(bw_), r(std::vector<Result>(numFns)), maxDist(_maxDist),
+      : bw(bw_), r(std::vector<Result>(numFns)),
         maxUnsoundExamples(maxUnsound), maxImpreciseExamples(maxImprecise) {}
 
   friend std::ostream &operator<<(std::ostream &os, const Results &x) {
