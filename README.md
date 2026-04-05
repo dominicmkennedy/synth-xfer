@@ -277,21 +277,27 @@ pattern make-sequential \
 
 ### `pattern generate-input`
 
-| CLI flag              | Description                                                          |
-|-----------------------|----------------------------------------------------------------------|
-| `--pattern <Path>`    | Pattern MLIR file to generate inputs for.                            |
-| `--domain <Name>`     | Abstract domain to generate inputs in.                               |
-| `--bw <spec>`         | One or more bitwidth specs, each as `bw` or `bw,samples`.            |
-| `--data-dir <Path>`   | Directory containing per-domain input TSVs used for sampling.        |
-| `-o, --output <Path>` | Output enum TSV.                                                     |
+| CLI flag                 | Description                                                                                     |
+|--------------------------|-------------------------------------------------------------------------------------------------|
+| `--pattern <Path>`       | Pattern MLIR file to generate inputs for.                                                       |
+| `--domain <Name>`        | Abstract domain to generate inputs in.                                                          |
+| `--mbw <bw,samples>`     | Bitwidth/sample-count pairs to sample that compute the ideal abstract output with `max-precise` |
+| `--hbw <bw,samples>`     | Bitwidth/sample-count pairs to sample but not compute the ideal value                           |
+| `--data-dir <Path>`      | Directory containing per-domain input TSVs used for sampling.                                   |
+| `--sampling-alpha <f64>` | Exponent applied to `count` before weighted row sampling.                                       |
+| `--weight-beta <f64>`    | Exponent applied to the proposal probability when emitting row weights.                         |
+| `--timeout <int>`        | Per-row ideal-computation timeout in seconds for `--mbw` rows.                                  |
+| `--max-failures <int>`   | Max consecutive duplicate/timeout rejections before failing. Default `1000`.                    |
+| `-o, --output <Path>`    | Output enum TSV.                                                                                |
 
 Example:
 ```bash
 pattern generate-input             \
   --pattern mlir/Patterns/008.mlir \
   --domain KnownBits               \
-  --bw 8,1000 64,1000              \
-  --data-dir input-data            \
+  --mbw 8,50000                    \
+  --hbw 64,50000                   \
+  --data-dir notes/input_data      \
   -o pattern_008_enum_data.tsv
 ```
 

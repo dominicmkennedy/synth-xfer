@@ -1,11 +1,7 @@
 from dataclasses import dataclass
-from itertools import product
 from pathlib import Path
-from random import Random
 import re
-from typing import cast
 
-import pandas as pd
 from xdsl.dialects.builtin import ModuleOp, StringAttr
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 from xdsl.ir import BlockArgument, Operation, OpResult, SSAValue
@@ -17,7 +13,6 @@ from synth_xfer._util.parse_mlir import (
     inline_mod,
     parse_mlir_mod,
 )
-from synth_xfer._util.tsv import EnumData, EnumMetaData
 
 _BASE_CONSTRAINTS: dict[str, frozenset[str]] = {
     "ashr": frozenset({"shift_lt_bw"}),
@@ -72,29 +67,6 @@ _TRANSFER_FLAG_TO_OP: dict[tuple[str, frozenset[str]], str] = {
     ("sub", frozenset({"sub_nuw"})): "SubNuw",
     ("sub", frozenset({"sub_nsw", "sub_nuw"})): "SubNswNuw",
     ("udiv", frozenset({"udiv_exact"})): "UdivExact",
-}
-
-_COMMUTATIVE_OPS = {
-    "Add",
-    "AddNsw",
-    "AddNswNuw",
-    "AddNuw",
-    "And",
-    "AvgCeilS",
-    "AvgCeilU",
-    "AvgFloorS",
-    "AvgFloorU",
-    "Mul",
-    "MulNsw",
-    "MulNswNuw",
-    "MulNuw",
-    "Or",
-    "OrDisjoint",
-    "Smax",
-    "Smin",
-    "Umax",
-    "Umin",
-    "Xor",
 }
 
 _KB = AbstractDomain.KnownBits
@@ -327,128 +299,6 @@ def analyze_pattern(
         edges=tuple(edges),
         reuse=_has_reuse(dag),
     )
-
-
-def _load_op_data(
-    data_dir: Path, domain: AbstractDomain, op: str, bw: int
-) -> tuple[int, pd.DataFrame]:
-    path = data_dir / str(domain) / f"{op}.tsv"
-    if not path.exists():
-        raise FileNotFoundError(f"Missing data file '{path}'.")
-    with path.open() as f:
-        data = EnumData.read_tsv(f)
-    return data.metadata.arity, cast(
-        pd.DataFrame, data.enumdata[data.enumdata["bw"] == bw].copy()
-    )
-
-
-def _append_unique(dst: list[str], src: pd.Series) -> None:
-    seen = set(dst)
-    for value in cast(list[str], src.astype(str).tolist()):
-        if value not in seen:
-            seen.add(value)
-            dst.append(value)
-
-
-def _collect_pattern_arg_values(
-    dag: PatternDag,
-    op_tables: dict[str, tuple[int, pd.DataFrame]],
-) -> dict[str, list[str]]:
-    arg_values = {arg: [] for arg in dag.args}
-
-    for node in dag.nodes:
-        arity, frame = op_tables[node.operation]
-        for operand_index, operand in enumerate(node.operands):
-            if operand not in arg_values:
-                continue
-            # A pattern arg may appear in multiple operand positions across the DAG.
-            # We intentionally use the union of all matching operand domains here.
-            positions = (
-                range(arity) if node.operation in _COMMUTATIVE_OPS else (operand_index,)
-            )
-            for position in positions:
-                column = f"arg_{position}"
-                if column not in frame.columns:
-                    raise ValueError(
-                        f"Data for op '{node.operation}' is missing column '{column}'."
-                    )
-                _append_unique(arg_values[operand], cast(pd.Series, frame[column]))
-
-    return arg_values
-
-
-def _decode_index(index: int, domains: list[list[str]]) -> tuple[str, ...]:
-    result = ["" for _ in domains]
-    for i in range(len(domains) - 1, -1, -1):
-        result[i] = domains[i][index % len(domains[i])]
-        index //= len(domains[i])
-    return tuple(result)
-
-
-def _rows_for_bw(
-    dag: PatternDag,
-    domain: AbstractDomain,
-    bw_spec: tuple[int, int | None],
-    data_dir: Path,
-    rng: Random,
-) -> list[tuple[object, ...]]:
-    bw, samples = bw_spec
-    op_tables = {
-        node.operation: _load_op_data(data_dir, domain, node.operation, bw)
-        for node in dag.nodes
-    }
-    arg_values = _collect_pattern_arg_values(dag, op_tables)
-    domains = [arg_values[arg] for arg in dag.args]
-    total = 1
-    for values in domains:
-        total *= len(values)
-
-    if samples is None:
-        rows = product(*domains)
-    else:
-        if samples > total:
-            raise ValueError(
-                f"Requested {samples} samples for bw={bw}, but only {total} inputs exist."
-            )
-        rows = (_decode_index(i, domains) for i in rng.sample(range(total), samples))
-    return [(bw, *values, "(bottom)") for values in rows]
-
-
-def generate_inputs(
-    path: Path,
-    domain: AbstractDomain,
-    bw_specs: list[tuple[int, int | None]],
-    data_dir: Path,
-    rng: Random,
-) -> EnumData:
-    dag = _load_pattern(path)
-    rows: list[tuple[object, ...]] = []
-    hbw: list[tuple[int, int, int]] = []
-    seen: set[int] = set()
-    for spec in sorted(bw_specs, key=lambda spec: spec[0]):
-        bw, _ = spec
-        if bw in seen:
-            raise ValueError(f"Duplicate bw spec for bw={bw}.")
-        seen.add(bw)
-        bw_rows = _rows_for_bw(dag, domain, spec, data_dir, rng)
-        rows.extend(bw_rows)
-        hbw.append((bw, len(bw_rows), 0))
-
-    metadata = EnumMetaData(
-        domain=domain,
-        op=f"pattern_{path.stem}",
-        arity=len(dag.args),
-        seed=None,
-        lbw=[],
-        mbw=[],
-        hbw=hbw,
-    )
-    df = pd.DataFrame.from_records(
-        rows,
-        columns=["bw"] + [f"arg_{i}" for i in range(len(dag.args))] + ["ideal"],
-    )
-
-    return EnumData(metadata, df)
 
 
 def _get_pattern_solutions(

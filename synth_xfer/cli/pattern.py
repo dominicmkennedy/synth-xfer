@@ -1,12 +1,10 @@
-from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser, ArgumentTypeError
+from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
 from pathlib import Path
 from random import Random, SystemRandom
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval import (
-    eval_pattern_exact,
-    eval_pattern_norm,
-)
+from synth_xfer._util.eval import eval_pattern_exact, eval_pattern_norm
+from synth_xfer._util.input_generation import generate_pattern_inputs
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
@@ -14,7 +12,6 @@ from synth_xfer._util.pattern import (
     CompletenessReport,
     analyze_pattern,
     construct_pattern_solution,
-    generate_inputs,
 )
 from synth_xfer._util.tsv import EnumData
 from synth_xfer._util.xfer_data import (
@@ -23,18 +20,7 @@ from synth_xfer._util.xfer_data import (
     namespace_module,
     resolve_xfer_name,
 )
-
-
-def _parse_bw_spec(text: str) -> tuple[int, int | None]:
-    parts = [part.strip() for part in text.split(",")]
-    try:
-        if len(parts) == 1:
-            return (int(parts[0]), None)
-        if len(parts) == 2:
-            return (int(parts[0]), int(parts[1]))
-    except ValueError as e:
-        raise ArgumentTypeError(str(e))
-    raise ArgumentTypeError(f"Invalid bw spec '{text}'. Expected 'bw' or 'bw,samples'.")
+from synth_xfer.cli.args import int_tuple
 
 
 def _format_report(report: CompletenessReport) -> str:
@@ -60,41 +46,6 @@ def _format_report(report: CompletenessReport) -> str:
     return "\n".join(lines)
 
 
-def _analyze_args(p: ArgumentParser):
-    p.add_argument(
-        "--pattern", type=Path, required=True, help="Pattern MLIR file to analyze"
-    )
-    p.add_argument(
-        "-d",
-        "--domain",
-        type=str,
-        choices=[str(x) for x in AbstractDomain],
-        required=True,
-        help="Abstract Domain to evaluate",
-    )
-
-
-def _seq_args(p: ArgumentParser):
-    p.add_argument(
-        "--pattern", type=Path, required=True, help="Pattern MLIR file to analyze"
-    )
-    p.add_argument(
-        "-d",
-        "--domain",
-        type=str,
-        choices=[str(x) for x in AbstractDomain],
-        required=True,
-        help="Abstract Domain",
-    )
-    p.add_argument(
-        "--xfer-dir",
-        type=Path,
-        required=True,
-        help="Directory containing component op solutions",
-    )
-    p.add_argument("-o", "--output", type=Path, help="Output mlir function")
-
-
 def _gen_args(p: ArgumentParser):
     p.add_argument(
         "--pattern", type=Path, required=True, help="Pattern MLIR file to analyze"
@@ -108,11 +59,18 @@ def _gen_args(p: ArgumentParser):
         help="Abstract Domain",
     )
     p.add_argument(
-        "--bw",
-        nargs="+",
-        type=_parse_bw_spec,
-        required=True,
-        help="Bitwidth specs as 'bw' or 'bw,samples'",
+        "--mbw",
+        nargs="*",
+        type=int_tuple,
+        default=[],
+        help="Bitwidth specs as 'bw,samples' with ideal computation",
+    )
+    p.add_argument(
+        "--hbw",
+        nargs="*",
+        type=int_tuple,
+        default=[],
+        help="Bitwidth specs as 'bw,samples' without ideal computation",
     )
     p.add_argument("-o", "--output", type=Path, required=True, help="Output TSV path")
     p.add_argument(
@@ -125,6 +83,30 @@ def _gen_args(p: ArgumentParser):
         "--seed",
         type=int,
         help="Sampling seed used only for random input selection",
+    )
+    p.add_argument(
+        "--sampling-alpha",
+        type=float,
+        default=1.0,
+        help="Exponent applied to per-row counts before sampling",
+    )
+    p.add_argument(
+        "--weight-beta",
+        type=float,
+        default=1.0,
+        help="Exponent applied to the proposal probability when emitting row weights",
+    )
+    p.add_argument(
+        "--timeout",
+        type=int,
+        default=10,
+        help="Timeout in seconds for ideal computation",
+    )
+    p.add_argument(
+        "--max-failures",
+        type=int,
+        default=1000,
+        help="Maximum consecutive duplicate/timeout rejections before failing",
     )
 
 
@@ -160,12 +142,39 @@ def main() -> None:
     analyze_parser = sub.add_parser(
         "analyze", formatter_class=ArgumentDefaultsHelpFormatter
     )
-    _analyze_args(analyze_parser)
+    analyze_parser.add_argument(
+        "--pattern", type=Path, required=True, help="Pattern MLIR file to analyze"
+    )
+    analyze_parser.add_argument(
+        "-d",
+        "--domain",
+        type=str,
+        choices=[str(x) for x in AbstractDomain],
+        required=True,
+        help="Abstract Domain to evaluate",
+    )
 
     seq_parser = sub.add_parser(
         "make-sequential", formatter_class=ArgumentDefaultsHelpFormatter
     )
-    _seq_args(seq_parser)
+    seq_parser.add_argument(
+        "--pattern", type=Path, required=True, help="Pattern MLIR file"
+    )
+    seq_parser.add_argument(
+        "-d",
+        "--domain",
+        type=str,
+        choices=[str(x) for x in AbstractDomain],
+        required=True,
+        help="Abstract Domain",
+    )
+    seq_parser.add_argument(
+        "--xfer-dir",
+        type=Path,
+        required=True,
+        help="Directory containing component op solutions",
+    )
+    seq_parser.add_argument("-o", "--output", type=Path, help="Output mlir function")
 
     gen_parser = sub.add_parser(
         "generate-input", formatter_class=ArgumentDefaultsHelpFormatter
@@ -184,14 +193,22 @@ def main() -> None:
 
     if args.command == "generate-input":
         rng = Random(SystemRandom().randrange(2**32) if args.seed is None else args.seed)
-        generated_inputs = generate_inputs(
+        generated_inputs, timeouts = generate_pattern_inputs(
             args.pattern,
             AbstractDomain[args.domain],
-            args.bw,
+            args.mbw,
+            args.hbw,
             data_dir=args.data_dir,
             rng=rng,
+            sampling_alpha=args.sampling_alpha,
+            weight_beta=args.weight_beta,
+            timeout=args.timeout,
+            max_failures=args.max_failures,
         )
         generated_inputs.write_tsv(args.output)
+        for bw, timeout in timeouts.items():
+            if timeout:
+                print(f"bw {bw} had {timeout} max-precise timeouts")
 
     if args.command == "make-sequential":
         fn = construct_pattern_solution(

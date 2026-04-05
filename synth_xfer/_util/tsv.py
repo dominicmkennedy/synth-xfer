@@ -85,6 +85,21 @@ class EnumData:
                 lineterminator="\n",
             )
 
+    def write_tsv_with_comments(self, path: Path, commented_rows: list[str]) -> None:
+        frontmatter = f"# ---\n{self.metadata.dump_commented()}\n# ---\n"
+        with path.open("w") as f:
+            f.write(frontmatter)
+            for row in commented_rows:
+                f.write(row)
+                f.write("\n")
+            self.enumdata.to_csv(
+                f,
+                sep="\t",
+                index=False,
+                header=True,
+                lineterminator="\n",
+            )
+
     @classmethod
     def read_tsv(cls, f: TextIO) -> "EnumData":
         lines = f.read().splitlines()
@@ -95,7 +110,11 @@ class EnumData:
 
         data_lines = [line for line in lines[end + 1 :] if not line.startswith("# ")]
         tsv_text = "\n".join(data_lines) + "\n"
-        frame = pd.read_csv(StringIO(tsv_text), sep="\t")
+        frame = pd.read_csv(StringIO(tsv_text), sep="\t", dtype=str)
+        if "bw" in frame.columns:
+            frame["bw"] = frame["bw"].astype(int)
+        if "count" in frame.columns:
+            frame["count"] = frame["count"].astype(int)
 
         return cls(metadata, frame)
 
