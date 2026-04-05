@@ -71,9 +71,10 @@ private:
   unsigned int maxUnsoundExamples = 0;
   unsigned int maxImpreciseExamples = 0;
 
+  template <typename Getter>
   void print_member(
       std::ostream &os, std::string_view name,
-      const std::function<unsigned long(const Result &x)> &getter) const {
+      Getter getter) const {
     os << std::left << std::setw(20) << name;
     os << "[";
     for (auto it = r.begin(); it != r.end(); ++it) {
