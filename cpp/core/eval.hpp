@@ -193,7 +193,7 @@ public:
 
   Results eval(const std::vector<Row> &to_eval) const {
     Results r{static_cast<unsigned int>(xfrFns.size()), ResBw,
-              ResultD::num_levels, maxUnsoundExamples, maxImpreciseExamples};
+              maxUnsoundExamples, maxImpreciseExamples};
 
     for (const Row &row : to_eval) {
       const ArgsTuple &args = std::get<0>(row);
