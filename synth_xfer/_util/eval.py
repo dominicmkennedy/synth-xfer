@@ -192,7 +192,7 @@ def enum(
     helper_funcs: HelperFuncs,
     sampler: Sampler,
 ) -> dict[int, ToEval]:
-    all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
+    all_bws = list(set(lbw + [x[0] for x in mbw] + [x[0] for x in hbw]))
     lowerer = LowerToLLVM(all_bws)
     crt = lowerer.add_fn(helper_funcs.crt_func, shim=True)
     op_constraint = (
