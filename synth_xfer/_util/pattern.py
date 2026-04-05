@@ -7,11 +7,21 @@ from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 from xdsl.ir import BlockArgument, Operation, OpResult, SSAValue
 
 from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.eval import eval_pattern_exact, eval_pattern_norm
+from synth_xfer._util.jit import Jit
+from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import (
     get_fns,
     get_solution,
     inline_mod,
     parse_mlir_mod,
+)
+from synth_xfer._util.tsv import EnumData
+from synth_xfer._util.xfer_data import (
+    enumdata_to_eval_inputs,
+    enumdata_to_run_inputs,
+    namespace_module,
+    resolve_xfer_name,
 )
 
 _BASE_CONSTRAINTS: dict[str, frozenset[str]] = {
@@ -350,3 +360,58 @@ def construct_pattern_solution(
     mod = ModuleOp([*lowered_xfers, solution])
     inline_mod(mod)
     return get_fns(mod)["solution"]
+
+
+def eval_pattern(
+    sequential_xfer: Path,
+    composite_xfer: Path,
+    xfer_name: str | None,
+    input_path: Path,
+    exact_bw: int,
+    norm_bw: int,
+) -> tuple[float, float, float, float]:
+    raw_seq_mod = parse_mlir_mod(sequential_xfer)
+    seq_mod = namespace_module(raw_seq_mod, "seq")
+    seq_xfer_name = "seq_solution"
+    comp_mod = parse_mlir_mod(composite_xfer)
+    comp_xfer_name = resolve_xfer_name(get_fns(comp_mod), xfer_name)
+
+    with input_path.open("r") as f:
+        data = EnumData.read_tsv(f)
+
+    if exact_bw not in [x[0] for x in data.metadata.mbw + data.metadata.hbw]:
+        raise ValueError(f"Exact BW {exact_bw} not in Enum TSV")
+    if norm_bw not in [x[0] for x in data.metadata.mbw + data.metadata.hbw]:
+        raise ValueError(f"Norm BW {norm_bw} not in Enum TSV")
+
+    exact_to_eval = enumdata_to_eval_inputs(data)[exact_bw]
+    norm_to_eval = enumdata_to_run_inputs(data)[norm_bw]
+
+    exact_weights = (
+        data.enumdata[data.enumdata["bw"] == exact_bw]["weight"].astype(float).tolist()
+    )
+    norm_weights = (
+        data.enumdata[data.enumdata["bw"] == norm_bw]["weight"].astype(float).tolist()
+    )
+
+    lowerer = LowerToLLVM(sorted({exact_bw, norm_bw}))
+    lowerer.add_mod(seq_mod, [seq_xfer_name])
+    lowerer.add_mod(comp_mod, [comp_xfer_name])
+
+    with Jit() as jit:
+        jit.add_mod(lowerer)
+        seq_exact, comp_exact = eval_pattern_exact(
+            exact_to_eval,
+            exact_weights,
+            jit.get_fn_ptr(f"{seq_xfer_name}_{exact_bw}_shim"),
+            jit.get_fn_ptr(f"{comp_xfer_name}_{exact_bw}_shim"),
+        )
+
+        seq_norm, comp_norm = eval_pattern_norm(
+            norm_to_eval,
+            norm_weights,
+            jit.get_fn_ptr(f"{seq_xfer_name}_{norm_bw}_shim"),
+            jit.get_fn_ptr(f"{comp_xfer_name}_{norm_bw}_shim"),
+        )
+
+    return seq_exact, comp_exact, seq_norm, comp_norm

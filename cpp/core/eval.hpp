@@ -69,12 +69,12 @@ public:
   struct ExactRow {
     ArgsT args;
     ResultD best;
-    uint64_t weight;
+    double weight;
   };
 
   struct NormRow {
     ArgsT args;
-    uint64_t weight;
+    double weight;
   };
 
   EvalPattern(XferFn sequential, XferFn composite)
@@ -88,15 +88,17 @@ public:
     long double composite_correct_weight = 0.0L;
 
     for (const auto &row : rows) {
-      total_weight += static_cast<long double>(row.weight);
+      const long double inv_weight =
+          1.0L / static_cast<long double>(row.weight);
+      total_weight += inv_weight;
 
       const auto [sequential_result, composite_result] = eval_both(row.args);
 
       if (sequential_result == row.best) {
-        sequential_correct_weight += static_cast<long double>(row.weight);
+        sequential_correct_weight += inv_weight;
       }
       if (composite_result == row.best) {
-        composite_correct_weight += static_cast<long double>(row.weight);
+        composite_correct_weight += inv_weight;
       }
     }
 
@@ -117,17 +119,17 @@ public:
     long double composite_norm_weight = 0.0L;
 
     for (const auto &row : rows) {
-      total_weight += static_cast<long double>(row.weight);
+      const long double inv_weight =
+          1.0L / static_cast<long double>(row.weight);
+      total_weight += inv_weight;
 
       const auto [sequential_result, composite_result] = eval_both(row.args);
 
       sequential_norm_weight +=
-          static_cast<long double>(sequential_result.norm()) *
-          static_cast<long double>(row.weight);
+          static_cast<long double>(sequential_result.norm()) * inv_weight;
 
       composite_norm_weight +=
-          static_cast<long double>(composite_result.norm()) *
-          static_cast<long double>(row.weight);
+          static_cast<long double>(composite_result.norm()) * inv_weight;
     }
 
     if (total_weight == 0.0L) {

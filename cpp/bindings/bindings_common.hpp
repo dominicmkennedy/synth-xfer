@@ -59,7 +59,7 @@ using EvalThunk = Results (*)(py::handle, const std::vector<std::uintptr_t> &,
                               const std::vector<std::uintptr_t> &, unsigned int,
                               unsigned int);
 using EvalPatternThunk = std::pair<double, double> (*)(py::handle,
-                                                       const std::vector<std::uint64_t> &,
+                                                       const std::vector<double> &,
                                                        std::uintptr_t,
                                                        std::uintptr_t);
 using RunThunk = py::object (*)(py::handle, std::uintptr_t);
@@ -240,7 +240,7 @@ void register_eval_domain(py::module_ &m) {
 template <typename EvalPatternT, typename EvalVec>
 std::vector<typename EvalPatternT::ExactRow>
 make_exact_pattern_rows(const EvalVec &to_eval,
-                        const std::vector<std::uint64_t> &weights) {
+                        const std::vector<double> &weights) {
   if (to_eval.size() != weights.size()) {
     throw py::value_error("weights length must match to_eval");
   }
@@ -257,7 +257,7 @@ make_exact_pattern_rows(const EvalVec &to_eval,
 template <typename EvalPatternT, typename RunVec>
 std::vector<typename EvalPatternT::NormRow>
 make_norm_pattern_rows(const RunVec &to_run,
-                       const std::vector<std::uint64_t> &weights) {
+                       const std::vector<double> &weights) {
   if (to_run.size() != weights.size()) {
     throw py::value_error("weights length must match to_run");
   }
@@ -289,7 +289,7 @@ void register_eval_pattern_domain(py::module_ &m) {
 
   bind_eval_pattern_func(
       m, exact_fn_name,
-      +[](py::handle to_eval, const std::vector<std::uint64_t> &weights,
+      +[](py::handle to_eval, const std::vector<double> &weights,
           std::uintptr_t sequential_addr,
           std::uintptr_t composite_addr) -> std::pair<double, double> {
         const EvalVec &v = py::cast<const EvalVec &>(to_eval);
@@ -303,7 +303,7 @@ void register_eval_pattern_domain(py::module_ &m) {
 
   bind_eval_pattern_func(
       m, norm_fn_name,
-      +[](py::handle to_run, const std::vector<std::uint64_t> &weights,
+      +[](py::handle to_run, const std::vector<double> &weights,
           std::uintptr_t sequential_addr,
           std::uintptr_t composite_addr) -> std::pair<double, double> {
         const RunVec &v = py::cast<const RunVec &>(to_run);

@@ -300,7 +300,7 @@ def parse_to_eval_inputs(
 
 
 def eval_pattern_exact(
-    to_eval: ToEval, weights: list[int], sequential: FnPtr, composite: FnPtr
+    to_eval: ToEval, weights: list[float], sequential: FnPtr, composite: FnPtr
 ) -> tuple[float, float]:
     return _get_eval_pattern_exact_fn(to_eval)(
         to_eval, weights, sequential.addr, composite.addr
@@ -308,7 +308,7 @@ def eval_pattern_exact(
 
 
 def eval_pattern_norm(
-    to_run: ArgsVec, weights: list[int], sequential: FnPtr, composite: FnPtr
+    to_run: ArgsVec, weights: list[float], sequential: FnPtr, composite: FnPtr
 ) -> tuple[float, float]:
     return _get_eval_pattern_norm_fn(to_run)(
         to_run, weights, sequential.addr, composite.addr

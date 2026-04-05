@@ -3,22 +3,12 @@ from pathlib import Path
 from random import Random, SystemRandom
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval import eval_pattern_exact, eval_pattern_norm
 from synth_xfer._util.input_generation import generate_pattern_inputs
-from synth_xfer._util.jit import Jit
-from synth_xfer._util.lower import LowerToLLVM
-from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
 from synth_xfer._util.pattern import (
     CompletenessReport,
     analyze_pattern,
     construct_pattern_solution,
-)
-from synth_xfer._util.tsv import EnumData
-from synth_xfer._util.xfer_data import (
-    enumdata_to_eval_inputs,
-    enumdata_to_run_inputs,
-    namespace_module,
-    resolve_xfer_name,
+    eval_pattern,
 )
 from synth_xfer.cli.args import int_tuple
 
@@ -219,42 +209,14 @@ def main() -> None:
         else:
             print(fn)
     if args.command == "eval":
-        raw_seq_mod = parse_mlir_mod(args.sequential_xfer)
-        seq_mod = namespace_module(raw_seq_mod, "seq")
-        seq_xfer_name = "seq_solution"
-        comp_mod = parse_mlir_mod(args.composite_xfer)
-        comp_xfer_name = resolve_xfer_name(get_fns(comp_mod), args.xfer_name)
-
-        with args.input.open("r") as f:
-            data = EnumData.read_tsv(f)
-
-        if args.exact_bw not in [x[0] for x in data.metadata.mbw + data.metadata.hbw]:
-            raise ValueError(f"Exact BW {args.exact_bw} not in Enum TSV")
-        if args.norm_bw not in [x[0] for x in data.metadata.mbw + data.metadata.hbw]:
-            raise ValueError(f"Norm BW {args.norm_bw} not in Enum TSV")
-
-        exact_to_eval = enumdata_to_eval_inputs(data)[args.exact_bw]
-        tmp_weights = [1 for _ in range(len(exact_to_eval))]
-        norm_to_eval = enumdata_to_run_inputs(data)[args.norm_bw]
-        lowerer = LowerToLLVM(sorted({args.exact_bw, args.norm_bw}))
-        lowerer.add_mod(seq_mod, [seq_xfer_name])
-        lowerer.add_mod(comp_mod, [comp_xfer_name])
-
-        with Jit() as jit:
-            jit.add_mod(lowerer)
-            seq_exact, comp_exact = eval_pattern_exact(
-                exact_to_eval,
-                tmp_weights,
-                jit.get_fn_ptr(f"{seq_xfer_name}_{args.exact_bw}_shim"),
-                jit.get_fn_ptr(f"{comp_xfer_name}_{args.exact_bw}_shim"),
-            )
-
-            seq_norm, comp_norm = eval_pattern_norm(
-                norm_to_eval,
-                tmp_weights,
-                jit.get_fn_ptr(f"{seq_xfer_name}_{args.norm_bw}_shim"),
-                jit.get_fn_ptr(f"{comp_xfer_name}_{args.norm_bw}_shim"),
-            )
+        seq_exact, comp_exact, seq_norm, comp_norm = eval_pattern(
+            args.sequential_xfer,
+            args.composite_xfer,
+            args.xfer_name,
+            args.input,
+            args.exact_bw,
+            args.norm_bw,
+        )
 
         print("Type       | Exact % | Norm Score")
         print("-----------|---------|-------------")
