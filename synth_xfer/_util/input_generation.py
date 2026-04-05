@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from multiprocessing import Pool
+import os
 from pathlib import Path
 from random import Random
 from typing import cast
@@ -6,7 +8,7 @@ from typing import cast
 import pandas as pd
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.max_precise import compute_max_precise
+from synth_xfer._util.max_precise import RowTask, process_row
 from synth_xfer._util.pattern import PatternDag, _load_pattern
 from synth_xfer._util.tsv import EnumData, EnumMetaData
 
@@ -211,49 +213,71 @@ def generate_pattern_inputs(
     mbw: list[tuple[int, int]] = []
     hbw: list[tuple[int, int, int]] = []
     timeout_counts_by_bw: dict[int, int] = {}
+    max_workers = os.cpu_count() or 1
 
-    for bw, samples in sorted(mbw_specs, key=lambda spec: spec[0]):
-        rows_for_bw: list[tuple[object, ...]] = []
-        seen_args: set[tuple[str, ...]] = set()
-        failed_attempts_since_accept = 0
-        timeout_counts_by_bw[bw] = 0
-        while len(rows_for_bw) < samples:
-            row, weight = generator.sample_row(bw, generator._load_op_tables(bw))
-            arg_values = row[1:-1]
-            key = tuple(str(value) for value in arg_values)
-            if key in seen_args:
-                failed_attempts_since_accept += 1
-                if failed_attempts_since_accept >= max_failures:
-                    raise ValueError(
-                        f"Failed to add a new row for bw={bw} after {max_failures} "
-                        "consecutive rejected attempts due to duplicates or timeouts."
-                    )
-                continue
-            try:
-                ideal = compute_max_precise(
-                    path,
-                    domain,
-                    bw,
-                    tuple(str(value) for value in arg_values),
-                    timeout,
-                )
-            except TimeoutError:
-                timeout_counts_by_bw[bw] += 1
-                failed_attempts_since_accept += 1
-
-                if failed_attempts_since_accept >= max_failures:
-                    raise ValueError(
-                        f"Failed to add a new row for bw={bw} after {max_failures} "
-                        "consecutive rejected attempts due to duplicates or timeouts."
-                    )
-
-                continue
-
-            rows_for_bw.append((row[0], *arg_values, ideal, weight))
-            seen_args.add(key)
+    with Pool(processes=max_workers) as pool:
+        for bw, samples in sorted(mbw_specs, key=lambda spec: spec[0]):
+            rows_for_bw: list[tuple[object, ...]] = []
+            seen_args: set[tuple[str, ...]] = set()
             failed_attempts_since_accept = 0
-        mbw_rows.extend(rows_for_bw)
-        mbw.append((bw, len(rows_for_bw)))
+            timeout_counts_by_bw[bw] = 0
+            while len(rows_for_bw) < samples:
+                batch_rows: list[tuple[tuple[object, ...], tuple[str, ...], float]] = []
+                tasks: list[RowTask] = []
+                batch_size = min(max_workers, samples - len(rows_for_bw))
+                while len(tasks) < batch_size:
+                    row, weight = generator.sample_row(bw, generator._load_op_tables(bw))
+                    arg_values = tuple(str(value) for value in row[1:-1])
+                    if arg_values in seen_args:
+                        failed_attempts_since_accept += 1
+                        if failed_attempts_since_accept >= max_failures:
+                            raise ValueError(
+                                f"Failed to add a new row for bw={bw} after {max_failures} "
+                                "consecutive rejected attempts due to duplicates or timeouts."
+                            )
+                        continue
+                    batch_rows.append((row, arg_values, weight))
+                    tasks.append(
+                        RowTask(
+                            index=len(tasks),
+                            op_path=path,
+                            domain=domain,
+                            bw=bw,
+                            args_str=",".join(arg_values),
+                            timeout=timeout,
+                        )
+                    )
+
+                for result in pool.map(process_row, tasks):
+                    row, arg_values, weight = batch_rows[result.index]
+                    if result.timed_out:
+                        timeout_counts_by_bw[bw] += 1
+                        failed_attempts_since_accept += 1
+                        if failed_attempts_since_accept >= max_failures:
+                            raise ValueError(
+                                f"Failed to add a new row for bw={bw} after {max_failures} "
+                                "consecutive rejected attempts due to duplicates or timeouts."
+                            )
+                        continue
+
+                    if arg_values in seen_args:
+                        failed_attempts_since_accept += 1
+                        if failed_attempts_since_accept >= max_failures:
+                            raise ValueError(
+                                f"Failed to add a new row for bw={bw} after {max_failures} "
+                                "consecutive rejected attempts due to duplicates or timeouts."
+                            )
+                        continue
+
+                    assert result.ideal is not None
+                    rows_for_bw.append((row[0], *arg_values, result.ideal, weight))
+                    seen_args.add(arg_values)
+                    failed_attempts_since_accept = 0
+                    if len(rows_for_bw) >= samples:
+                        break
+
+            mbw_rows.extend(rows_for_bw)
+            mbw.append((bw, len(rows_for_bw)))
 
     for bw, samples in sorted(hbw_specs, key=lambda spec: spec[0]):
         seen_args: set[tuple[str, ...]] = set()

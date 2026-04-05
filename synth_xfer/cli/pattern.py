@@ -77,13 +77,13 @@ def _gen_args(p: ArgumentParser):
     p.add_argument(
         "--sampling-alpha",
         type=float,
-        default=1.0,
+        default=0.7,
         help="Exponent applied to per-row counts before sampling",
     )
     p.add_argument(
         "--weight-beta",
         type=float,
-        default=1.0,
+        default=0.15,
         help="Exponent applied to the proposal probability when emitting row weights",
     )
     p.add_argument(

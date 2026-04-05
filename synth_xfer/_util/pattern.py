@@ -12,6 +12,7 @@ from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import (
     get_fns,
+    get_helper_funcs,
     get_solution,
     inline_mod,
     parse_mlir_mod,
@@ -213,6 +214,12 @@ def _resolve_operation(
     return op_name
 
 
+def _resolve_metadata_op(op: str) -> Path:
+    if op.startswith("pattern_"):
+        return Path("mlir") / "Patterns" / f"{op.removeprefix('pattern_')}.mlir"
+    return Path("mlir") / "Operations" / f"{op}.mlir"
+
+
 def _load_pattern(pattern_path: Path) -> PatternDag:
     pattern_mod = parse_mlir_mod(pattern_path)
     fns = get_fns(pattern_mod)
@@ -394,7 +401,12 @@ def eval_pattern(
         data.enumdata[data.enumdata["bw"] == norm_bw]["weight"].astype(float).tolist()
     )
 
+    helpers = get_helper_funcs(
+        _resolve_metadata_op(data.metadata.op), data.metadata.domain
+    )
     lowerer = LowerToLLVM(sorted({exact_bw, norm_bw}))
+    lowerer.add_fn(helpers.meet_func)
+    lowerer.add_fn(helpers.get_top_func)
     lowerer.add_mod(seq_mod, [seq_xfer_name])
     lowerer.add_mod(comp_mod, [comp_xfer_name])
 
