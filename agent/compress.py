@@ -29,6 +29,7 @@ def _run_agent_compress(
     ops_path: Path,
     instructions_path: Path,
     max_turns: int,
+    exact_bw: tuple[int, ...],
 ) -> tuple[str, object]:
     """Run agent to compress a target file. Returns (final_output, run_result)."""
     del api_key  # Reserved for future model/provider auth parity.
@@ -94,6 +95,7 @@ def _run_agent_compress(
                 op_path=Path(target.task.op_file),
                 domain=AbstractDomain.KnownBits,
                 xfer_name=f"kb_{target.task.op_name.lower()}",
+                exact_bw=exact_bw,
             )
             match = re.search(pattern, curr_eval_summary)
             if match is None:
@@ -122,6 +124,7 @@ def _run_agent_compress(
             op_path=Path(target.task.op_file),
             domain=AbstractDomain.KnownBits,
             xfer_name=f"kb_{target.task.op_name.lower()}",
+            exact_bw=exact_bw,
         )
         match = re.search(pattern, compressed_eval_summary)
         if match is None:
@@ -190,6 +193,7 @@ def run_compress_task(
         ops_path=args.ops,
         instructions_path=args.compress_instructions,
         max_turns=args.max_turns,
+        exact_bw=tuple(args.exact_bw),
     )
     print_token_usage(run_result)
 

@@ -193,6 +193,7 @@ class SynthesisAgent:
                 op_path=Path(task.op_file),
                 domain=AbstractDomain.KnownBits,
                 xfer_name=f"kb_{task.op_name.lower()}",
+                exact_bw=tuple(args.exact_bw),
             )
 
         return Agent(
@@ -243,13 +244,18 @@ def run_eval(
     transformer: SynthesisResult,
     library: LibraryState,
     op_name: str,
+    exact_bw: tuple[int, ...] = (8,),
 ) -> str:
     """Evaluate the transformer via eval_transformer (no subprocess)."""
     cleaned_mlir = clean_llm_output(transformer.solution_text)
     full_soln = merge_library_text(library.functions_text, cleaned_mlir)
 
     return eval_transformer(
-        full_soln, Path(op_file_path), AbstractDomain.KnownBits, f"kb_{op_name.lower()}"
+        full_soln,
+        Path(op_file_path),
+        AbstractDomain.KnownBits,
+        f"kb_{op_name.lower()}",
+        exact_bw=exact_bw,
     )
 
 
@@ -302,10 +308,14 @@ async def run_single_synthesis_task(
     eval_summary: str | None = None
     if not args.skip_eval:
         print(f"{tag} Evaluating transformer...")
-        eval_summary = run_eval(task.op_file, result, library, task.op_name)
+        eval_t0 = time.monotonic()
+        eval_summary = run_eval(
+            task.op_file, result, library, task.op_name, exact_bw=tuple(args.exact_bw)
+        )
+        eval_time = time.monotonic() - eval_t0
         print(f"{tag} Eval result: {eval_summary}")
         save_file(
-            f"synthesis_time: {synthesis_time:.2f}s\n\n{eval_summary}",
+            f"synthesis_time: {synthesis_time:.2f}s\neval_time: {eval_time:.2f}s\n\n{eval_summary}",
             output_dir,
             f"eval_r{round_num}_{task.op_name.lower()}.txt",
         )

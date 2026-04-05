@@ -127,6 +127,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip the compress step after synthesis (default: compress is enabled)",
     )
+    parser.add_argument(
+        "--exact-bw",
+        type=int,
+        nargs="+",
+        default=[8],
+        metavar="BW",
+        help="Exact bitwidth(s) for eval (default: 8)",
+    )
 
     args = parser.parse_args()
     _validate_args(parser, args)

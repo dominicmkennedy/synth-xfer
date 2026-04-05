@@ -241,7 +241,7 @@ def eval_transformer(
     try:
         lbw, mbw, hbw = _parse_bw_args(exact_bw, norm_bw)
         sampler = Sampler.uniform()
-        top_r, synth_r = run(
+        _, synth_r = run(
             domain=domain,
             lbw=lbw,
             mbw=mbw,
@@ -254,9 +254,7 @@ def eval_transformer(
         )
         exact_bw_val = exact_bw[0]
         norm_bw_val = norm_bw[0]
-        top_exact = next(x for x in top_r.per_bit_res if x.bitwidth == exact_bw_val)
         synth_exact = next(x for x in synth_r.per_bit_res if x.bitwidth == exact_bw_val)
-        top_norm = next(x for x in top_r.per_bit_res if x.bitwidth == norm_bw_val)
         synth_norm = next(x for x in synth_r.per_bit_res if x.bitwidth == norm_bw_val)
         return (
             f"Sound %: {synth_exact.get_sound_prop() * 100:.2f}, Exact %: {synth_exact.get_exact_prop() * 100:.2f}, Norm: {synth_norm.dist:.4f} "
