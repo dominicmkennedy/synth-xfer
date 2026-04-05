@@ -290,7 +290,7 @@ pattern make-sequential \
 | `--max-failures <int>`   | Max consecutive duplicate/timeout rejections before failing. Default `1000`.                    |
 | `-o, --output <Path>`    | Output enum TSV.                                                                                |
 
-Example:
+Example (This command may take several minutes depending on the size of `mbw`):
 ```bash
 pattern generate-input             \
   --pattern mlir/Patterns/008.mlir \
