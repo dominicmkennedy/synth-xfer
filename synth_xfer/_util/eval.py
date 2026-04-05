@@ -102,26 +102,26 @@ def _get_eval_fn(
 
 def _get_eval_pattern_exact_fn(
     to_eval: ToEval,
-) -> Callable[[ToEval, list[int], int, int], tuple[float, float]]:
+) -> Callable[[ToEval, list[float], int, int], tuple[float, float]]:
     def _eval_engine_name(to_eval: ToEval) -> str:
         suffix = to_eval.__class__.__name__.lower()[6:]
         return f"eval_pattern_exact_{suffix}"
 
     return cast(
-        Callable[[ToEval, list[int], int, int], tuple[float, float]],
+        Callable[[ToEval, list[float], int, int], tuple[float, float]],
         _get_ee_fn_dyn(_eval_engine_name(to_eval)),
     )
 
 
 def _get_eval_pattern_norm_fn(
     to_run: ArgsVec,
-) -> Callable[[ArgsVec, list[int], int, int], tuple[float, float]]:
+) -> Callable[[ArgsVec, list[float], int, int], tuple[float, float]]:
     def _eval_engine_name(to_run: ArgsVec) -> str:
         suffix = to_run.__class__.__name__.lower()[4:]
         return f"eval_pattern_norm_{suffix}"
 
     return cast(
-        Callable[[ArgsVec, list[int], int, int], tuple[float, float]],
+        Callable[[ArgsVec, list[float], int, int], tuple[float, float]],
         _get_ee_fn_dyn(_eval_engine_name(to_run)),
     )
 
