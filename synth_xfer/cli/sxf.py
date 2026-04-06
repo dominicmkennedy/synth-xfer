@@ -341,7 +341,12 @@ def _build_arg_parser() -> Namespace:
         help="number of unsound candidates considered for abduction",
         default=15,
     )
-    p.add_argument("-q", "--quiet", action="store_true")
+    p.add_argument(
+        "--debug",
+        action="store_true",
+        default=False,
+        help="write debug.log to the output directory (default: off)",
+    )
 
     return p.parse_args()
 
