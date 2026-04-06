@@ -19,7 +19,7 @@ from synth_xfer._util.mcmc_sampler import setup_mcmc
 from synth_xfer._util.one_iter import synthesize_one_iteration
 from synth_xfer._util.parse_mlir import HelperFuncs, get_helper_funcs, top_as_xfer
 from synth_xfer._util.random import Random, Sampler
-from synth_xfer._util.solution_set import EvalFn, UnsizedSolutionSet
+from synth_xfer._util.solution_set import EvalFn, SolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
 from synth_xfer.cli.args import int_list, int_triple, int_tuple, make_sampler_parser
 
@@ -122,7 +122,7 @@ def run(
     logger.perf(f"Enum engine took {run_time:.4f}s")
 
     eval_fn = _eval_helper(to_eval, all_bws, helper_funcs)
-    solution_set = UnsizedSolutionSet([], optimize=optimize)
+    solution_set = SolutionSet([], optimize=optimize)
 
     start_time = perf_counter()
     init_cmp_res = solution_set.eval_improve([], eval_fn)[0]
@@ -147,7 +147,7 @@ def run(
         )
 
         if weighted_dsl:
-            assert isinstance(solution_set, UnsizedSolutionSet)
+            assert isinstance(solution_set, SolutionSet)
             context_weighted.weighted = True
             solution_set.learn_weights(context_weighted, eval_fn)
 

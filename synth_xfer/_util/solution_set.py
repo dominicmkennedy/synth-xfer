@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 import io
 from typing import Callable, TypeAlias
 
@@ -30,8 +29,8 @@ EvalFn: TypeAlias = Callable[
 ]
 
 
-class SolutionSet(ABC):
-    "This class is an abstract class for maintaining solutions. It supports to generate the meet of solutions"
+class SolutionSet:
+    "Maintains solutions and supports generating the meet of solutions."
 
     solutions_size: int
     solutions: list[FunctionWithCondition]
@@ -65,20 +64,6 @@ class SolutionSet(ABC):
         eval_func: EvalFn,
     ) -> list[EvalResult]:
         return eval_func(transfers, self.solutions)
-
-    @abstractmethod
-    def construct_new_solution_set(
-        self,
-        lbw: list[int],
-        vbw: list[int],
-        new_candidates_sp: list[FunctionWithCondition],
-        new_candidates_p: list[FuncOp],
-        new_candidates_c: list[FunctionWithCondition],
-        # Parameters used by SMT verifier
-        helper_funcs: HelperFuncs,
-        num_unsound_candidates: int,
-        eval_func: EvalFn,
-    ) -> SolutionSet: ...
 
     def has_solution(self) -> bool:
         return self.solutions_size != 0
@@ -133,18 +118,6 @@ class SolutionSet(ABC):
         final_module = ModuleOp([])
         final_module.body.block.add_ops(function_lst)
         return final_module
-
-
-class UnsizedSolutionSet(SolutionSet):
-    "This class maintains a list of solutions without a specified size"
-
-    def __init__(
-        self,
-        initial_solutions: list[FunctionWithCondition],
-        is_perfect: bool = False,
-        optimize: bool = True,
-    ):
-        super().__init__(initial_solutions, is_perfect, optimize)
 
     def handle_inconsistent_result(self, f: FunctionWithCondition):
         str_output = io.StringIO()
