@@ -10,7 +10,11 @@ from pathlib import Path
 import pandas as pd
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.max_precise import RowTask, compute_max_precise, process_row
+from synth_xfer._util.max_precise import (
+    RowProcessor,
+    RowTask,
+    compute_max_precise,
+)
 from synth_xfer._util.tsv import EnumData
 
 
@@ -79,21 +83,15 @@ def _fill_hbw_rows(data: EnumData, timeout: int) -> tuple[EnumData, list[str]]:
     tasks = [
         RowTask(
             index=int(index),  # type: ignore
-            op_path=op_path,
-            domain=data.metadata.domain,
             bw=int(row["bw"]),  # type: ignore
-            args_str=",".join(str(row[col]) for col in arg_cols),
-            timeout=timeout,
+            args=tuple(str(row[col]) for col in arg_cols),
         )
         for index, row in data.enumdata.iterrows()
         if int(row["bw"]) in hbw_bws  # type: ignore
     ]
 
-    if not tasks:
-        return data, []
-
     with Pool() as pool:
-        results = pool.map(process_row, tasks)
+        results = pool.map(RowProcessor(op_path, data.metadata.domain, timeout), tasks)
 
     df = data.enumdata.copy()
     columns = list(df.columns)
@@ -129,38 +127,20 @@ def _fill_hbw_rows(data: EnumData, timeout: int) -> tuple[EnumData, list[str]]:
     return EnumData(metadata, df), commented_rows
 
 
-def _run_input_mode(args: Namespace) -> None:
-    assert args.input is not None
-    with args.input.open() as f:
-        data = EnumData.read_tsv(f)
-
-    updated, commented_rows = _fill_hbw_rows(data, args.timeout)
-    output_path = args.input if args.output is None else args.output
-    updated.write_tsv_with_comments(output_path, commented_rows)
-
-
-def _run_single_mode(args: Namespace) -> None:
-    assert args.op is not None
-    assert args.domain is not None
-    assert args.args is not None
-    assert args.bw is not None
-    print(
-        compute_max_precise(
-            args.op,
-            AbstractDomain[args.domain],
-            args.bw,
-            tuple(args.args.split(",")),
-            args.timeout,
-        )
-    )
-
-
 def main() -> None:
     args = _get_args()
     if args.input is not None:
-        _run_input_mode(args)
+        with args.input.open() as f:
+            data = EnumData.read_tsv(f)
+
+        updated, commented_rows = _fill_hbw_rows(data, args.timeout)
+        output_path = args.input if args.output is None else args.output
+        updated.write_tsv_with_comments(output_path, commented_rows)
     else:
-        _run_single_mode(args)
+        fn_args = tuple(x.strip() for x in args.args.split(";"))
+        domain = AbstractDomain[args.domain]
+        max_prec = compute_max_precise(args.op, domain, args.bw, fn_args, args.timeout)
+        print(max_prec)
 
 
 if __name__ == "__main__":

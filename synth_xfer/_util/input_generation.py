@@ -8,7 +8,7 @@ from typing import cast
 import pandas as pd
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.max_precise import RowTask, process_row
+from synth_xfer._util.max_precise import RowProcessor, RowTask
 from synth_xfer._util.pattern import PatternDag, _load_pattern
 from synth_xfer._util.tsv import EnumData, EnumMetaData
 
@@ -216,6 +216,7 @@ def generate_pattern_inputs(
     max_workers = os.cpu_count() or 1
 
     with Pool(processes=max_workers) as pool:
+        processor = RowProcessor(path, domain, timeout)
         for bw, samples in sorted(mbw_specs, key=lambda spec: spec[0]):
             rows_for_bw: list[tuple[object, ...]] = []
             seen_args: set[tuple[str, ...]] = set()
@@ -240,15 +241,12 @@ def generate_pattern_inputs(
                     tasks.append(
                         RowTask(
                             index=len(tasks),
-                            op_path=path,
-                            domain=domain,
                             bw=bw,
-                            args_str=",".join(arg_values),
-                            timeout=timeout,
+                            args=arg_values,
                         )
                     )
 
-                for result in pool.map(process_row, tasks):
+                for result in pool.map(processor, tasks):
                     row, arg_values, weight = batch_rows[result.index]
                     if result.timed_out:
                         timeout_counts_by_bw[bw] += 1

@@ -14,12 +14,13 @@ from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import get_helper_funcs, top_as_xfer
 from synth_xfer._util.tsv import EnumData, build_enum_data
 from synth_xfer._util.xfer_data import (
+    PreparedCandidates,
     XferCandidate,
     enumdata_to_eval_inputs,
     load_file_candidates,
     load_solution_dir_candidates,
 )
-from synth_xfer.cli.args import PreparedCandidates, get_sampler, make_sampler_parser
+from synth_xfer.cli.args import get_sampler, make_sampler_parser
 
 ExactBw: TypeAlias = int | tuple[int, int]
 DistBw: TypeAlias = int | tuple[int, int] | tuple[int, int, int]
