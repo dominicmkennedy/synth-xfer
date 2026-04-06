@@ -6,12 +6,12 @@ from typing import Callable, TypeAlias
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 
-from synth_xfer._util.xfer_func import XferFunc
 from synth_xfer._util.dce import dce
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.log import get_logger, write_log_file
 from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.synth_context import SynthesizerContext
+from synth_xfer._util.xfer_func import XferFunc
 from synth_xfer.cli.verify import verify_function
 from synth_xfer.egraph_rewriter.rewriter import rewrite_single_function
 

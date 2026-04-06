@@ -3,7 +3,6 @@ from time import perf_counter
 from xdsl.dialects.builtin import StringAttr
 from xdsl.dialects.func import FuncOp
 
-from synth_xfer._util.xfer_func import XferFunc
 from synth_xfer._util.cost_model import decide
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.log import get_logger
@@ -11,6 +10,7 @@ from synth_xfer._util.mcmc_sampler import MCMCSampler
 from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.random import Random
 from synth_xfer._util.solution_set import EvalFn, SolutionSet
+from synth_xfer._util.xfer_func import XferFunc
 
 
 def _build_eval_list(

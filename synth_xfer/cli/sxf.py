@@ -7,7 +7,6 @@ from argparse import (
 from pathlib import Path
 from time import perf_counter
 
-from synth_xfer._util.xfer_func import XferFunc
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.dsl_operators import DslOpSet, load_dsl_ops
 from synth_xfer._util.eval import EvalInputMap, ToEval, enum, eval_transfer_func
@@ -21,6 +20,7 @@ from synth_xfer._util.parse_mlir import HelperFuncs, get_helper_funcs, top_as_xf
 from synth_xfer._util.random import Random, Sampler
 from synth_xfer._util.solution_set import EvalFn, SolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
+from synth_xfer._util.xfer_func import XferFunc
 from synth_xfer.cli.args import int_list, int_triple, int_tuple, make_sampler_parser
 
 
