@@ -7,7 +7,7 @@ from argparse import (
 from pathlib import Path
 from time import perf_counter
 
-from synth_xfer._util.cond_func import FunctionWithCondition
+from synth_xfer._util.xfer_func import XferFunc
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.dsl_operators import DslOpSet, load_dsl_ops
 from synth_xfer._util.eval import EvalInputMap, ToEval, enum, eval_transfer_func
@@ -28,15 +28,15 @@ def _eval_helper(
     to_eval: dict[int, ToEval], bws: list[int], helper_funcs: HelperFuncs
 ) -> EvalFn:
     def helper(
-        xfer: list[FunctionWithCondition],
-        base: list[FunctionWithCondition],
+        xfer: list[XferFunc],
+        base: list[XferFunc],
     ) -> list[EvalResult]:
         lowerer = LowerToLLVM(bws)
         lowerer.add_fn(helper_funcs.get_top_func)
 
         if not xfer:
-            ret_top_func = FunctionWithCondition(top_as_xfer(helper_funcs.transfer_func))
-            ret_top_func.set_func_name("ret_top")
+            ret_top_func = XferFunc(top_as_xfer(helper_funcs.transfer_func))
+            ret_top_func.set_name("ret_top")
             xfer = [ret_top_func]
 
         xfer_names = [fc.lower(lowerer.add_fn) for fc in xfer]

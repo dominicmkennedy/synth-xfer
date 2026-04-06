@@ -6,7 +6,7 @@ from typing import Callable, TypeAlias
 from xdsl.dialects.builtin import ModuleOp
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 
-from synth_xfer._util.cond_func import FunctionWithCondition
+from synth_xfer._util.xfer_func import XferFunc
 from synth_xfer._util.dce import dce
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.log import get_logger, write_log_file
@@ -16,24 +16,22 @@ from synth_xfer.cli.verify import verify_function
 from synth_xfer.egraph_rewriter.rewriter import rewrite_single_function
 
 
-def _rename_functions(lst: list[FunctionWithCondition], prefix: str) -> list[str]:
+def _rename_functions(lst: list[XferFunc], prefix: str) -> list[str]:
     func_names: list[str] = []
     for i, func in enumerate(lst):
         func_names.append(prefix + str(i))
-        func.set_func_name(func_names[-1])
+        func.set_name(func_names[-1])
     return func_names
 
 
-EvalFn: TypeAlias = Callable[
-    [list[FunctionWithCondition], list[FunctionWithCondition]], list[EvalResult]
-]
+EvalFn: TypeAlias = Callable[[list[XferFunc], list[XferFunc]], list[EvalResult]]
 
 
 class SolutionSet:
     "Maintains solutions and supports generating the meet of solutions."
 
     solutions_size: int
-    solutions: list[FunctionWithCondition]
+    solutions: list[XferFunc]
     precise_set: list[FuncOp]
     is_perfect: bool
 
@@ -47,7 +45,7 @@ class SolutionSet:
 
     def __init__(
         self,
-        initial_solutions: list[FunctionWithCondition],
+        initial_solutions: list[XferFunc],
         is_perfect: bool = False,
         optimize: bool = True,
     ):
@@ -60,7 +58,7 @@ class SolutionSet:
 
     def eval_improve(
         self,
-        transfers: list[FunctionWithCondition],
+        transfers: list[XferFunc],
         eval_func: EvalFn,
     ) -> list[EvalResult]:
         return eval_func(transfers, self.solutions)
@@ -71,14 +69,14 @@ class SolutionSet:
     def generate_solution(self) -> tuple[FuncOp, list[FuncOp]]:
         assert self.has_solution()
         solutions = self.solutions
-        result = FuncOp("solution", solutions[0].func.function_type)
+        result = FuncOp("solution", solutions[0].body.function_type)
         result_type = result.function_type.outputs.data
         part_result: list[CallOp] = []
         part_solution_funcs: list[FuncOp] = []
         for ith, func_with_cond in enumerate(solutions):
             cur_func_name = "partial_solution_" + str(ith)
-            func_with_cond.set_func_name(cur_func_name)
-            part_solution_funcs.append(func_with_cond.get_function())
+            func_with_cond.set_name(cur_func_name)
+            part_solution_funcs.append(func_with_cond.build())
             part_result.append(CallOp(cur_func_name, result.args, result_type))
         if len(part_result) == 1:
             result.body.block.add_ops(part_result + [ReturnOp(part_result[-1])])
@@ -107,7 +105,7 @@ class SolutionSet:
         final_solution, part_solutions = self.generate_solution()
         function_lst: list[FuncOp] = []
         for sol in self.solutions:
-            func_body = dce(sol.func)
+            func_body = dce(sol.body)
             function_lst.append(func_body)
             if sol.cond is not None:
                 func_cond = dce(sol.cond)
@@ -119,35 +117,33 @@ class SolutionSet:
         final_module.body.block.add_ops(function_lst)
         return final_module
 
-    def handle_inconsistent_result(self, f: FunctionWithCondition):
+    def handle_inconsistent_result(self, f: XferFunc):
         str_output = io.StringIO()
 
         print("module {", file=str_output)
-        print(dce(f.func), file=str_output)
+        print(dce(f.body), file=str_output)
         if f.cond is not None:
             print(dce(f.cond), file=str_output)
-        print(f.get_function(), file=str_output)
+        print(f.build(), file=str_output)
         print("}", file=str_output)
 
         write_log_file("error.mlir", str_output.getvalue())
 
         raise Exception("Inconsistent between eval engine and verifier")
 
-    def handle_unsound_rewrite(
-        self, original: FunctionWithCondition, rewritten: FunctionWithCondition
-    ):
+    def handle_unsound_rewrite(self, original: XferFunc, rewritten: XferFunc):
         str_output = io.StringIO()
 
         print("module {", file=str_output)
-        print(original.func, file=str_output)
+        print(original.body, file=str_output)
         if original.cond is not None:
             print(original.cond, file=str_output)
-        # print(original.get_function(), file=str_output)
+        # print(original.build(), file=str_output)
         print("// After rewrite:", file=str_output)
-        print(rewritten.func, file=str_output)
+        print(rewritten.body, file=str_output)
         if rewritten.cond is not None:
             print(rewritten.cond, file=str_output)
-        # print(rewritten.get_function(), file=str_output)
+        # print(rewritten.build(), file=str_output)
         print("}", file=str_output)
 
         write_log_file("error_rewrite.mlir", str_output.getvalue())
@@ -158,9 +154,9 @@ class SolutionSet:
         self,
         lbw: list[int],
         vbw: list[int],
-        new_candidates_sp: list[FunctionWithCondition],
+        new_candidates_sp: list[XferFunc],
         new_candidates_p: list[FuncOp],
-        new_candidates_c: list[FunctionWithCondition],
+        new_candidates_c: list[XferFunc],
         helper_funcs: HelperFuncs,
         num_unsound_candidates: int,
         eval_func: EvalFn,
@@ -187,36 +183,36 @@ class SolutionSet:
             if max_improve_res.get_potential_improve() == 0:
                 break
 
-            body_number = cand.func.attributes["number"]
+            body_number = cand.body.attributes["number"]
             cond_number = "None" if cand.cond is None else cand.cond.attributes["number"]
 
             def _verify_and_maybe_remove(
-                candidate: FunctionWithCondition,
-            ) -> FunctionWithCondition | None:
+                candidate: XferFunc,
+            ) -> XferFunc | None:
                 """Return True if candidate was removed due to verification failure/timeouts."""
 
-                def _rewrite(candidate: FunctionWithCondition) -> FunctionWithCondition:
+                def _rewrite(candidate: XferFunc) -> XferFunc:
                     if not self.optimize:
                         return candidate
                     rwt_func = rewrite_single_function(
-                        dce(candidate.func), quiet=True, timeout=5
+                        dce(candidate.body), quiet=True, timeout=5
                     )
                     # Todo: support rewriting condition functions later
                     # rwt_cond = rewrite_single_function(candidate.cond) if candidate.cond is not None else None
                     rwt_cond = candidate.cond
-                    rewritten = FunctionWithCondition(rwt_func, rwt_cond)
-                    rewritten.set_func_name(candidate.func_name)
+                    rewritten = XferFunc(rwt_func, rwt_cond)
+                    rewritten.set_name(candidate.name)
                     return rewritten
 
                 def _verify_once(
                     bw: int,
-                    original: FunctionWithCondition,
-                    rewritten: FunctionWithCondition,
+                    original: XferFunc,
+                    rewritten: XferFunc,
                 ) -> bool:
                     is_sound, _ = verify_function(
                         bw,
-                        original.get_function(),
-                        [original.func, original.cond],
+                        original.build(),
+                        [original.body, original.cond],
                         helper_funcs,
                         200,
                     )
@@ -235,8 +231,8 @@ class SolutionSet:
                     if self.optimize:
                         is_sound_rwt, _ = verify_function(
                             bw,
-                            rewritten.get_function(),
-                            [rewritten.func, rewritten.cond],
+                            rewritten.build(),
+                            [rewritten.body, rewritten.cond],
                             helper_funcs,
                             200,
                         )
@@ -257,7 +253,7 @@ class SolutionSet:
                     return rewritten
                 return candidate
 
-            def _log_str_and_cond(candidate: FunctionWithCondition) -> tuple[str, bool]:
+            def _log_str_and_cond(candidate: XferFunc) -> tuple[str, bool]:
                 if candidate in new_candidates_sp:
                     return "Add a new transformer", False
                 if candidate in new_candidates_c:
@@ -273,7 +269,7 @@ class SolutionSet:
             log_str, is_cond = _log_str_and_cond(cand)
             if is_cond:
                 num_cond_solutions += 1
-            from_weighted_dsl = "from_weighted_dsl" in cand.func.attributes
+            from_weighted_dsl = "from_weighted_dsl" in cand.body.attributes
             logger.info(
                 f"{log_str}, body: {body_number}, cond: {cond_number}. After adding, Exact: {max_improve_res.get_exact_prop() * 100:.2f}%, Dist: {max_improve_res.get_dist():.2f}, weighted?: {from_weighted_dsl}"
             )
@@ -290,9 +286,7 @@ class SolutionSet:
             return self
 
         precise_candidates = self.precise_set + new_candidates_p
-        precise_candidates_to_eval = [
-            FunctionWithCondition(f.clone()) for f in precise_candidates
-        ]
+        precise_candidates_to_eval = [XferFunc(f.clone()) for f in precise_candidates]
         _rename_functions(precise_candidates_to_eval, "precise_candidates_")
         result = self.eval_improve(precise_candidates_to_eval, eval_func)
 
@@ -329,13 +323,13 @@ class SolutionSet:
             )
             res = cmp_results[0]
             to_learn = res.get_new_exact_prop() > 0.005
-            body_number = sol.func.attributes["number"]
+            body_number = sol.body.attributes["number"]
             cond_number = "None" if sol.cond is None else sol.cond.attributes["number"]
             logger.info(
                 f"\tbody {body_number}, cond {cond_number} : #exact {res.get_exacts() - res.get_unsolved_exacts()} -> {res.get_exacts()}, dist_improve: {res.get_potential_improve():3f}%, cond?: {self.solutions[i].cond is not None}, learn?: {to_learn}"
             )
             if to_learn:
-                learn_form_funcs.append(dce(sol.func))
+                learn_form_funcs.append(dce(sol.body))
 
         freq_of_learn_funcs = SynthesizerContext.count_op_frequency(learn_form_funcs)
         context.update_weights(freq_of_learn_funcs)
