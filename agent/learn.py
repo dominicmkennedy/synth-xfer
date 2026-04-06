@@ -36,7 +36,12 @@ def _run_agent_learn(
     @function_tool
     def get_corpus_functions() -> str:
         """Return the corpus MLIR programs to learn library funcs from"""
-        return "\n".join(result.solution_text for result in synthesis_results)
+        text = ""
+        for result in synthesis_results:
+            for soln in result.solution_iters:
+                text += f"{soln}\n"
+
+        return text
 
     @function_tool
     def get_available_primitives() -> str:

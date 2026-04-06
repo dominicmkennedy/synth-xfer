@@ -53,6 +53,7 @@ class SynthesisAgent:
         self._args = args
         self._library = current_lib
         self._history: list[Any] | None = None
+        self._soln_iters: list[str] = []
         self._agent = self._build_agent(args, api_key)
 
     def update_library(self, new_lib: LibraryState) -> None:
@@ -186,6 +187,7 @@ class SynthesisAgent:
             - Exact %: the percentage of inputs for which the output abstract value is exactly the same the optimal transfer function (perfect precision)
             - Norm: ignore for now
             """
+            self._soln_iters.append(transformer_mlir)
             lib_text = "\n".join(func.source for func in self._library.functions)
             full_soln = merge_library_text(lib_text, transformer_mlir)
             return eval_transformer(
@@ -218,8 +220,9 @@ class SynthesisAgent:
             model=args.model,
         )
 
-    async def run(self, round_num: int) -> tuple[str, object, Any]:
-        """Run one synthesis round. Returns (final_output, run_result, inp)."""
+    async def run(self, round_num: int) -> tuple[str, object, Any, list[str]]:
+        """Run one synthesis round. Returns (final_output, run_result, inp, evalled_transformers)."""
+        self._soln_iters = []
         if self._history is None:
             user_content = f"{_make_initial_prompt(self._task)}\n"
         else:
@@ -236,7 +239,7 @@ class SynthesisAgent:
         ]
         result = await Runner.run(self._agent, inp, max_turns=self._args.max_turns)
         self._history = result.to_input_list()
-        return result.final_output, result, inp
+        return result.final_output, result, inp, list(self._soln_iters)
 
 
 def run_eval(
@@ -273,7 +276,7 @@ async def run_single_synthesis_task(
     output_dir = Path(args.output)
     print(f"{tag} Using model: {args.model}")
     t0 = time.monotonic()
-    llm_output, run_result, agent_input = await synth_agent.run(round_num)
+    llm_output, run_result, agent_input, soln_iters = await synth_agent.run(round_num)
     synthesis_time = time.monotonic() - t0
 
     if args.dump_agent_run:
@@ -303,7 +306,13 @@ async def run_single_synthesis_task(
     )
     print(f"{tag} Transformer: {transformer_file}")
 
-    result = SynthesisResult(task, llm_output, transformer_file, None)
+    result = SynthesisResult(
+        task=task,
+        solution_text=llm_output,
+        solution_iters=soln_iters,
+        transformer_path=transformer_file, 
+        eval_summary=None
+    )
 
     eval_summary: str | None = None
     if not args.skip_eval:
@@ -320,7 +329,13 @@ async def run_single_synthesis_task(
             f"eval_r{round_num}_{task.op_name.lower()}.txt",
         )
 
-    return SynthesisResult(task, llm_output, transformer_file, eval_summary)
+    return SynthesisResult(
+        task=task, 
+        solution_text=llm_output, 
+        solution_iters=soln_iters,
+        transformer_path=transformer_file,
+        eval_summary=eval_summary
+    )
 
 
 async def run_synthesis_tasks(

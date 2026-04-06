@@ -30,6 +30,7 @@ class SynthesisResult:
 
     task: SynthesisTask
     solution_text: str
+    solution_iters: list[str]
     transformer_path: Path
     eval_summary: str | None = None
 
