@@ -8,8 +8,12 @@ import re
 from pydantic import BaseModel
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.random import Sampler
-from synth_xfer.cli.eval_final import _parse_bw_args, run
+from synth_xfer._util.eval import enum, eval_transfer_func
+from synth_xfer._util.eval_result import EvalResult
+from synth_xfer._util.jit import Jit
+from synth_xfer._util.lower import LowerToLLVM
+from synth_xfer._util.parse_mlir import get_helper_funcs, parse_mlir_mod
+from synth_xfer._util.random import Random, Sampler
 
 
 @dataclass
@@ -214,41 +218,50 @@ def merge_library_text(mod1: str, mod2: str) -> str:
 
 
 def eval_transformer(
-    solution_path: Path | str,
+    solution: str,
     op_path: Path,
     domain: AbstractDomain,
     xfer_name: str,
     *,
-    exact_bw: tuple[int, ...] = (8,),
-    norm_bw: tuple[int, ...] = (64, 2500, 50000),
+    lbw: list[int],
+    mbw: list[tuple[int, int]] = [],
+    hbw: list[tuple[int, int, int]] = [],
     random_seed: int | None = None,
 ) -> str:
-    """Run eval on a transformer (file path or MLIR string) and return a summary string.
+    """Run eval on a transformer (MLIR string) and return a summary string.
 
     For use by the agent and by main.run_eval(). On failure returns 'error: ...'.
     """
     try:
-        lbw, mbw, hbw = _parse_bw_args(exact_bw, norm_bw)
+        all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
+        EvalResult.init_bw_settings(
+            set(lbw), set(x[0] for x in mbw), set(x[0] for x in hbw)
+        )
         sampler = Sampler.uniform()
-        _, synth_r = run(
-            domain=domain,
-            lbw=lbw,
-            mbw=mbw,
-            hbw=hbw,
-            op_path=op_path,
-            solution_path=solution_path,
-            xfer_name=xfer_name,
-            random_seed=random_seed,
-            sampler=sampler,
+
+        helpers = get_helper_funcs(op_path, domain)
+        sol_module = parse_mlir_mod(solution)
+        seed = (
+            Random(random_seed).randint(0, 1_000_000)
+            if random_seed is None
+            else random_seed
         )
-        exact_bw_val = exact_bw[0]
-        norm_bw_val = norm_bw[0]
-        synth_exact = next(x for x in synth_r.per_bit_res if x.bitwidth == exact_bw_val)
-        synth_norm = next(x for x in synth_r.per_bit_res if x.bitwidth == norm_bw_val)
-        return (
-            f"Sound %: {synth_exact.get_sound_prop() * 100:.2f}, Exact %: {synth_exact.get_exact_prop() * 100:.2f}, Norm: {synth_norm.dist:.4f} "
-            # f"(top Exact %: {top_exact.get_exact_prop() * 100:.2f}, top Norm: {top_norm.dist:.4f})"
-        )
+
+        lowerer = LowerToLLVM(all_bws)
+        lowerer.add_fn(helpers.meet_func)
+        lowerer.add_fn(helpers.get_top_func)
+        lowerer.add_mod(sol_module, [xfer_name])
+
+        to_eval = enum(lbw, mbw, hbw, seed, helpers, sampler)
+        with Jit() as jit:
+            jit.add_mod(lowerer)
+            eval_input = {
+                bw: (to_eval[bw], [jit.get_fn_ptr(f"{xfer_name}_{bw}_shim")], [])
+                for bw in all_bws
+            }
+            (synth_r,) = eval_transfer_func(eval_input)
+
+        return f"Sound %: {synth_r.get_sound_prop() * 100:.2f}, Exact %: {synth_r.get_exact_prop() * 100:.2f}, Dist: {synth_r.sound_dist:.4f}"
     except Exception as e:
         msg = str(e).strip() or repr(e) or type(e).__name__
         # Single line, truncated, so the agent reliably sees parse/location info

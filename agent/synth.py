@@ -189,11 +189,11 @@ class SynthesisAgent:
             lib_text = "\n".join(func.source for func in self._library.functions)
             full_soln = merge_library_text(lib_text, transformer_mlir)
             return eval_transformer(
-                solution_path=full_soln,
+                solution=full_soln,
                 op_path=Path(task.op_file),
                 domain=AbstractDomain.KnownBits,
                 xfer_name=f"kb_{task.op_name.lower()}",
-                exact_bw=tuple(args.exact_bw),
+                lbw=args.exact_bw,
             )
 
         return Agent(
@@ -244,7 +244,7 @@ def run_eval(
     transformer: SynthesisResult,
     library: LibraryState,
     op_name: str,
-    exact_bw: tuple[int, ...] = (8,),
+    lbw: list[int],
 ) -> str:
     """Evaluate the transformer via eval_transformer (no subprocess)."""
     cleaned_mlir = clean_llm_output(transformer.solution_text)
@@ -255,7 +255,7 @@ def run_eval(
         Path(op_file_path),
         AbstractDomain.KnownBits,
         f"kb_{op_name.lower()}",
-        exact_bw=exact_bw,
+        lbw=lbw,
     )
 
 
@@ -310,7 +310,7 @@ async def run_single_synthesis_task(
         print(f"{tag} Evaluating transformer...")
         eval_t0 = time.monotonic()
         eval_summary = run_eval(
-            task.op_file, result, library, task.op_name, exact_bw=tuple(args.exact_bw)
+            task.op_file, result, library, task.op_name, lbw=args.exact_bw
         )
         eval_time = time.monotonic() - eval_t0
         print(f"{tag} Eval result: {eval_summary}")
