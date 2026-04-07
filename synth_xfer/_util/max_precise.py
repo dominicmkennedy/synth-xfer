@@ -2,7 +2,6 @@ from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
 import re
-from typing import cast
 
 from xdsl.context import Context
 from xdsl.dialects.arith import Arith
@@ -59,7 +58,10 @@ def _get_ctx() -> Context:
     return _CTX
 
 
-def _get_abst_val(arg: str, domain: AbstractDomain, bw: int) -> tuple[int, int]:
+def _get_abst_val(arg: str, domain: AbstractDomain, bw: int) -> tuple[int, int] | None:
+    if arg == "(bottom)":
+        return None
+
     def kb_str_to_vals(arg: str) -> tuple[int, int]:
         known_z, known_o = 0, 0
 
@@ -259,8 +261,12 @@ class ComputeMaxPrecise:
 class KnownBitsMaxPrecise(ComputeMaxPrecise):
     def check_ith_bit(self, ith: int) -> str | None:
         ith_bit = Extract(ith, ith, self.query.result)
-        can_be_z = self.query.check(cast(BoolRef, ith_bit == BitVecVal(0, 1)))
-        can_be_o = self.query.check(cast(BoolRef, ith_bit == BitVecVal(1, 1)))
+        probe_z = ith_bit == BitVecVal(0, 1)
+        probe_o = ith_bit == BitVecVal(1, 1)
+        assert isinstance(probe_z, BoolRef)
+        assert isinstance(probe_o, BoolRef)
+        can_be_z = self.query.check(probe_z)
+        can_be_o = self.query.check(probe_o)
         if can_be_o and can_be_z:
             return "?"
         if (not can_be_z) and (not can_be_o):
@@ -425,7 +431,10 @@ def compute_max_precise(
     ctx = _get_ctx()
 
     hlprs = get_helper_funcs(op_path, domain)
-    abst_arg_values = [_get_abst_val(arg, domain, bw) for arg in args]
+    parsed_args = [_get_abst_val(arg, domain, bw) for arg in args]
+    if any(arg is None for arg in parsed_args):
+        return "(bottom)"
+    abst_arg_values = [arg for arg in parsed_args if arg is not None]
 
     fns = [hlprs.instance_constraint_func, hlprs.crt_func, hlprs.op_constraint_func]
     lower_to_smt_module(m := ModuleOp([x.clone() for x in fns if x is not None]), bw, ctx)
