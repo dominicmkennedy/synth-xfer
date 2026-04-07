@@ -92,10 +92,10 @@ def synthesize_one_iteration(
         sound_most_improve_tfs.append((init_tf, spl.current_cmp, 0))
         most_improve_tfs.append((init_tf, spl.current_cmp, 0))
 
-    # MCMC start
+    logger.info(f"\n{'=' * 60}")
     logger.info(
-        f"Iter {ith_iter}: Start {num_mcmc - len(c_range)} MCMC to sampling programs of length {program_length}."
-        f"Start {len(c_range)} MCMC to sample abductions. Each one is run for {num_steps} steps..."
+        f"Iter {ith_iter}: {num_mcmc - len(c_range)} synthesis MCMC + {len(c_range)} abduction MCMC,"
+        f" program length {program_length}, {num_steps} steps each"
     )
 
     for rnd in range(num_steps):

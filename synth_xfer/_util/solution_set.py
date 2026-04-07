@@ -165,10 +165,11 @@ class SolutionSet:
         candidates = self.solutions + new_candidates_sp + new_candidates_c
         _rename_functions(candidates, "part_solution_")
 
-        logger.info(f"Size of new candidates: {len(new_candidates_sp)}")
-        logger.info(f"Size of new conditional candidates: {len(new_candidates_c)}")
-        logger.info(f"Size of solutions: {len(candidates)}")
-        logger.info("Reset solution set...")
+        logger.info(
+            f"Candidates: {len(new_candidates_sp)} new, {len(new_candidates_c)} new conditional,"
+            f" {len(self.solutions)} existing  →  {len(candidates)} total"
+        )
+        logger.info("Resetting solution set...")
 
         self.solutions = []
         num_cond_solutions = 0
@@ -218,12 +219,12 @@ class SolutionSet:
                     )
                     if is_sound is None:
                         logger.info(
-                            f"Skip a function of which verification timed out at bw {bw}, body: {body_number}, cond: {cond_number}"
+                            f"\tVerification timed out at bw {bw} (body: {body_number}, cond: {cond_number}) — skipping"
                         )
                         return False
                     if not is_sound:
                         logger.info(
-                            f"Skip a unsound function at bw {bw}, body: {body_number}, cond: {cond_number}"
+                            f"\tUnsound at bw {bw} (body: {body_number}, cond: {cond_number}) — skipping"
                         )
                         if bw in lbw:
                             self.handle_inconsistent_result(original)
@@ -238,7 +239,7 @@ class SolutionSet:
                         )
                         if is_sound != is_sound_rwt:
                             logger.info(
-                                f"Inconsistent rewrite, body: {body_number}, cond: {cond_number}, original soundness: {is_sound}, rewritten soundness: {is_sound_rwt}"
+                                f"\tInconsistent rewrite at bw {bw}, body: {body_number}, cond: {cond_number} (original: {is_sound}, rewritten: {is_sound_rwt})"
                             )
                             self.handle_unsound_rewrite(original, rewritten)
 
@@ -255,12 +256,12 @@ class SolutionSet:
 
             def _log_str_and_cond(candidate: XferFunc) -> tuple[str, bool]:
                 if candidate in new_candidates_sp:
-                    return "Add a new transformer", False
+                    return "new", False
                 if candidate in new_candidates_c:
-                    return "Add a new transformer (cond)", True
+                    return "new (cond)", True
                 if candidate.cond is None:
-                    return "Add a existing transformer", False
-                return "Add a existing transformer (cond)", True
+                    return "existing", False
+                return "existing (cond)", True
 
             cand_to_be_added = _verify_and_maybe_remove(cand)
             if cand_to_be_added is None:
@@ -269,15 +270,19 @@ class SolutionSet:
             log_str, is_cond = _log_str_and_cond(cand)
             if is_cond:
                 num_cond_solutions += 1
-            from_weighted_dsl = "from_weighted_dsl" in cand.body.attributes
+            weighted_tag = (
+                " [weighted]" if "from_weighted_dsl" in cand.body.attributes else ""
+            )
             logger.info(
-                f"{log_str}, body: {body_number}, cond: {cond_number}. After adding, Exact: {max_improve_res.get_exact_prop() * 100:.2f}%, Dist: {max_improve_res.get_dist():.2f}, weighted?: {from_weighted_dsl}"
+                f"\t+ {log_str} (body: {body_number}, cond: {cond_number})"
+                f"  →  exact: {max_improve_res.get_exact_prop() * 100:.2f}%, dist: {max_improve_res.get_dist():.2f}{weighted_tag}"
             )
             candidates.remove(cand)
             self.solutions.append(cand_to_be_added)
 
-        logger.info(f"The number of solutions after reseting: {len(self.solutions)}")
-        logger.info(f"The number of conditional solutions: {num_cond_solutions}")
+        logger.info(
+            f"Solutions after resetting: {len(self.solutions)} ({num_cond_solutions} conditional)"
+        )
         self.solutions_size = len(self.solutions)
 
         final_result = self.eval_improve([], eval_func)[0]
@@ -296,12 +301,12 @@ class SolutionSet:
             key=lambda x: x[1].get_potential_improve(),
         )
         top_k = sorted_pairs[:num_unsound_candidates]
-        logger.info(f"Top {num_unsound_candidates} Precise candidates:")
+        logger.info(f"Top {num_unsound_candidates} unsound candidates:")
         self.precise_set = []
         for cand, res in top_k:
             body_number = cand.attributes["number"]
             logger.info(
-                f"{body_number}\tunsolved_exact: {res.get_unsolved_exact_prop() * 100:.2f}%, sound: {res.get_sound_prop() * 100:.2f}%, dist_reduce: {res.base_dist:.2f} -> {res.sound_dist:.2f}"
+                f"\t{body_number}  exact: {res.get_unsolved_exact_prop() * 100:.2f}%  sound: {res.get_sound_prop() * 100:.2f}%  dist: {res.base_dist:.2f} → {res.sound_dist:.2f}"
             )
             self.precise_set.append(cand)
 
@@ -315,7 +320,7 @@ class SolutionSet:
         "Set weights in context according to the frequencies of each DSL operation that appear in func in solution set"
 
         logger = get_logger()
-        logger.info("Improvement by each individual function")
+        logger.info("Per-solution contribution:")
         learn_form_funcs: list[FuncOp] = []
         for i, sol in enumerate(self.solutions):
             cmp_results: list[EvalResult] = eval_func(
@@ -325,8 +330,12 @@ class SolutionSet:
             to_learn = res.get_new_exact_prop() > 0.005
             body_number = sol.body.attributes["number"]
             cond_number = "None" if sol.cond is None else sol.cond.attributes["number"]
+            cond_tag = " [cond]" if self.solutions[i].cond is not None else ""
+            learn_tag = " [to_learn]" if to_learn else ""
             logger.info(
-                f"\tbody {body_number}, cond {cond_number} : #exact {res.get_exacts() - res.get_unsolved_exacts()} -> {res.get_exacts()}, dist_improve: {res.get_potential_improve():3f}%, cond?: {self.solutions[i].cond is not None}, learn?: {to_learn}"
+                f"\tbody {body_number}, cond {cond_number}{cond_tag}"
+                f"  exact: {res.get_exacts() - res.get_unsolved_exacts()} → {res.get_exacts()}"
+                f"  dist_improve: {res.get_potential_improve():.4f}%{learn_tag}"
             )
             if to_learn:
                 learn_form_funcs.append(dce(sol.body))
@@ -334,7 +343,9 @@ class SolutionSet:
         freq_of_learn_funcs = SynthesizerContext.count_op_frequency(learn_form_funcs)
         context.update_weights(freq_of_learn_funcs)
 
-        logger.info("Current Weights:")
         for _, weights in context.op_weights.items():
-            for key, value in weights.items():
-                logger.info(f"\t{key}: {value}")
+            pairs = "  ".join(
+                f"{k.__name__.removesuffix('Op')}:{v}"
+                for k, v in sorted(weights.items(), key=lambda x: -x[1])
+            )
+            logger.info(f"Weights: {pairs}")

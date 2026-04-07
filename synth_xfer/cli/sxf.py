@@ -130,7 +130,7 @@ def run(
     logger.perf(f"Init Eval took {run_time:.4f}s")
 
     init_exact = init_cmp_res.get_exact_prop() * 100
-    s = f"Top Solution | Exact {init_exact:.4f}% |"
+    s = f"Top Solution | Exact {init_exact:.4f}% | Dist {init_cmp_res.dist:.4f} |"
     logger.info(s)
     print(s)
 
@@ -145,11 +145,6 @@ def run(
         current_num_abd_procs += (num_abd_procs - current_num_abd_procs) // (
             num_iters - ith_iter
         )
-
-        if weighted_dsl:
-            assert isinstance(solution_set, SolutionSet)
-            context_weighted.weighted = True
-            solution_set.learn_weights(context_weighted, eval_fn)
 
         mcmc_samplers, prec_set, ranges = setup_mcmc(
             helper_funcs.transfer_func,
@@ -195,14 +190,18 @@ def run(
 
         iter_time = perf_counter() - iter_start
         final_exact = final_cmp_res.get_exact_prop() * 100
-        print(
-            f"Iteration {ith_iter}  | Exact {final_exact:.4f}% | {solution_set.solutions_size} solutions | {iter_time:.4f}s |"
-        )
 
+        if weighted_dsl:
+            context_weighted.weighted = True
+            solution_set.learn_weights(context_weighted, eval_fn)
+
+        logger.info(f"Per-BW Results: \n{lbw_mbw_log}\n{hbw_log}\n")
         logger.info(
-            f"Iter {ith_iter} Finished. Result of Current Solution: \n{lbw_mbw_log}\n{hbw_log}\n"
+            f"Iteration {ith_iter}  | Exact {final_exact:.4f}% | Dist {final_cmp_res.dist:.4f} | {solution_set.solutions_size} solutions | {iter_time:.4f}s |"
         )
-
+        print(
+            f"Iteration {ith_iter}  | Exact {final_exact:.4f}% | Dist {final_cmp_res.dist:.4f} | {solution_set.solutions_size} solutions | {iter_time:.4f}s |"
+        )
         if solution_set.is_perfect:
             print("Found a perfect solution")
             break
