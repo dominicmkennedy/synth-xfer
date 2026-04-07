@@ -7,7 +7,6 @@ from argparse import (
 from pathlib import Path
 from time import perf_counter
 
-from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.dsl_operators import DslOpSet, load_dsl_ops
 from synth_xfer._util.eval import EvalInputMap, ToEval, enum, eval_transfer_func
@@ -19,8 +18,9 @@ from synth_xfer._util.mcmc_sampler import setup_mcmc
 from synth_xfer._util.one_iter import synthesize_one_iteration
 from synth_xfer._util.parse_mlir import HelperFuncs, get_helper_funcs, top_as_xfer
 from synth_xfer._util.random import Random, Sampler
-from synth_xfer._util.solution_set import EvalFn, UnsizedSolutionSet
+from synth_xfer._util.solution_set import EvalFn, SolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
+from synth_xfer._util.xfer_func import XferFunc
 from synth_xfer.cli.args import int_list, int_triple, int_tuple, make_sampler_parser
 
 
@@ -28,15 +28,15 @@ def _eval_helper(
     to_eval: dict[int, ToEval], bws: list[int], helper_funcs: HelperFuncs
 ) -> EvalFn:
     def helper(
-        xfer: list[FunctionWithCondition],
-        base: list[FunctionWithCondition],
+        xfer: list[XferFunc],
+        base: list[XferFunc],
     ) -> list[EvalResult]:
         lowerer = LowerToLLVM(bws)
         lowerer.add_fn(helper_funcs.get_top_func)
 
         if not xfer:
-            ret_top_func = FunctionWithCondition(top_as_xfer(helper_funcs.transfer_func))
-            ret_top_func.set_func_name("ret_top")
+            ret_top_func = XferFunc(top_as_xfer(helper_funcs.transfer_func))
+            ret_top_func.set_name("ret_top")
             xfer = [ret_top_func]
 
         xfer_names = [fc.lower(lowerer.add_fn) for fc in xfer]
@@ -122,7 +122,7 @@ def run(
     logger.perf(f"Enum engine took {run_time:.4f}s")
 
     eval_fn = _eval_helper(to_eval, all_bws, helper_funcs)
-    solution_set = UnsizedSolutionSet([], optimize=optimize)
+    solution_set = SolutionSet([], optimize=optimize)
 
     start_time = perf_counter()
     init_cmp_res = solution_set.eval_improve([], eval_fn)[0]
@@ -130,7 +130,7 @@ def run(
     logger.perf(f"Init Eval took {run_time:.4f}s")
 
     init_exact = init_cmp_res.get_exact_prop() * 100
-    s = f"Top Solution | Exact {init_exact:.4f}% |"
+    s = f"Top Solution | Exact {init_exact:.4f}% | Dist {init_cmp_res.dist:.4f} |"
     logger.info(s)
     print(s)
 
@@ -145,11 +145,6 @@ def run(
         current_num_abd_procs += (num_abd_procs - current_num_abd_procs) // (
             num_iters - ith_iter
         )
-
-        if weighted_dsl:
-            assert isinstance(solution_set, UnsizedSolutionSet)
-            context_weighted.weighted = True
-            solution_set.learn_weights(context_weighted, eval_fn)
 
         mcmc_samplers, prec_set, ranges = setup_mcmc(
             helper_funcs.transfer_func,
@@ -195,14 +190,18 @@ def run(
 
         iter_time = perf_counter() - iter_start
         final_exact = final_cmp_res.get_exact_prop() * 100
-        print(
-            f"Iteration {ith_iter}  | Exact {final_exact:.4f}% | {solution_set.solutions_size} solutions | {iter_time:.4f}s |"
-        )
 
+        if weighted_dsl:
+            context_weighted.weighted = True
+            solution_set.learn_weights(context_weighted, eval_fn)
+
+        logger.info(f"Per-BW Results: \n{lbw_mbw_log}\n{hbw_log}\n")
         logger.info(
-            f"Iter {ith_iter} Finished. Result of Current Solution: \n{lbw_mbw_log}\n{hbw_log}\n"
+            f"Iteration {ith_iter}  | Exact {final_exact:.4f}% | Dist {final_cmp_res.dist:.4f} | {solution_set.solutions_size} solutions | {iter_time:.4f}s |"
         )
-
+        print(
+            f"Iteration {ith_iter}  | Exact {final_exact:.4f}% | Dist {final_cmp_res.dist:.4f} | {solution_set.solutions_size} solutions | {iter_time:.4f}s |"
+        )
         if solution_set.is_perfect:
             print("Found a perfect solution")
             break
@@ -341,7 +340,12 @@ def _build_arg_parser() -> Namespace:
         help="number of unsound candidates considered for abduction",
         default=15,
     )
-    p.add_argument("-q", "--quiet", action="store_true")
+    p.add_argument(
+        "--debug",
+        action="store_true",
+        default=False,
+        help="write debug.log to the output directory (default: off)",
+    )
 
     return p.parse_args()
 

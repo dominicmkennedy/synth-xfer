@@ -110,7 +110,7 @@ sxf --op mlir/Operations/Add.mlir     \
 | `--condition-length <int>`       | Length of synthesized abduction (default: `10`).                                                                                                                                     |
 | `--num-unsound-candidates <int>` | Number of unsound candidates considered for abduction (default: `15`).                                                                                                               |
 | `--optimize`                     | Run e-graph-based rewrite optimizer on synthesized candidates.                                                                                                                       |
-| `--quiet`                        | Suppress verbose output.                                                                                                                                                             |
+| `--debug`                        | Write `debug.log` to the output directory (default: off).                                                                                                                            |
 
 Exactly one of `--op` or `--benchmark` must be provided.
 
@@ -342,7 +342,7 @@ pattern eval                             \
 | `--timeout` | Timeout in seconds                                     |
 | `--input`   | Takes an enum `.tsv`, and will sovle all `hbw` rows    |
 
-Example: 
+Example:
 ```bash
 max-precise --op mlir/Operations/Or.mlir --bw 4 -d KnownBits --args "00??; 11??"
 # or

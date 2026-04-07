@@ -149,7 +149,7 @@ def _execute_job(
     try:
         _prepare_output_dir(output_folder, allow_existing=allow_existing)
 
-        logger = init_logging(output_folder, not args.quiet)
+        logger = init_logging(output_folder, args.debug)
         max_len = max(
             len(k)
             for k in [*vars(args), "transfer_functions", "arity", "lbw", "mbw", "hbw"]
