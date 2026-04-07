@@ -120,7 +120,7 @@ def _run_agent_compress(
         # Get eval of new transformer
         full_soln = merge_library_text(library.functions_text, transformer_mlir)
         compressed_eval_summary = eval_transformer(
-            solution_path=full_soln,
+            solution=full_soln,
             op_path=Path(target.task.op_file),
             domain=AbstractDomain.KnownBits,
             xfer_name=f"kb_{target.task.op_name.lower()}",
@@ -217,6 +217,7 @@ def run_compress_task(
     return SynthesisResult(
         task=target.task,
         solution_text=target_text,
+        solution_iters=target.solution_iters,
         transformer_path=target.transformer_path,
         eval_summary=target.eval_summary,
     )
