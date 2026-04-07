@@ -8,7 +8,7 @@ from typing import cast
 import pandas as pd
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.max_precise import RowTask, process_row
+from synth_xfer._util.max_precise import RowProcessor, RowTask
 from synth_xfer._util.pattern import PatternDag, _load_pattern
 from synth_xfer._util.tsv import EnumData, EnumMetaData
 
@@ -186,6 +186,17 @@ class PatternInputGenerator:
         return rows
 
 
+def _ideal_is_top(i: str, bw: int, domain: AbstractDomain) -> bool:
+    if domain == AbstractDomain.KnownBits:
+        return i == bw * "?"
+    if domain == AbstractDomain.UConstRange:
+        return i == f"[0, {2**bw - 1}]"
+    if domain == AbstractDomain.SConstRange:
+        return i == f"[{-(2 ** (bw - 1))}, {2 ** (bw - 1) - 1}]"
+
+    raise NotImplementedError
+
+
 def generate_pattern_inputs(
     path: Path,
     domain: AbstractDomain,
@@ -216,6 +227,7 @@ def generate_pattern_inputs(
     max_workers = os.cpu_count() or 1
 
     with Pool(processes=max_workers) as pool:
+        processor = RowProcessor(path, domain, timeout)
         for bw, samples in sorted(mbw_specs, key=lambda spec: spec[0]):
             rows_for_bw: list[tuple[object, ...]] = []
             seen_args: set[tuple[str, ...]] = set()
@@ -240,15 +252,12 @@ def generate_pattern_inputs(
                     tasks.append(
                         RowTask(
                             index=len(tasks),
-                            op_path=path,
-                            domain=domain,
                             bw=bw,
-                            args_str=",".join(arg_values),
-                            timeout=timeout,
+                            args=arg_values,
                         )
                     )
 
-                for result in pool.map(process_row, tasks):
+                for result in pool.map(processor, tasks):
                     row, arg_values, weight = batch_rows[result.index]
                     if result.timed_out:
                         timeout_counts_by_bw[bw] += 1
@@ -270,6 +279,11 @@ def generate_pattern_inputs(
                         continue
 
                     assert result.ideal is not None
+
+                    if _ideal_is_top(result.ideal, bw, domain):
+                        seen_args.add(arg_values)
+                        continue
+
                     rows_for_bw.append((row[0], *arg_values, result.ideal, weight))
                     seen_args.add(arg_values)
                     failed_attempts_since_accept = 0

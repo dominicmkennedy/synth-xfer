@@ -1,15 +1,17 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from io import StringIO
 from pathlib import Path
+import re
+from typing import cast
 
 from xdsl.context import Context
 from xdsl.dialects.arith import Arith
 from xdsl.dialects.builtin import Builtin, ModuleOp
 from xdsl.dialects.func import Func
-from xdsl.dialects.smt import BitVectorType, BoolType, ConstantBoolOp
-from xdsl.ir import Attribute, Operation
+from xdsl.dialects.smt import ConstantBoolOp
+from xdsl.ir import Operation, OpResult
 from xdsl.transforms.canonicalize import CanonicalizePass
-from xdsl_smt.dialects.smt_bitvector_dialect import ConstantOp, ExtractOp
+from xdsl_smt.dialects.smt_bitvector_dialect import ConstantOp
 from xdsl_smt.dialects.smt_dialect import (
     AssertOp,
     CallOp,
@@ -17,161 +19,248 @@ from xdsl_smt.dialects.smt_dialect import (
     DefineFunOp,
     EqOp,
 )
-from xdsl_smt.dialects.smt_utils_dialect import FirstOp, PairOp, PairType
+from xdsl_smt.dialects.smt_utils_dialect import FirstOp, PairOp
 from xdsl_smt.dialects.transfer import Transfer
 from xdsl_smt.passes.dead_code_elimination import DeadCodeElimination
 from xdsl_smt.passes.lower_pairs import LowerPairs
 from xdsl_smt.passes.transfer_inline import FunctionCallInline
 from xdsl_smt.traits.smt_printer import print_to_smtlib
 from xdsl_smt.utils.transfer_function_util import get_argument_instances_with_effect
-from z3 import Solver, parse_smt2_string, sat, unknown
+from z3 import (
+    UGE,
+    ULE,
+    BitVec,
+    BitVecRef,
+    BitVecVal,
+    BoolRef,
+    Extract,
+    Solver,
+    parse_smt2_string,
+    sat,
+    unknown,
+)
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.parse_mlir import get_helper_funcs
 from synth_xfer._util.verifier import lower_to_smt_module
 
-
-def parse_kb_str(arg: str) -> tuple[int, int]:
-    known_z, known_o = 0, 0
-
-    for ch in arg:
-        if ch == "0":
-            known_z |= 1
-        elif ch == "1":
-            known_o |= 1
-        known_z <<= 1
-        known_o <<= 1
-
-    known_z >>= 1
-    known_o >>= 1
-    return known_z, known_o
+_CTX: Context | None = None
 
 
-def parse_args(
-    args: tuple[str, ...], domain: AbstractDomain, bitwidth: int
-) -> list[tuple[int, int]]:
+def _get_ctx() -> Context:
+    global _CTX
+    if _CTX is None:
+        ctx = Context()
+        ctx.load_dialect(Arith)
+        ctx.load_dialect(Builtin)
+        ctx.load_dialect(Func)
+        ctx.load_dialect(Transfer)
+        _CTX = ctx
+    return _CTX
+
+
+def _get_abst_val(arg: str, domain: AbstractDomain, bw: int) -> tuple[int, int]:
+    def kb_str_to_vals(arg: str) -> tuple[int, int]:
+        known_z, known_o = 0, 0
+
+        for ch in arg:
+            if ch == "0":
+                known_z |= 1
+            elif ch == "1":
+                known_o |= 1
+            known_z <<= 1
+            known_o <<= 1
+
+        known_z >>= 1
+        known_o >>= 1
+        return known_z, known_o
+
     if domain == AbstractDomain.KnownBits:
-        result: list[tuple[int, int]] = []
-        for arg in args:
-            if len(arg) != bitwidth:
-                raise ValueError(f"arg len: {len(arg)} != bitwidth: {bitwidth}")
+        if len(arg) != bw:
+            raise ValueError(f"arg len: {len(arg)} != bitwidth: {bw}")
 
-            result.append(parse_kb_str(arg))
-        return result
+        return kb_str_to_vals(arg)
+    if domain == AbstractDomain.UConstRange:
+        m = re.match(r"^\[(\d+), (\d+)\]$", arg)
+        if not m or not m.group(1).isnumeric() or not m.group(2).isnumeric():
+            raise ValueError(f"arg: {arg} is malformed")
+        else:
+            lb, ub = int(m.group(1)), int(m.group(2))
+            if lb < 0 or lb >= 2**bw or ub < 0 or ub >= 2**bw or lb > ub:
+                raise ValueError(f"arg: {arg} out of range")
+
+        return lb, ub
+    if domain == AbstractDomain.SConstRange:
+        imin = -(2**bw // 2)
+        imax = (2**bw // 2) - 1
+        m = re.match(r"^\[(-?\d+), (-?\d+)\]$", arg)
+        if not m:
+            raise ValueError(f"arg: {arg} is malformed")
+        else:
+            lb, ub = int(m.group(1)), int(m.group(2))
+            if lb < imin or lb > imax or ub < imin or ub > imax or lb > ub:
+                raise ValueError(f"arg: {arg} out of range")
+        return lb, ub
+
     raise NotImplementedError(f"Max precise not implemented for {domain} yet")
 
 
-def _get_abst_args(
-    arity: int, conc_ty: Attribute, d: AbstractDomain
-) -> list[DeclareConstOp]:
-    assert isinstance(conc_ty, BitVectorType)
+@dataclass
+class MaxPreciseQueryBuilder:
+    domain: AbstractDomain
+    bitwidth: int
+    abstract_arg_values: list[tuple[int, int]]
+    instance_constraint: DefineFunOp
+    concrete_op: DefineFunOp
+    op_constraint: DefineFunOp | None
+    _const_false: ConstantBoolOp = field(init=False, repr=False)
 
-    abstract_type = BoolType()
-    for _ in range(d.vec_size):
-        abstract_type = PairType(conc_ty, abstract_type)
+    def _input_vars(self) -> list[DeclareConstOp]:
+        input_vars = [
+            x
+            for x in get_argument_instances_with_effect(self.concrete_op, {})
+            if isinstance(x, DeclareConstOp)
+        ]
+        assert len(input_vars) + 1 == len(self.concrete_op.func_type.inputs)
+        return input_vars
 
-    return [DeclareConstOp(abstract_type) for _ in range(arity)]
+    def _get_op_constraint(self, inputs: list[DeclareConstOp]) -> list[Operation]:
+        if self.op_constraint is None:
+            return []
 
-
-def _to_pair_op(
-    constant_bool: ConstantBoolOp, val_list: list[ConstantOp]
-) -> list[PairOp]:
-    last_val = constant_bool.result
-    result: list[PairOp] = []
-    for val in val_list[::-1]:
-        result.append(PairOp(val.res, last_val))
-        last_val = result[-1].res
-    return result
-
-
-def _get_abst_constraint(
-    const_false: ConstantBoolOp,
-    abst_arg_types: list[DeclareConstOp],
-    abst_bitvectors: list[tuple[int, int]],
-    bitwidth: int,
-) -> list[Operation]:
-    result: list[Operation] = []
-    for abst_bv, abst_arg_type in zip(abst_bitvectors, abst_arg_types):
-        constant_ops = [ConstantOp.from_int_value(x, bitwidth) for x in abst_bv]
-        pair_op = _to_pair_op(const_false, constant_ops)
-        eq_op = EqOp(pair_op[-1].res, abst_arg_type.res)
-        assert_op = AssertOp(eq_op.res)
-        result += constant_ops + pair_op + [eq_op, assert_op]
-    return result
-
-
-def _get_op_constraint(
-    op_constraint: DefineFunOp, inputs: list[DeclareConstOp]
-) -> list[Operation]:
-    constant_i1 = ConstantOp.from_int_value(1, 1)
-    constant_bool = ConstantBoolOp(False)
-    pair_op = PairOp(constant_i1.res, constant_bool.result)
-    pair_res_op = PairOp(pair_op.res, constant_bool.result)
-    call_op = CallOp(op_constraint.ret, inputs + [constant_bool.result])
-    eq_op = EqOp(pair_res_op.res, call_op.res[0])
-    assert_op = AssertOp(eq_op.res)
-    return [constant_i1, constant_bool, pair_op, pair_res_op, call_op, eq_op, assert_op]
-
-
-def _get_in_constraint(
-    abstract_inputs: list[DeclareConstOp],
-    inputs: list[DeclareConstOp],
-    instance_constraint: DefineFunOp,
-) -> list[Operation]:
-    result: list[Operation] = []
-    constant_i1 = ConstantOp.from_int_value(1, 1)
-    constant_bool = ConstantBoolOp(False)
-    pair_op = PairOp(constant_i1.res, constant_bool.result)
-    pair_res_op = PairOp(pair_op.res, constant_bool.result)
-    for abstract_input, concrete_input in zip(abstract_inputs, inputs):
-        call_op = CallOp(
-            instance_constraint.ret,
-            [abstract_input, concrete_input, constant_bool.result],
-        )
+        const_i1 = ConstantOp.from_int_value(1, 1)
+        pair_op = PairOp(const_i1.res, self._const_false.result)
+        pair_res_op = PairOp(pair_op.res, self._const_false.result)
+        call_op = CallOp(self.op_constraint.ret, inputs + [self._const_false.result])
         eq_op = EqOp(pair_res_op.res, call_op.res[0])
         assert_op = AssertOp(eq_op.res)
+        return [const_i1, pair_op, pair_res_op, call_op, eq_op, assert_op]
 
-        result += [call_op, eq_op, assert_op]
-    return [constant_i1, constant_bool, pair_op, pair_res_op] + result
+    def _to_pair_value(self, val_list: list[ConstantOp]) -> tuple[list[PairOp], OpResult]:
+        last_val = self._const_false.result
+        result: list[PairOp] = []
+        for val in val_list[::-1]:
+            result.append(PairOp(val.res, last_val))
+            last_val = result[-1].res
+        return result, result[-1].res
+
+    def _abstract_values(self) -> tuple[list[Operation], list[OpResult]]:
+        ops: list[Operation] = []
+        values: list[OpResult] = []
+        for abst_bv in self.abstract_arg_values:
+            constant_ops = [
+                ConstantOp.from_int_value(x % (2**self.bitwidth), self.bitwidth)
+                for x in abst_bv
+            ]
+            pair_ops, pair_value = self._to_pair_value(constant_ops)
+            ops += constant_ops + pair_ops
+            values.append(pair_value)
+        return ops, values
+
+    def _get_in_constraint(
+        self,
+        abstract_inputs: list[OpResult],
+        inputs: list[DeclareConstOp],
+    ) -> list[Operation]:
+        result: list[Operation] = []
+        constant_i1 = ConstantOp.from_int_value(1, 1)
+        pair_op = PairOp(constant_i1.res, self._const_false.result)
+        pair_res_op = PairOp(pair_op.res, self._const_false.result)
+        for abstract_input, concrete_input in zip(abstract_inputs, inputs):
+            call_op = CallOp(
+                self.instance_constraint.ret,
+                [abstract_input, concrete_input, self._const_false.result],
+            )
+            eq_op = EqOp(pair_res_op.res, call_op.res[0])
+            assert_op = AssertOp(eq_op.res)
+
+            result += [call_op, eq_op, assert_op]
+        return [constant_i1, pair_op, pair_res_op] + result
+
+    def build(self) -> ModuleOp:
+        input_arguments = self._input_vars()
+        self._const_false = ConstantBoolOp(False)
+
+        abstract_ops, abstract_inputs = self._abstract_values()
+        op_constraint = self._get_op_constraint(input_arguments)
+        concrete_call = CallOp(self.concrete_op.ret, input_arguments)
+        concrete_result = FirstOp(concrete_call.res[0])
+
+        result_var = DeclareConstOp(concrete_result.res.type)
+        result_var.res.name_hint = "result"
+        result_eq = EqOp(result_var.res, concrete_result.res)
+        result_assert = AssertOp(result_eq.res)
+
+        return ModuleOp(
+            input_arguments
+            + [self._const_false]
+            + abstract_ops
+            + op_constraint
+            + self._get_in_constraint(abstract_inputs, input_arguments)
+            + [concrete_call, concrete_result, result_var, result_eq, result_assert]
+        )
 
 
 @dataclass(frozen=True)
-class KnownBitsChecker:
-    ctx: Context
+class PreparedQuery:
+    solver: Solver
+    result: BitVecRef
     timeout: int
 
-    def _make_z3_call(self, module: ModuleOp) -> bool:
-        FunctionCallInline(True, {}).apply(self.ctx, module)
-        LowerPairs().apply(self.ctx, module)
-        CanonicalizePass().apply(self.ctx, module)
-        DeadCodeElimination().apply(self.ctx, module)
+    @classmethod
+    def from_module(
+        cls, ctx: Context, smt_mod: ModuleOp, bitwidth: int, timeout: int
+    ) -> "PreparedQuery":
+        module = smt_mod.clone()
+        FunctionCallInline(True, {}).apply(ctx, module)
+        LowerPairs().apply(ctx, module)
+        CanonicalizePass().apply(ctx, module)
+        DeadCodeElimination().apply(ctx, module)
         stream = StringIO()
         print_to_smtlib(module, stream)
 
         solver = Solver()
-        solver.set(timeout=self.timeout * 1000)
+        solver.set(timeout=timeout * 1000)
         solver.add(parse_smt2_string(stream.getvalue()))
+        return cls(solver=solver, result=BitVec("$result", bitwidth), timeout=timeout)
 
-        result = solver.check()
+    def is_sat(self) -> bool:
+        result = self.solver.check()
         if result == unknown:
             raise TimeoutError()
         return result == sat
 
-    def _ith_bit_is(self, module: ModuleOp, ith_bit: int, bit_val: int) -> bool:
-        block = module.body.block
-        concrete_res = block.last_op
-        assert isinstance(concrete_res, CallOp)
-        first_op = FirstOp(concrete_res.res[0])
-        ith_bit_op = ExtractOp(first_op.res, ith_bit, ith_bit)
-        const_bv_op = ConstantOp.from_int_value(bit_val, 1)
-        eq_op = EqOp(ith_bit_op.res, const_bv_op.res)
-        assert_op = AssertOp(eq_op.res)
-        block.add_ops([first_op, ith_bit_op, const_bv_op, eq_op, assert_op])
-        return self._make_z3_call(module)
+    def check(self, probe: BoolRef) -> bool:
+        self.solver.push()
+        try:
+            self.solver.add(probe)
+            result = self.solver.check()
+        finally:
+            self.solver.pop()
 
-    def check_ith_bit(self, verify_module: ModuleOp, ith: int) -> str | None:
-        can_be_z = self._ith_bit_is(verify_module.clone(), ith, 0)
-        can_be_o = self._ith_bit_is(verify_module.clone(), ith, 1)
+        if result == unknown:
+            raise TimeoutError()
+        return result == sat
+
+    def bv_val(self, val: int) -> BitVecRef:
+        return BitVecVal(val, self.result.size())
+
+
+@dataclass(frozen=True)
+class ComputeMaxPrecise:
+    query: PreparedQuery
+    bitwidth: int
+
+    def compute(self) -> str:
+        raise NotImplementedError
+
+
+@dataclass(frozen=True)
+class KnownBitsMaxPrecise(ComputeMaxPrecise):
+    def check_ith_bit(self, ith: int) -> str | None:
+        ith_bit = Extract(ith, ith, self.query.result)
+        can_be_z = self.query.check(cast(BoolRef, ith_bit == BitVecVal(0, 1)))
+        can_be_o = self.query.check(cast(BoolRef, ith_bit == BitVecVal(1, 1)))
         if can_be_o and can_be_z:
             return "?"
         if (not can_be_z) and (not can_be_o):
@@ -182,15 +271,123 @@ class KnownBitsChecker:
             return "0"
         raise AssertionError("unreachable")
 
+    def compute(self) -> str:
+        result = ""
+        for i in range(self.bitwidth):
+            ith_result = self.check_ith_bit(i)
+            if ith_result is None:
+                return "(bottom)"
+            result = ith_result + result
+        return result
+
+
+@dataclass(frozen=True)
+class IntervalMaxPrecise(ComputeMaxPrecise):
+    def _can_be_leq(self, val: int) -> bool:
+        return self.query.check(self._cmp_leq(self.query.result, val))
+
+    def _can_be_geq(self, val: int) -> bool:
+        return self.query.check(self._cmp_geq(self.query.result, val))
+
+    def _cmp_leq(self, concrete_res: BitVecRef, val: int) -> BoolRef:
+        raise NotImplementedError
+
+    def _cmp_geq(self, concrete_res: BitVecRef, val: int) -> BoolRef:
+        raise NotImplementedError
+
+    def min_value(self) -> int:
+        raise NotImplementedError
+
+    def max_value(self) -> int:
+        raise NotImplementedError
+
+    def format_result(self, lower_bound: int, upper_bound: int) -> str:
+        raise NotImplementedError
+
+    def lower_bound(self) -> int | None:
+        if not self.query.is_sat():
+            return None
+
+        lo, hi = self.min_value(), self.max_value()
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if self._can_be_leq(mid):
+                hi = mid
+            else:
+                lo = mid + 1
+        return lo
+
+    def upper_bound(self, lower_bound: int) -> int:
+        lo, hi = lower_bound, self.max_value()
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if self._can_be_geq(mid):
+                lo = mid
+            else:
+                hi = mid - 1
+        return lo
+
+    def compute(self) -> str:
+        lower_bound = self.lower_bound()
+        if lower_bound is None:
+            return "(bottom)"
+        return self.format_result(lower_bound, self.upper_bound(lower_bound))
+
+
+@dataclass(frozen=True)
+class UConstRangeMaxPrecise(IntervalMaxPrecise):
+    def _cmp_leq(self, concrete_res: BitVecRef, val: int) -> BoolRef:
+        return ULE(concrete_res, self.query.bv_val(val))
+
+    def _cmp_geq(self, concrete_res: BitVecRef, val: int) -> BoolRef:
+        return UGE(concrete_res, self.query.bv_val(val))
+
+    def min_value(self) -> int:
+        return 0
+
+    def max_value(self) -> int:
+        return 2**self.bitwidth - 1
+
+    def format_result(self, lower_bound: int, upper_bound: int) -> str:
+        return f"[{lower_bound}, {upper_bound}]"
+
+
+@dataclass(frozen=True)
+class SConstRangeMaxPrecise(IntervalMaxPrecise):
+    def _cmp_leq(self, concrete_res: BitVecRef, val: int) -> BoolRef:
+        return concrete_res <= self.query.bv_val(val)
+
+    def _cmp_geq(self, concrete_res: BitVecRef, val: int) -> BoolRef:
+        return concrete_res >= self.query.bv_val(val)
+
+    def min_value(self) -> int:
+        return -(2**self.bitwidth // 2)
+
+    def max_value(self) -> int:
+        return (2**self.bitwidth // 2) - 1
+
+    def format_result(self, lower_bound: int, upper_bound: int) -> str:
+        return f"[{lower_bound}, {upper_bound}]"
+
+
+def _get_max_precise_computer(
+    domain: AbstractDomain, query: PreparedQuery, bw: int
+) -> ComputeMaxPrecise:
+    if domain == AbstractDomain.KnownBits:
+        return KnownBitsMaxPrecise(query, bw)
+    if domain == AbstractDomain.UConstRange:
+        return UConstRangeMaxPrecise(query, bw)
+    if domain == AbstractDomain.SConstRange:
+        return SConstRangeMaxPrecise(query, bw)
+
+    raise NotImplementedError(f"Max precise not implemented for {domain}")
+
 
 @dataclass(frozen=True)
 class RowTask:
     index: int
-    op_path: Path
-    domain: AbstractDomain
     bw: int
-    args_str: str
-    timeout: int
+    args: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -200,6 +397,24 @@ class RowResult:
     timed_out: bool = False
 
 
+@dataclass(frozen=True)
+class RowProcessor:
+    op_path: Path
+    domain: AbstractDomain
+    timeout: int
+
+    def __call__(self, task: RowTask) -> RowResult:
+        try:
+            return RowResult(
+                index=task.index,
+                ideal=compute_max_precise(
+                    self.op_path, self.domain, task.bw, task.args, self.timeout
+                ),
+            )
+        except TimeoutError:
+            return RowResult(index=task.index, timed_out=True)
+
+
 def compute_max_precise(
     op_path: Path,
     domain: AbstractDomain,
@@ -207,14 +422,10 @@ def compute_max_precise(
     args: tuple[str, ...],
     timeout: int,
 ) -> str:
-    ctx = Context()
-    ctx.load_dialect(Arith)
-    ctx.load_dialect(Builtin)
-    ctx.load_dialect(Func)
-    ctx.load_dialect(Transfer)
+    ctx = _get_ctx()
 
     hlprs = get_helper_funcs(op_path, domain)
-    abstract_args = parse_args(args, domain, bw)
+    abst_arg_values = [_get_abst_val(arg, domain, bw) for arg in args]
 
     fns = [hlprs.instance_constraint_func, hlprs.crt_func, hlprs.op_constraint_func]
     lower_to_smt_module(m := ModuleOp([x.clone() for x in fns if x is not None]), bw, ctx)
@@ -226,51 +437,15 @@ def compute_max_precise(
     assert isinstance(concrete_op, DefineFunOp)
     assert isinstance(op_constraint, DefineFunOp) or op_constraint is None
 
-    input_arguments = [
-        arg
-        for arg in get_argument_instances_with_effect(concrete_op, {})
-        if isinstance(arg, DeclareConstOp)
-    ]
-    assert len(input_arguments) + 1 == len(concrete_op.func_type.inputs)
-    smt_arg_type = _get_abst_args(
-        len(input_arguments), input_arguments[0].res.type, domain
-    )
+    smt_mod = MaxPreciseQueryBuilder(
+        domain=domain,
+        bitwidth=bw,
+        abstract_arg_values=abst_arg_values,
+        instance_constraint=instance_constraint,
+        concrete_op=concrete_op,
+        op_constraint=op_constraint,
+    ).build()
 
-    input_op_constraint = []
-    if op_constraint is not None:
-        input_op_constraint = _get_op_constraint(op_constraint, input_arguments)
-
-    verify_module = ModuleOp(
-        input_arguments
-        + smt_arg_type
-        + _get_abst_constraint(ConstantBoolOp(False), smt_arg_type, abstract_args, bw)
-        + input_op_constraint
-        + _get_in_constraint(smt_arg_type, input_arguments, instance_constraint)
-        + [CallOp(concrete_op.ret, input_arguments)]
-    )
-
-    result = ""
-    checker = KnownBitsChecker(ctx=ctx, timeout=timeout)
-    for i in range(bw):
-        ith_result = checker.check_ith_bit(verify_module, i)
-        if ith_result is None:
-            return "(bottom)"
-        result = ith_result + result
-
-    return result
-
-
-def process_row(task: RowTask) -> RowResult:
-    try:
-        return RowResult(
-            index=task.index,
-            ideal=compute_max_precise(
-                task.op_path,
-                task.domain,
-                task.bw,
-                tuple(task.args_str.split(",")),
-                task.timeout,
-            ),
-        )
-    except TimeoutError:
-        return RowResult(index=task.index, timed_out=True)
+    query = PreparedQuery.from_module(ctx, smt_mod, bw, timeout)
+    computer = _get_max_precise_computer(domain, query, bw)
+    return computer.compute()
