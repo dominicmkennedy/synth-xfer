@@ -182,10 +182,14 @@ class SynthesisAgent:
 
         @function_tool
         def run_eval_tool(transformer_mlir: str) -> str:
-            """Evaluate the generated transformer MLIR for the current operation (e.g. kb_<op>). Pass the raw MLIR code as a string. Evaluate on a low bitwidth (default: 4), and a high bitwidth (default: 64). Returns a short summary:
-            - Sound %: the percentage of inputs for which the output abstract value is sound
-            - Exact %: the percentage of inputs for which the output abstract value is exactly the same the optimal transfer function (perfect precision)
-            - Norm: ignore for now
+            """Evaluate the generated transformer MLIR for the current operation (e.g. kb_<op>). Pass the raw MLIR code as a string. Uses `--exact-bw` bitwidths from the CLI (default 8).
+
+            First line is always a short summary:
+            - Sound %: fraction of inputs where the abstract output is sound
+            - Exact %: fraction where the result matches the optimal transfer (full precision)
+            - Dist: sound-distance metric for this eval
+
+            If the transformer is not fully sound or not fully exact, following lines may include a short legend and up to a few concrete counterexamples per bitwidth (unsound vs imprecise), labeled with bw=..., so you can see inputs, your abstract output, and the optimal abstract output.
             """
             self._soln_iters.append(transformer_mlir)
             lib_text = "\n".join(func.source for func in self._library.functions)
@@ -196,6 +200,8 @@ class SynthesisAgent:
                 domain=AbstractDomain.KnownBits,
                 xfer_name=f"kb_{task.op_name.lower()}",
                 lbw=args.exact_bw,
+                unsound_ex=3,
+                imprecise_ex=3,
             )
 
         return Agent(

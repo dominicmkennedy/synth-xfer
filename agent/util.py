@@ -218,6 +218,59 @@ def merge_library_text(mod1: str, mod2: str) -> str:
     return f"builtin.module {{\n{indented}\n}}"
 
 
+def _format_eval_examples_for_agent(
+    eval_result: EvalResult, domain: AbstractDomain
+) -> str:
+    """Optional multi-line suffix: legend plus unsound/imprecise CaseExample lines per bitwidth."""
+    if not any(
+        res.unsound_examples or res.imprecise_examples
+        for res in eval_result.per_bit_res
+    ):
+        return ""
+
+    lines: list[str] = [
+        "",
+        "Counterexamples (eval uses abstract inputs for this domain; your transformer is "
+        "evaluated after meet with the sound baseline in this pipeline):",
+        "How to read each example line:",
+        "  • The `( ... )` before `->` lists abstract inputs in MLIR argument order: first = %0, then %1, and so on.",
+        "  • After `->`: your abstract output in this eval; `best` is the optimal abstract output for that input.",
+    ]
+    if domain == AbstractDomain.KnownBits:
+        lines.extend(
+            [
+                "  • KnownBits: each input/output is one string of length = bw above; bits are MSB→LSB (left to right). "
+                "`0` and `1` are known; `?` is unknown.",
+                "  • Imprecise rows may still show `dist: 0.0000`; treat them as not exactly matching `best`.",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "Unsound: the abstract output does not soundly cover the true concrete result; "
+            "`best` is the optimal abstract output for that input.",
+            "Imprecise: still sound but less precise than optimal; `dist` is precision loss vs "
+            "optimal (0 = exact).",
+            "",
+        ]
+    )
+    unsound_lines: list[str] = []
+    imprecise_lines: list[str] = []
+    for res in eval_result.per_bit_res:
+        for ex in res.unsound_examples:
+            unsound_lines.append(f"  bw={res.bitwidth}: {ex.to_str(show_dist=False)}")
+        for ex in res.imprecise_examples:
+            imprecise_lines.append(f"  bw={res.bitwidth}: {ex.to_str()}")
+    if unsound_lines:
+        lines.append("Unsound examples (per bitwidth):")
+        lines.extend(unsound_lines)
+        lines.append("")
+    if imprecise_lines:
+        lines.append("Imprecise examples (per bitwidth):")
+        lines.extend(imprecise_lines)
+    return "\n".join(lines).rstrip("\n")
+
+
 def eval_transformer(
     solution: str,
     op_path: Path,
@@ -228,6 +281,8 @@ def eval_transformer(
     mbw: list[tuple[int, int]] = [],
     hbw: list[tuple[int, int, int]] = [],
     random_seed: int | None = None,
+    unsound_ex: int = 3,
+    imprecise_ex: int = 3,
 ) -> str:
     """Run eval on a transformer (MLIR string) and return a summary string.
 
@@ -260,9 +315,14 @@ def eval_transformer(
                 bw: (to_eval[bw], [jit.get_fn_ptr(f"{xfer_name}_{bw}_shim")], [])
                 for bw in all_bws
             }
-            (synth_r,) = eval_transfer_func(eval_input)
+            (synth_r,) = eval_transfer_func(eval_input, unsound_ex, imprecise_ex)
 
-        return f"Sound %: {synth_r.get_sound_prop() * 100:.2f}, Exact %: {synth_r.get_exact_prop() * 100:.2f}, Dist: {synth_r.sound_dist:.4f}"
+        summary = (
+            f"Sound %: {synth_r.get_sound_prop() * 100:.2f}, "
+            f"Exact %: {synth_r.get_exact_prop() * 100:.2f}, "
+            f"Dist: {synth_r.sound_dist:.4f}"
+        )
+        return summary + _format_eval_examples_for_agent(synth_r, domain)
     except Exception as e:
         msg = str(e).strip() or repr(e) or type(e).__name__
         # Single line, truncated, so the agent reliably sees parse/location info
