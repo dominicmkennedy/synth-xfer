@@ -190,14 +190,17 @@ Should produce:
 |-----------------------|-----------------------------------------------------------------------------------------------------------------------------|
 | `--xfer-file <Path>`  | One or more transformer `.mlir` files.                                                                                      |
 | `--xfer-name <str>`   | Name of the transformer function to evaluate (defaults to `solution`, or the only function in the file if there's just one) |
-| `-i, --input <Path>`  | Existing enum TSV dataset. If omitted, `run-xfer` reads a TSV from stdin.                                                   |
-| `--bw <int>`          | Bitwidth for stdin apply mode. Required when `--input` is omitted.                                                          |
-| `--domain <Name>`     | Abstract domain for stdin apply mode. Required when `--input` is omitted.                                                   |
+| `-i, --input <Path>`  | Existing enum TSV dataset. If omitted, `run-xfer` uses `--args`.                                                            |
+| `--bw <int>`          | Bitwidth for args apply mode. Required when `--input` is omitted.                                                           |
+| `--domain <Name>`     | Abstract domain for args apply mode. Required when `--input` is omitted.                                                    |
+| `--args <Name>`       | The string representation of abstract value inputs. (args are `;` separated)                                                |
 | `-o, --output <Path>` | Write the resulting table as TSV.                                                                                           |
 
 Example invocation:
 ```bash
-run-xfer --xfer-file tests/data/kb_and.mlir --bw 4 --domain KnownBits
+run-xfer --xfer-file tests/data/kb_or.mlir --bw 4 -d KnownBits --args="00??; 11?0"
+# or
+run-xfer --xfer-file tests/data/cr_add.mlir --bw 4 -d UConstRange --args="[5, 10]; [2, 3]"
 ```
 
 ## Important CLI Options for `eval-xfer`
@@ -340,4 +343,8 @@ pattern eval                             \
 | `--input`   | Takes an enum `.tsv`, and will sovle all `hbw` rows    |
 
 Example:
-`max-precise --op mlir/Operations/Or.mlir -d KnownBits --args "00??,11??" --bw 4`
+```bash
+max-precise --op mlir/Operations/Or.mlir --bw 4 -d KnownBits --args "00??; 11??"
+# or
+max-precise --op mlir/Operations/Add.mlir --bw 4 -d UConstRange --args="[5, 10]; [2, 3]"
+```
