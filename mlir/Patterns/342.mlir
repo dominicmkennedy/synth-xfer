@@ -30,7 +30,6 @@ module {
     %neg = "transfer.get_all_ones"(%arg0) : (!transfer.integer) -> !transfer.integer
     %rhs_not_neg = "transfer.cmp"(%neg, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
     %no_overflow = arith.ori %lhs_not_int_min, %rhs_not_neg : i1
-    %res = arith.andi %0, %no_overflow : i1
-    return %res : i1
+    return %no_overflow : i1
   }
 }

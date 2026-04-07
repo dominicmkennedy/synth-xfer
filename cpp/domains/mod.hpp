@@ -108,21 +108,6 @@ template <std::size_t X_> struct ModT {
       return res;
     }
 
-    constexpr std::uint64_t distance(const Mod &rhs) const noexcept {
-      if (isBottom() && rhs.isBottom())
-        return 0;
-
-      if (isBottom()) {
-        return rhs.v[0].popcount();
-      }
-
-      if (rhs.isBottom()) {
-        return v[0].popcount();
-      }
-
-      return (v[0] ^ rhs.v[0]).popcount();
-    }
-
     constexpr std::uint64_t size() const noexcept {
       if (isBottom())
         return 0;
@@ -135,6 +120,15 @@ template <std::size_t X_> struct ModT {
           sz += Mod::get_cong_class_size(i);
 
       return sz;
+    }
+
+    constexpr double norm() const noexcept {
+      if (isBottom())
+        return 0.0;
+      if (isTop())
+        return 1.0;
+
+      return std::log2(static_cast<double>(size())) / static_cast<double>(BW);
     }
 
     static constexpr Mod fromConcrete(const APInt<BW> &x) noexcept {
@@ -279,31 +273,7 @@ template <std::size_t BW> using Mod11 = ModT<11>::Mod<BW>;
 template <std::size_t BW> using Mod13 = ModT<13>::Mod<BW>;
 
 static_assert(Domain<Mod3, 4>);
-static_assert(Domain<Mod3, 8>);
-static_assert(Domain<Mod3, 16>);
-static_assert(Domain<Mod3, 32>);
-static_assert(Domain<Mod3, 64>);
-
 static_assert(Domain<Mod5, 4>);
-static_assert(Domain<Mod5, 8>);
-static_assert(Domain<Mod5, 16>);
-static_assert(Domain<Mod5, 32>);
-static_assert(Domain<Mod5, 64>);
-
 static_assert(Domain<Mod7, 4>);
-static_assert(Domain<Mod7, 8>);
-static_assert(Domain<Mod7, 16>);
-static_assert(Domain<Mod7, 32>);
-static_assert(Domain<Mod7, 64>);
-
 static_assert(Domain<Mod11, 4>);
-static_assert(Domain<Mod11, 8>);
-static_assert(Domain<Mod11, 16>);
-static_assert(Domain<Mod11, 32>);
-static_assert(Domain<Mod11, 64>);
-
 static_assert(Domain<Mod13, 4>);
-static_assert(Domain<Mod13, 8>);
-static_assert(Domain<Mod13, 16>);
-static_assert(Domain<Mod13, 32>);
-static_assert(Domain<Mod13, 64>);

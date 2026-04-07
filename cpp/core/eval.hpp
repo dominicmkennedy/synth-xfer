@@ -3,8 +3,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <sstream>
-#include <string>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -60,6 +58,112 @@ std::vector<Dom<ResBw>> run_transformer(const std::uintptr_t &xfer_addr,
 template <template <std::size_t> class Dom, std::size_t ResBw,
           std::size_t... BWs>
   requires(Domain<Dom, ResBw> && (Domain<Dom, BWs> && ...))
+class EvalPattern {
+public:
+  static constexpr std::size_t num_args = sizeof...(BWs);
+
+  using ResultD = Dom<ResBw>;
+  using ArgsT = Args<Dom, BWs...>;
+  using XferFn = detail::xfer_fn_t<num_args, ResultD::arity>;
+
+  struct ExactRow {
+    ArgsT args;
+    ResultD best;
+    double weight;
+  };
+
+  struct NormRow {
+    ArgsT args;
+    double weight;
+  };
+
+  EvalPattern(XferFn sequential, XferFn composite)
+      : sequential_xfer_(std::move(sequential)),
+        composite_xfer_(std::move(composite)) {}
+
+  [[nodiscard]] std::pair<double, double>
+  eval_pattern_exact(const std::vector<ExactRow> &rows) const {
+    long double total_weight = 0.0L;
+    long double sequential_correct_weight = 0.0L;
+    long double composite_correct_weight = 0.0L;
+
+    for (const auto &row : rows) {
+      const long double inv_weight =
+          1.0L / static_cast<long double>(row.weight);
+      total_weight += inv_weight;
+
+      const auto [sequential_result, composite_result] = eval_both(row.args);
+
+      if (sequential_result == row.best) {
+        sequential_correct_weight += inv_weight;
+      }
+      if (composite_result == row.best) {
+        composite_correct_weight += inv_weight;
+      }
+    }
+
+    if (total_weight == 0.0L) {
+      return {0.0, 0.0};
+    }
+
+    return {
+        static_cast<double>(100.0L * sequential_correct_weight / total_weight),
+        static_cast<double>(100.0L * composite_correct_weight / total_weight),
+    };
+  }
+
+  [[nodiscard]] std::pair<double, double>
+  eval_pattern_norm(const std::vector<NormRow> &rows) const {
+    long double total_weight = 0.0L;
+    long double sequential_norm_weight = 0.0L;
+    long double composite_norm_weight = 0.0L;
+
+    for (const auto &row : rows) {
+      const long double inv_weight =
+          1.0L / static_cast<long double>(row.weight);
+      total_weight += inv_weight;
+
+      const auto [sequential_result, composite_result] = eval_both(row.args);
+
+      sequential_norm_weight +=
+          static_cast<long double>(sequential_result.norm()) * inv_weight;
+
+      composite_norm_weight +=
+          static_cast<long double>(composite_result.norm()) * inv_weight;
+    }
+
+    if (total_weight == 0.0L) {
+      return {0.0, 0.0};
+    }
+
+    return {
+        static_cast<double>(sequential_norm_weight / total_weight),
+        static_cast<double>(composite_norm_weight / total_weight),
+    };
+  }
+
+private:
+  [[nodiscard]] static ResultD eval_one(const XferFn &fn, const ArgsT &args) {
+    return [&]<std::size_t... Is>(std::index_sequence<Is...>) -> ResultD {
+      return ResultD(
+          unpack<Dom, ResBw>(fn(pack<Dom, BWs>(std::get<Is>(args).v)...)));
+    }(std::make_index_sequence<num_args>{});
+  }
+
+  [[nodiscard]] std::pair<ResultD, ResultD> eval_both(const ArgsT &args) const {
+    return {
+        eval_one(sequential_xfer_, args),
+        eval_one(composite_xfer_, args),
+    };
+  }
+
+  XferFn sequential_xfer_;
+  XferFn composite_xfer_;
+};
+
+template <template <std::size_t> class Dom, std::size_t ResBw,
+          std::size_t... BWs>
+  requires(Domain<Dom, ResBw> && (Domain<Dom, BWs> && ...))
 class Eval {
 public:
   static constexpr std::size_t N = sizeof...(BWs);
@@ -69,7 +173,6 @@ public:
 
   using ArgsTuple = std::tuple<Dom<BWs>...>;
   using Row = std::tuple<Args<Dom, BWs...>, ResultD>;
-  using EvalVec = ToEval<Dom, ResBw, BWs...>;
   using XferFn = detail::xfer_fn_t<N, arity>;
 
 private:
@@ -90,11 +193,11 @@ public:
       refFns[i] = reinterpret_cast<XferFn>(refAddrs[i]);
   }
 
-  Results eval(const EvalVec &toEval) const {
+  Results eval(const std::vector<Row> &to_eval) const {
     Results r{static_cast<unsigned int>(xfrFns.size()), ResBw,
-              ResultD::num_levels, maxUnsoundExamples, maxImpreciseExamples};
+              maxUnsoundExamples, maxImpreciseExamples};
 
-    for (const Row &row : toEval) {
+    for (const Row &row : to_eval) {
       const ArgsTuple &args = std::get<0>(row);
       const ResultD &best = std::get<1>(row);
       evalSingle(args, best, r);
@@ -130,19 +233,20 @@ private:
     ResultD ref = DomainHelpers::meetAll(run_fns(refFns));
 
     bool solved = (ref == best);
-    unsigned long baseDis = ref.distance(best);
+    double base_distance = dist(ref, best);
 
     for (unsigned int i = 0; i < synth_results.size(); ++i) {
       ResultD synth_after_meet = ref.meet(synth_results[i]);
       bool sound = DomainHelpers::isSuperset(synth_after_meet, best);
       bool exact = (synth_after_meet == best);
-      unsigned long dis = synth_after_meet.distance(best);
-      unsigned long soundDis = sound ? dis : baseDis;
-      // Xuanyu: Creating a CaseExample is expensive, so we passed things to incResult and create it only when necessary.
-      r.incResult(sound, dis, exact, solved, soundDis,
-                  args, synth_after_meet, best, dis, i);
+      double distance = dist(synth_after_meet, best);
+      double sound_distance = sound ? distance : base_distance;
+      // Xuanyu: Creating a CaseExample is expensive, so we passed things to
+      // incResult and create it only when necessary.
+      r.incResult(sound, exact, solved, sound_distance, args, synth_after_meet,
+                  best, distance, i);
     }
 
-    r.incCases(solved, baseDis);
+    r.incCases(solved, base_distance);
   }
 };

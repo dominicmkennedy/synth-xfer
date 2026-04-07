@@ -7,7 +7,7 @@ from xdsl.parser import ModuleOp
 from z3 import BitVecNumRef, FuncDeclRef, ModelRef
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval import run_concrete_fn
+from synth_xfer._util.eval import parse_to_run_inputs, run_concrete_fn, run_xfer_fns
 from synth_xfer._util.parse_mlir import (
     HelperFuncs,
     get_fns,
@@ -15,9 +15,8 @@ from synth_xfer._util.parse_mlir import (
     parse_mlir_mod,
 )
 from synth_xfer._util.verifier import verify_transfer_function
+from synth_xfer._util.xfer_data import resolve_xfer_name
 from synth_xfer.cli.args import int_list
-from synth_xfer.cli.eval_final import resolve_xfer_name
-from synth_xfer.cli.run_xfer import run_xfer_fn
 
 
 def verify_function(
@@ -181,9 +180,13 @@ def _print_counterexample(
         conc_output = None
     else:
         try:
-            abst_output = run_xfer_fn(
-                domain, bw, [tuple(abst_args)], mlir_mod, xfer_name
-            )[0]
+            input_args = parse_to_run_inputs(domain, bw, func_arity, [tuple(abst_args)])
+            abst_output = run_xfer_fns(
+                domain,
+                {bw: input_args},
+                mlir_mod,
+                [xfer_name],
+            )[0][0]
         except ImportError as e:
             abst_output = None
             print(f"Warning: Could not execute due {e}")

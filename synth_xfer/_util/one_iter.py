@@ -3,7 +3,6 @@ from time import perf_counter
 from xdsl.dialects.builtin import StringAttr
 from xdsl.dialects.func import FuncOp
 
-from synth_xfer._util.cond_func import FunctionWithCondition
 from synth_xfer._util.cost_model import decide
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.log import get_logger
@@ -11,6 +10,7 @@ from synth_xfer._util.mcmc_sampler import MCMCSampler
 from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.random import Random
 from synth_xfer._util.solution_set import EvalFn, SolutionSet
+from synth_xfer._util.xfer_func import XferFunc
 
 
 def _build_eval_list(
@@ -19,7 +19,7 @@ def _build_eval_list(
     p: range,
     c: range,
     prec_func_after_distribute: list[FuncOp],
-) -> list[FunctionWithCondition]:
+) -> list[XferFunc]:
     """
     build the parameters of eval_transfer_func
     input:
@@ -28,19 +28,19 @@ def _build_eval_list(
     funcs          =  [ ..mcmc_sp.. , ..mcmc_p.. ,..prec_set..]
     conds          =  [  nothing    ,  nothing   , ..mcmc_c.. ]
     """
-    lst: list[FunctionWithCondition] = []
+    lst: list[XferFunc] = []
     for i in sp:
-        fwc = FunctionWithCondition(mcmc_proposals[i].clone())
-        fwc.set_func_name(f"{mcmc_proposals[i].sym_name.data}{i}")
+        fwc = XferFunc(mcmc_proposals[i].clone())
+        fwc.set_name(f"{mcmc_proposals[i].sym_name.data}{i}")
         lst.append(fwc)
     for i in p:
-        fwc = FunctionWithCondition(mcmc_proposals[i].clone())
-        fwc.set_func_name(f"{mcmc_proposals[i].sym_name.data}{i}")
+        fwc = XferFunc(mcmc_proposals[i].clone())
+        fwc.set_name(f"{mcmc_proposals[i].sym_name.data}{i}")
         lst.append(fwc)
     for i in c:
         prec_func = prec_func_after_distribute[i - c.start].clone()
-        fwc = FunctionWithCondition(prec_func, mcmc_proposals[i].clone())
-        fwc.set_func_name(f"{prec_func.sym_name.data}_abd_{i}")
+        fwc = XferFunc(prec_func, mcmc_proposals[i].clone())
+        fwc.set_name(f"{prec_func.sym_name.data}_abd_{i}")
         lst.append(fwc)
 
     return lst
@@ -92,10 +92,10 @@ def synthesize_one_iteration(
         sound_most_improve_tfs.append((init_tf, spl.current_cmp, 0))
         most_improve_tfs.append((init_tf, spl.current_cmp, 0))
 
-    # MCMC start
+    logger.info(f"\n{'=' * 60}")
     logger.info(
-        f"Iter {ith_iter}: Start {num_mcmc - len(c_range)} MCMC to sampling programs of length {program_length}."
-        f"Start {len(c_range)} MCMC to sample abductions. Each one is run for {num_steps} steps..."
+        f"Iter {ith_iter}: {num_mcmc - len(c_range)} synthesis MCMC + {len(c_range)} abduction MCMC,"
+        f" program length {program_length}, {num_steps} steps each"
     )
 
     for rnd in range(num_steps):
@@ -161,15 +161,15 @@ def synthesize_one_iteration(
             for i in range(num_mcmc):
                 logger.debug(f"{i}_{most_improve_tfs[i][2]}\n{most_improve_tfs[i][1]}")
 
-    candidates_sp: list[FunctionWithCondition] = []
+    candidates_sp: list[XferFunc] = []
     candidates_p: list[FuncOp] = []
-    candidates_c: list[FunctionWithCondition] = []
+    candidates_c: list[XferFunc] = []
     for i in list(sp_range) + list(p_range):
         if (
             sound_most_improve_tfs[i][1].is_sound()
             and sound_most_improve_tfs[i][1].get_potential_improve() > 0
         ):
-            candidates_sp.append(FunctionWithCondition(sound_most_improve_tfs[i][0]))
+            candidates_sp.append(XferFunc(sound_most_improve_tfs[i][0]))
         if (
             not most_improve_tfs[i][1].is_sound()
             and most_improve_tfs[i][1].get_unsolved_exacts() > 0
@@ -181,7 +181,7 @@ def synthesize_one_iteration(
             and sound_most_improve_tfs[i][1].get_potential_improve() > 0
         ):
             candidates_c.append(
-                FunctionWithCondition(
+                XferFunc(
                     prec_set[i - len(sp_range) - len(p_range)],
                     sound_most_improve_tfs[i][0],
                 )

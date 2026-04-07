@@ -68,7 +68,7 @@ def _verify_pattern(
         return True, None
 
 
-def _lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
+def lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
     SMTLowerer.rewrite_patterns = {**func_to_smt_patterns}
     SMTLowerer.type_lowerers = {
         IntegerType: IntegerTypeSemantics(),
@@ -122,7 +122,7 @@ def _create_smt_function(func: FuncOp, width: int, ctx: Context) -> DefineFunOp:
     """
 
     module = ModuleOp([func.clone()])
-    _lower_to_smt_module(module, width, ctx)
+    lower_to_smt_module(module, width, ctx)
     resultFunc = module.ops.first
     assert isinstance(resultFunc, DefineFunOp)
     return resultFunc
@@ -272,7 +272,7 @@ def verify_transfer_function(
     concrete_func_name: str = concrete_func.sym_name.data
     assert concrete_func_name is not None
 
-    _lower_to_smt_module(smt_module, width, ctx)
+    lower_to_smt_module(smt_module, width, ctx)
 
     func_name_to_smt_func: dict[str, DefineFunOp] = {}
     for op in smt_module.ops:

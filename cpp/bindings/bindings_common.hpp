@@ -56,7 +56,12 @@ using EnumHighThunk = py::object (*)(std::uintptr_t,
                                      unsigned int, unsigned int, unsigned int,
                                      std::shared_ptr<rngdist::Sampler>);
 using EvalThunk = Results (*)(py::handle, const std::vector<std::uintptr_t> &,
-                              const std::vector<std::uintptr_t> &, unsigned int, unsigned int);
+                              const std::vector<std::uintptr_t> &, unsigned int,
+                              unsigned int);
+using EvalPatternThunk = std::pair<double, double> (*)(py::handle,
+                                                       const std::vector<double> &,
+                                                       std::uintptr_t,
+                                                       std::uintptr_t);
 using RunThunk = py::object (*)(py::handle, std::uintptr_t);
 using LenThunk = std::size_t (*)(py::handle);
 using GetItemThunk = py::object (*)(py::handle, std::size_t);
@@ -65,6 +70,8 @@ using IterThunk = py::object (*)(py::handle);
 void bind_enum_funcs(py::module_ &m, const std::string &fn_name,
                      EnumLowThunk low, EnumMidThunk mid, EnumHighThunk high);
 void bind_eval_func(py::module_ &m, const std::string &fn_name, EvalThunk eval);
+void bind_eval_pattern_func(py::module_ &m, const std::string &fn_name,
+                            EvalPatternThunk eval);
 void bind_run_func(py::module_ &m, const std::string &fn_name, RunThunk run);
 template <typename PyClass>
 void bind_sequence_protocol(PyClass &cls, LenThunk len, GetItemThunk getitem,
@@ -89,10 +96,10 @@ void register_domain_class(py::module_ &m) {
   cls.def_static("top", []() { return D<BW>::top(); });
   cls.def_static("bottom", []() { return D<BW>::bottom(); });
   cls.def(py::init([](const std::string &s) { return D<BW>::parse(s); }));
-  cls.def("size", [](const D<BW> &self) { return self.size(); });
+  cls.def("norm", [](const D<BW> &self) { return self.norm(); });
   cls.def(
-      "distance",
-      [](const D<BW> &self, const D<BW> &rhs) { return self.distance(rhs); },
+      "dist",
+      [](const D<BW> &self, const D<BW> &rhs) { return dist(self, rhs); },
       py::arg("rhs"));
   cls.def("__eq__",
           [](const D<BW> &self, const D<BW> &rhs) { return self == rhs; });
@@ -230,6 +237,85 @@ void register_eval_domain(py::module_ &m) {
       });
 }
 
+template <typename EvalPatternT, typename EvalVec>
+std::vector<typename EvalPatternT::ExactRow>
+make_exact_pattern_rows(const EvalVec &to_eval,
+                        const std::vector<double> &weights) {
+  if (to_eval.size() != weights.size()) {
+    throw py::value_error("weights length must match to_eval");
+  }
+
+  std::vector<typename EvalPatternT::ExactRow> out;
+  out.reserve(to_eval.size());
+  for (std::size_t i = 0; i < to_eval.size(); ++i) {
+    const auto &[args, best] = to_eval[i];
+    out.push_back({args, best, weights[i]});
+  }
+  return out;
+}
+
+template <typename EvalPatternT, typename RunVec>
+std::vector<typename EvalPatternT::NormRow>
+make_norm_pattern_rows(const RunVec &to_run,
+                       const std::vector<double> &weights) {
+  if (to_run.size() != weights.size()) {
+    throw py::value_error("weights length must match to_run");
+  }
+
+  std::vector<typename EvalPatternT::NormRow> out;
+  out.reserve(to_run.size());
+  for (std::size_t i = 0; i < to_run.size(); ++i) {
+    out.push_back({to_run[i], weights[i]});
+  }
+  return out;
+}
+
+template <template <std::size_t> class Dom, std::size_t ResBw,
+          std::size_t... BWs>
+  requires(Domain<Dom, ResBw> && (Domain<Dom, BWs> && ...))
+void register_eval_pattern_domain(py::module_ &m) {
+  using EvalVec = ToEval<Dom, ResBw, BWs...>;
+  using RunVec = ArgsVec<Dom, BWs...>;
+  using EvalPatternT = EvalPattern<Dom, ResBw, BWs...>;
+
+  std::string dname = std::string(Dom<ResBw>::name);
+  std::string dname_lower = to_lower_ascii(std::move(dname));
+
+  std::string exact_fn_name =
+      "eval_pattern_exact_" + dname_lower + "_" + std::to_string(ResBw);
+  std::string norm_fn_name = "eval_pattern_norm_" + dname_lower;
+  ((exact_fn_name += "_" + std::to_string(BWs)), ...);
+  ((norm_fn_name += "_" + std::to_string(BWs)), ...);
+
+  bind_eval_pattern_func(
+      m, exact_fn_name,
+      +[](py::handle to_eval, const std::vector<double> &weights,
+          std::uintptr_t sequential_addr,
+          std::uintptr_t composite_addr) -> std::pair<double, double> {
+        const EvalVec &v = py::cast<const EvalVec &>(to_eval);
+        auto exact_rows = make_exact_pattern_rows<EvalPatternT>(v, weights);
+        py::gil_scoped_release release;
+        return EvalPatternT{
+            reinterpret_cast<typename EvalPatternT::XferFn>(sequential_addr),
+            reinterpret_cast<typename EvalPatternT::XferFn>(composite_addr)}
+            .eval_pattern_exact(exact_rows);
+      });
+
+  bind_eval_pattern_func(
+      m, norm_fn_name,
+      +[](py::handle to_run, const std::vector<double> &weights,
+          std::uintptr_t sequential_addr,
+          std::uintptr_t composite_addr) -> std::pair<double, double> {
+        const RunVec &v = py::cast<const RunVec &>(to_run);
+        auto norm_rows = make_norm_pattern_rows<EvalPatternT>(v, weights);
+        py::gil_scoped_release release;
+        return EvalPatternT{
+            reinterpret_cast<typename EvalPatternT::XferFn>(sequential_addr),
+            reinterpret_cast<typename EvalPatternT::XferFn>(composite_addr)}
+            .eval_pattern_norm(norm_rows);
+      });
+}
+
 template <template <std::size_t> class Dom, std::size_t ResBw,
           std::size_t... BWs>
   requires(Domain<Dom, ResBw> && (Domain<Dom, BWs> && ...))
@@ -308,6 +394,7 @@ void register_uniform_arity(py::module_ &m) {
 
     register_enum_domain<Dom, BW, (static_cast<void>(Is), BW)...>(m);
     register_eval_domain<Dom, BW, (static_cast<void>(Is), BW)...>(m);
+    register_eval_pattern_domain<Dom, BW, (static_cast<void>(Is), BW)...>(m);
     register_run_domain<Dom, BW, (static_cast<void>(Is), BW)...>(m);
   }(std::make_index_sequence<N>{});
 }

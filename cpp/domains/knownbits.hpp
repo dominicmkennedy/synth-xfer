@@ -85,26 +85,22 @@ public:
     return res;
   }
 
-  constexpr std::uint64_t distance(const KnownBits &rhs) const noexcept {
-    if (isBottom() && rhs.isBottom())
-      return 0;
-
-    if (isBottom())
-      return BW - (rhs.zero() ^ rhs.one()).popcount();
-
-    if (rhs.isBottom())
-      return BW - (zero() ^ one()).popcount();
-
-    return (zero() ^ rhs.zero()).popcount() + (one() ^ rhs.one()).popcount();
-  }
-
   constexpr std::uint64_t size() const noexcept {
     if (isBottom())
       return 0;
     if (isTop())
       return APInt<BW>::getMaxValue().getZExtValue();
 
-    return (1ULL << distance(KnownBits::bottom())) - 1;
+    uint32_t unknown_bits = (~zero() & ~one()).popcount();
+    return (1ULL << unknown_bits) - 1;
+  }
+
+  constexpr double norm() const noexcept {
+    if (isBottom())
+      return 0.0;
+
+    uint32_t unknown_bits = (~zero() & ~one()).popcount();
+    return static_cast<double>(unknown_bits + 1) / static_cast<double>(BW + 1);
   }
 
   static constexpr KnownBits fromConcrete(const APInt<BW> &x) noexcept {

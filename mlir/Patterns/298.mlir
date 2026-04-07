@@ -1,19 +1,17 @@
 module {
   func.func @concrete_op(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer) -> !transfer.integer {
     %0 = "transfer.or"(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = "transfer.or"(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %2 = "transfer.lshr"(%1, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %3 = "transfer.or"(%0, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %4 = "transfer.lshr"(%3, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    return %4 : !transfer.integer
+    %1 = "transfer.lshr"(%0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %2 = "transfer.or"(%0, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %3 = "transfer.lshr"(%2, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    return %3 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer, %arg2: !transfer.integer, %arg3: !transfer.integer) -> i1 {
     %0 = "transfer.or"(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = "transfer.or"(%arg2, %arg3) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %2 = "transfer.lshr"(%1, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %ssa_2_con_0_z = func.call @shift_lt_bw(%1, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %3 = "transfer.or"(%0, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %ssa_4_con_0_z = func.call @shift_lt_bw(%3, %arg0) : (!transfer.integer, !transfer.integer) -> i1
+    %1 = "transfer.lshr"(%0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %ssa_1_con_0_z = func.call @shift_lt_bw(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %2 = "transfer.or"(%0, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %ssa_3_con_0_z = func.call @shift_lt_bw(%2, %arg0) : (!transfer.integer, !transfer.integer) -> i1
     %and_0 = arith.andi %ssa_2_con_0_z, %ssa_4_con_0_z : i1
     return %and_0 : i1
   }

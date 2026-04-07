@@ -40,7 +40,7 @@ def test_jit_with_kb_and():
         res = get_per_bit(raw_res)[0]
         assert (
             str(res).strip()
-            == "bw: 4  all: 6561  s: 6561  e: 6561  uall: 6480  ue: 6480  dis: 0       bdis: 4374.0  sdis: 0"
+            == "bw: 4  all: 6561  s: 6561  e: 6561  uall: 6480  ue: 6480  dis: 0       bdis: 3499.2  sdis: 0"
         )
 
         conc_op_addr = jit.get_fn_ptr("concrete_op_8_shim")
@@ -77,7 +77,7 @@ def test_jit_with_ucr_add():
         res = get_per_bit(raw_res)[0]
         assert (
             str(res).strip()
-            == "bw: 4  all: 18496 s: 18496 e: 18496 uall: 6920  ue: 6920  dis: 0       bdis: 4243.2  sdis: 0"
+            == "bw: 4  all: 18496 s: 18496 e: 18496 uall: 6920  ue: 6920  dis: 0       bdis: 2526.39 sdis: 0"
         )
 
         conc_op_addr = jit.get_fn_ptr("concrete_op_8_shim")

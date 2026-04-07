@@ -72,25 +72,21 @@ public:
     return res;
   }
 
-  constexpr std::uint64_t distance(const UConstRange &rhs) const noexcept {
-    if (isBottom() && rhs.isBottom())
+  constexpr std::uint64_t size() const noexcept {
+    if (isBottom())
       return 0;
 
-    if (isBottom())
-      return APIntOps::abdu(rhs.lower(), rhs.upper()).getZExtValue();
-
-    if (rhs.isBottom())
-      return APIntOps::abdu(lower(), upper()).getZExtValue();
-
-    const std::uint64_t ld =
-        APIntOps::abdu(lower(), rhs.lower()).getZExtValue();
-    const std::uint64_t ud =
-        APIntOps::abdu(upper(), rhs.upper()).getZExtValue();
-    return ld + ud;
+    return APIntOps::abdu(lower(), upper()).getZExtValue();
   }
 
-  constexpr std::uint64_t size() const noexcept {
-    return distance(UConstRange::bottom());
+  constexpr double norm() const noexcept {
+    if (isBottom())
+      return 0.0;
+    if (isTop())
+      return 1.0;
+
+    const uint64_t diff = APIntOps::abdu(lower(), upper()).getZExtValue() + 1;
+    return std::log2(static_cast<double>(diff)) / static_cast<double>(BW);
   }
 
   static constexpr UConstRange fromConcrete(const APInt<BW> &x) noexcept {

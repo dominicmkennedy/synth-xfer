@@ -28,11 +28,31 @@ class _Readable(Protocol):
     def read_text(self) -> str: ...
 
 
-def parse_mlir(p: _Readable | str) -> Operation:
+def parse_mlir(p: _Readable) -> Operation:
     func_str = p if isinstance(p, str) else p.read_text()
     func_name = "<text>" if isinstance(p, str) else p.name
 
     return Parser(_ctx, func_str, func_name).parse_op()
+
+
+def inline_mod(mod: ModuleOp) -> ModuleOp:
+    """NOTE: Modifies mod inplace"""
+    FunctionCallInline(False, get_fns(mod)).apply(_ctx, mod)
+
+    return mod
+
+
+def get_solution(p: Path, d: AbstractDomain) -> FuncOp:
+    sol_mod = parse_mlir(p)
+    assert isinstance(sol_mod, ModuleOp)
+
+    base_path = Path(__file__).parent.parent.parent / "mlir" / str(d)
+    meet = parse_mlir_func(base_path / "meet.mlir")
+    top = parse_mlir_func(base_path / "top.mlir")
+    sol_mod.body.block.add_ops([meet, top])
+    inline_mod(sol_mod)
+
+    return get_fns(sol_mod)["solution"]
 
 
 def parse_mlir_func(p: str | _Readable) -> FuncOp:
@@ -51,14 +71,11 @@ def parse_mlir_mod(p: str | _Readable, inline: bool = False) -> ModuleOp:
 
     if isinstance(mod, ModuleOp):
         if inline:
-            FunctionCallInline(False, get_fns(mod)).apply(_ctx, mod)
+            inline_mod(mod)
 
         return mod
     elif isinstance(mod, FuncOp):
-        wrapped = ModuleOp([mod])
-        if inline:
-            FunctionCallInline(False, get_fns(wrapped)).apply(_ctx, wrapped)
-        return wrapped
+        return ModuleOp([mod])
     else:
         raise ValueError(f"mlir in '{func_name}' is not a ModuleOp")
 

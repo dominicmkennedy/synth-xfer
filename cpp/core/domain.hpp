@@ -39,7 +39,11 @@ concept Domain =
       { d.meet(d) } noexcept -> std::same_as<D<BW>>;
       { d.join(d) } noexcept -> std::same_as<D<BW>>;
       { d.toConcrete() } -> std::same_as<std::vector<APInt<BW>>>;
-      { d.distance(d) } noexcept -> std::same_as<std::uint64_t>;
+      // norm(x) = log2(|gamma(x)|) / BW
+      // such that: norm(top) = 1 and norm(bot) = 0
+      { d.norm() } noexcept -> std::same_as<double>;
+      // size(x) = min(|gamma(x)| - 1, 0)
+      // this avoids int overflow
       { d.size() } noexcept -> std::same_as<std::uint64_t>;
       { d.sample_concrete(rng) } -> std::same_as<APInt<BW>>;
 
@@ -105,6 +109,18 @@ template <template <std::size_t> class D, std::size_t BW>
   requires Domain<D, BW>
 bool constexpr isSuperset(const D<BW> &lhs, const D<BW> &rhs) {
   return lhs.meet(rhs) == rhs;
+}
+
+template <template <std::size_t> class D, std::size_t BW>
+  requires Domain<D, BW>
+constexpr double dist(const D<BW> &lhs, const D<BW> &rhs) noexcept {
+  if (isSuperset(lhs, rhs))
+    return lhs.norm() - rhs.norm();
+  if (isSuperset(rhs, lhs))
+    return rhs.norm() - lhs.norm();
+  // assert False
+  assert(false && "Can't compute distance between incomparable elements");
+  __builtin_unreachable();
 }
 
 template <template <std::size_t> class D, std::size_t BW>
