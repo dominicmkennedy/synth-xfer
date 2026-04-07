@@ -36,16 +36,15 @@ class Jit:
 
         return llvm.create_mcjit_compiler(backing_mod, tm), tm, target
 
-    engine, tm, target = _create_exec_engine()
-
     def __init__(self) -> None:
+        self.engine, self.tm, self.target = self._create_exec_engine()
         self.mods: list[llvm.ModuleRef] = []
         self._closed = False
 
     def __enter__(self) -> "Jit":
         return self
 
-    def __exit__(self, exc_type, exc, tb) -> None:
+    def __exit__(self, _exc_type, _exc, _tb) -> None:
         if self._closed:
             return
         for mod in self.mods:

@@ -43,9 +43,6 @@ from xdsl_smt.utils.transfer_function_util import (
 )
 from z3 import ModelRef, Solver, parse_smt2_string, sat, unknown
 
-# TODO do we still need this
-_TMP_MODULE: list[ModuleOp] = []
-
 
 def _verify_pattern(
     ctx: Context, op: ModuleOp, timeout: int
@@ -120,17 +117,13 @@ def _add_poison_to_conc_fn(concrete_func: FuncOp) -> FuncOp:
 
 def _create_smt_function(func: FuncOp, width: int, ctx: Context) -> DefineFunOp:
     """
-    Input: a function with type FuncOp
-    Return: the function lowered to SMT dialect with specified width
-
-    We might reuse some function with specific width so we save it to global TMP_MODULE
-    Class FunctionCollection is the only caller of this function and maintains all generated SMT functions
+    Input: a FuncOp function
+    Return: An SMT DefineFunOp at the specified width
     """
 
-    global _TMP_MODULE
-    _TMP_MODULE.append(ModuleOp([func.clone()]))
-    _lower_to_smt_module(_TMP_MODULE[-1], width, ctx)
-    resultFunc = _TMP_MODULE[-1].ops.first
+    module = ModuleOp([func.clone()])
+    _lower_to_smt_module(module, width, ctx)
+    resultFunc = module.ops.first
     assert isinstance(resultFunc, DefineFunOp)
     return resultFunc
 

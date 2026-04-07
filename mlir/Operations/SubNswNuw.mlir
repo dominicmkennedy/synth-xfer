@@ -1,22 +1,14 @@
-"builtin.module"() ({
-  "func.func"() ({
-  ^bb0(%arg0: !transfer.integer, %arg1: !transfer.integer):
-    %result = "transfer.sub"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) ->!transfer.integer
-    "func.return"(%result) : (!transfer.integer) -> ()
-  }) {function_type = (!transfer.integer,!transfer.integer) -> !transfer.integer, sym_name = "concrete_op"} : () -> ()
-
-  "func.func"() ({
-  ^bb0(%arg0: !transfer.integer, %arg1: !transfer.integer):
-    %nuw = "transfer.cmp"(%arg0, %arg1) {predicate=9:i64}: (!transfer.integer, !transfer.integer) -> i1
-
-    %res = "transfer.sub"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %xor0 = "transfer.xor"(%arg0, %res) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %xor1 = "transfer.xor"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %andres = "transfer.and"(%xor0, %xor1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %zero = "transfer.constant"(%arg0){value=0:index} : (!transfer.integer) -> !transfer.integer
-    %nsw = "transfer.cmp"(%andres, %zero) {predicate=5:i64}: (!transfer.integer, !transfer.integer) -> i1
-
-    %check = "arith.andi"(%nuw, %nsw) : (i1, i1) -> i1
-    "func.return"(%check) : (i1) -> ()
-  }) {function_type = (!transfer.integer, !transfer.integer) -> i1, sym_name = "op_constraint"} : () -> ()
-}): () -> ()
+module {
+  func.func @concrete_op(%arg0: !transfer.integer, %arg1: !transfer.integer) -> !transfer.integer {
+    %0 = "transfer.sub"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    return %0 : !transfer.integer
+  }
+  func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+    %ssub_ov = "transfer.ssub_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %usub_ov = "transfer.usub_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %any_ov = arith.ori %ssub_ov, %usub_ov : i1
+    %true = arith.constant true
+    %no_ov = arith.xori %any_ov, %true : i1
+    return %no_ov : i1
+  }
+}

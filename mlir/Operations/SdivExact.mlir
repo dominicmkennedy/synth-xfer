@@ -1,29 +1,22 @@
-"builtin.module"() ({
-  "func.func"() ({
-  ^bb0(%arg0: !transfer.integer, %arg1: !transfer.integer):
-    %result = "transfer.sdiv"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) ->!transfer.integer
-    "func.return"(%result) : (!transfer.integer) -> ()
-  }) {function_type = (!transfer.integer,!transfer.integer) -> !transfer.integer, sym_name = "concrete_op"} : () -> ()
+module {
+  func.func @concrete_op(%arg0: !transfer.integer, %arg1: !transfer.integer) -> !transfer.integer {
+    %0 = "transfer.sdiv"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    return %0 : !transfer.integer
+  }
+  func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+    %const_0 = "transfer.constant"(%arg1) {value = 0 : i64} : (!transfer.integer) -> !transfer.integer
+    %rhs_not_0 = "transfer.cmp"(%const_0, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
 
-"func.func"() ({
-  ^bb0(%arg0: !transfer.integer, %arg1: !transfer.integer):
-    %const0 = "transfer.constant"(%arg1) {value=0:index}:(!transfer.integer)->!transfer.integer
-    %arg1_neq_0 = "transfer.cmp"(%const0, %arg1) {predicate=1:i64}: (!transfer.integer, !transfer.integer) -> i1
-    %arg0_eq_0 = "transfer.cmp"(%const0, %arg0) {predicate=0:i64}: (!transfer.integer, !transfer.integer) -> i1
-    %arg0_plus_arg0 = "transfer.add"(%arg0, %arg0) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %arg0_plus_arg0_neq_0 = "transfer.cmp"(%arg0_plus_arg0, %const0) {predicate=1:i64}: (!transfer.integer, !transfer.integer) -> i1
-    %arg0_neq_smin = "arith.ori"(%arg0_eq_0, %arg0_plus_arg0_neq_0) : (i1, i1) -> i1
-    %minus1 = "transfer.get_all_ones"(%arg0) : (!transfer.integer) -> !transfer.integer
-    %arg1_neq_minus1 = "transfer.cmp"(%minus1, %arg1) {predicate=1:i64}: (!transfer.integer, !transfer.integer) -> i1
-    %not_ub2 = "arith.ori"(%arg0_neq_smin, %arg1_neq_minus1) : (i1, i1) -> i1
-    %not_ub = "arith.andi"(%arg1_neq_0, %not_ub2) : (i1, i1) -> i1
+    %int_min = "transfer.get_signed_min_value"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %lhs_not_int_min = "transfer.cmp"(%int_min, %arg0) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %neg_1 = "transfer.get_all_ones"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %rhs_not_neg_1 = "transfer.cmp"(%neg_1, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %no_overflow = "arith.ori"(%lhs_not_int_min, %rhs_not_neg_1) : (i1, i1) -> i1
+    %no_ub = "arith.andi"(%rhs_not_0, %no_overflow) : (i1, i1) -> i1
 
-    %const1 = "transfer.constant"(%arg1) {value=1:index}:(!transfer.integer)->!transfer.integer
-    %safe_arg1 = "transfer.select"(%arg1_neq_0, %arg1, %const1) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
-    %rem = "transfer.srem"(%arg0, %safe_arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %exact = "transfer.cmp"(%rem, %const0) {predicate=0:i64}: (!transfer.integer, !transfer.integer) -> i1
-
-    %check = "arith.andi"(%exact, %not_ub) : (i1, i1) -> i1
-    "func.return"(%check) : (i1) -> ()
-  }) {function_type = (!transfer.integer, !transfer.integer) -> i1, sym_name = "op_constraint"} : () -> ()
-}) : () -> ()
+    %srem = "transfer.srem"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %exact = "transfer.cmp"(%srem, %const_0) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %res = "arith.andi"(%no_ub, %exact) : (i1, i1) -> i1
+    return %res : i1
+  }
+}

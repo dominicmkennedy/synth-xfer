@@ -6,45 +6,33 @@ module {
     return %2 : !transfer.integer
   }
   func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %true = arith.constant true
     %0 = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = call @add_nuw(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %2 = "transfer.shl"(%0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %3 = call @shl_nuw(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %4 = call @shifting_amount_less_bitwidth(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
-    %5 = "transfer.or"(%arg1, %2) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %6 = call @or_disjoint(%arg1, %2) : (!transfer.integer, !transfer.integer) -> i1
-    %7 = arith.andi %true, %1 : i1
-    %8 = arith.andi %7, %3 : i1
-    %9 = arith.andi %8, %4 : i1
-    %10 = arith.andi %9, %6 : i1
-    return %10 : i1
+    %ssa_0_con_0_z = func.call @add_nuw(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %1 = "transfer.shl"(%0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %ssa_1_con_0_z = func.call @shl_nuw(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_1_con_1_z = func.call @shift_lt_bw(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %ssa_2_con_0_z = func.call @or_disjoint(%arg1, %1) : (!transfer.integer, !transfer.integer) -> i1
+    %and_0 = arith.andi %ssa_0_con_0_z, %ssa_1_con_0_z : i1
+    %and_1 = arith.andi %and_0, %ssa_1_con_1_z : i1
+    %and_2 = arith.andi %and_1, %ssa_2_con_0_z : i1
+    return %and_2 : i1
   }
   func.func @add_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %0 = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %1 = "transfer.cmp"(%0, %arg0) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %2 = "transfer.cmp"(%0, %arg1) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %3 = arith.andi %1, %2 : i1
-    return %3 : i1
+    %uadd_ov = "transfer.uadd_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %true = arith.constant true
+    %no_ov = arith.xori %uadd_ov, %true : i1
+    return %no_ov : i1
   }
   func.func @shl_nuw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
-    %1 = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer
-    %2 = "transfer.cmp"(%arg1, %0) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %3 = "transfer.cmp"(%arg1, %1) {predicate = 7 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %4 = arith.andi %2, %3 : i1
-    %5 = "transfer.countl_zero"(%arg0) : (!transfer.integer) -> !transfer.integer
-    %6 = "transfer.cmp"(%5, %arg1) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %7 = arith.andi %4, %6 : i1
-    return %7 : i1
+    %shl = "transfer.shl"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %lshr = "transfer.lshr"(%shl, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %nuw = "transfer.cmp"(%lshr, %arg0) {predicate = 0 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    return %nuw : i1
   }
-  func.func @shifting_amount_less_bitwidth(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
-    %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer
-    %1 = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer
-    %2 = "transfer.cmp"(%arg1, %0) {predicate = 9 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %3 = "transfer.cmp"(%arg1, %1) {predicate = 7 : i64} : (!transfer.integer, !transfer.integer) -> i1
-    %4 = arith.andi %2, %3 : i1
-    return %4 : i1
+  func.func @shift_lt_bw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+    %bitwidth = "transfer.get_bit_width"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %shift_amt_lt_bw = "transfer.cmp"(%arg1, %bitwidth) {predicate = 6 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    return %shift_amt_lt_bw : i1
   }
   func.func @or_disjoint(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %0 = "transfer.constant"(%arg1) {value = 0 : index} : (!transfer.integer) -> !transfer.integer

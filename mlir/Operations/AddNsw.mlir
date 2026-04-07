@@ -1,18 +1,12 @@
-"builtin.module"() ({
-  "func.func"() ({
-  ^bb0(%arg0: !transfer.integer, %arg1: !transfer.integer):
-    %result = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) ->!transfer.integer
-    "func.return"(%result) : (!transfer.integer) -> ()
-  }) {function_type = (!transfer.integer,!transfer.integer) -> !transfer.integer, sym_name = "concrete_op"} : () -> ()
-
-  "func.func"() ({
-  ^bb0(%arg0: !transfer.integer, %arg1: !transfer.integer):
-    %sum = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %xor0 = "transfer.xor"(%arg0, %sum) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %xor1 = "transfer.xor"(%arg1, %sum) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %andres = "transfer.and"(%xor0, %xor1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
-    %zero = "transfer.constant"(%arg0){value=0:index} : (!transfer.integer) -> !transfer.integer
-    %and_lt_zero = "transfer.cmp"(%andres, %zero) {predicate=5:i64}: (!transfer.integer, !transfer.integer) -> i1
-    "func.return"(%and_lt_zero) : (i1) -> ()
-  }) {function_type = (!transfer.integer, !transfer.integer) -> i1, sym_name = "op_constraint"} : () -> ()
-}): () -> ()
+module {
+  func.func @concrete_op(%arg0: !transfer.integer, %arg1: !transfer.integer) -> !transfer.integer {
+    %0 = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    return %0 : !transfer.integer
+  }
+  func.func @op_constraint(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
+    %sadd_ov = "transfer.sadd_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %true = arith.constant true
+    %no_ov = arith.xori %sadd_ov, %true : i1
+    return %no_ov : i1
+  }
+}
