@@ -217,7 +217,7 @@ def run_compress_task(
     return SynthesisResult(
         task=target.task,
         solution_text=target_text,
-        solution_iters = target.solution_iters,
+        solution_iters=target.solution_iters,
         transformer_path=target.transformer_path,
         eval_summary=target.eval_summary,
     )
