@@ -223,15 +223,13 @@ def _format_eval_examples_for_agent(
 ) -> str:
     """Optional multi-line suffix: legend plus unsound/imprecise CaseExample lines per bitwidth."""
     if not any(
-        res.unsound_examples or res.imprecise_examples
-        for res in eval_result.per_bit_res
+        res.unsound_examples or res.imprecise_examples for res in eval_result.per_bit_res
     ):
         return ""
 
     lines: list[str] = [
         "",
-        "Counterexamples (eval uses abstract inputs for this domain; your transformer is "
-        "evaluated after meet with the sound baseline in this pipeline):",
+        "Counterexamples:",
         "How to read each example line:",
         "  • The `( ... )` before `->` lists abstract inputs in MLIR argument order: first = %0, then %1, and so on.",
         "  • After `->`: your abstract output in this eval; `best` is the optimal abstract output for that input.",
@@ -241,9 +239,11 @@ def _format_eval_examples_for_agent(
             [
                 "  • KnownBits: each input/output is one string of length = bw above; bits are MSB→LSB (left to right). "
                 "`0` and `1` are known; `?` is unknown.",
-                "  • Imprecise rows may still show `dist: 0.0000`; treat them as not exactly matching `best`.",
+                "  • Imprecise rows may still show `dist: 0.0000`; treat them as not exactly matching `best`.",  # Todo: fix this dist bug
             ]
         )
+    else:
+        assert False, f"Domain {domain} not supported in example formatting yet"
     lines.extend(
         [
             "",
@@ -281,8 +281,8 @@ def eval_transformer(
     mbw: list[tuple[int, int]] = [],
     hbw: list[tuple[int, int, int]] = [],
     random_seed: int | None = None,
-    unsound_ex: int = 3,
-    imprecise_ex: int = 3,
+    unsound_ex: int = 0,
+    imprecise_ex: int = 0,
 ) -> str:
     """Run eval on a transformer (MLIR string) and return a summary string.
 
