@@ -326,10 +326,21 @@ def main():
         help="Dump full agent run (messages, tool calls, outputs) to output dir",
     )
     parser.add_argument(
+        "--stitch",
+        action="store_true",
+        help="Run library learning with Stitch",
+    )
+    parser.add_argument(
         "--library-instructions",
         type=Path,
         default=Path(__file__).parent / "md" / "library_instructions.md",
         help="Path to library agent instructions file (default: agent/md/library_instructions.md)",
+    )
+    parser.add_argument(
+        "--autodoc-instructions",
+        type=Path,
+        default=Path(__file__).parent / "md" / "autodoc_instructions.md",
+        help="Path to autodoc agent instructions file (default: agent/md/autodoc_instructions.md)",
     )
     parser.add_argument(
         "--library-prompt",
@@ -374,6 +385,7 @@ def main():
 
     for name, path in [
         ("--library-instructions", args.library_instructions),
+        ("--autodoc-instructions", args.autodoc_instructions),
         ("--library-prompt", args.library_prompt),
         ("--ops", args.ops),
     ]:
@@ -396,6 +408,7 @@ def main():
             solution_iters=[],
             transformer_path=None,
             eval_summary=None,
+            solution_iters=[Path(input_file).read_text()],
         )
         corpus.append(result)
 
@@ -403,13 +416,24 @@ def main():
     lib = load_initial_library(args.library_dir)
 
     for rnd in range(args.rounds):
-        lib = run_library_learn_task(
-            version=rnd,
-            previous_library=lib,
-            synthesis_results=corpus,
-            args=args,
-            api_key=api_key,
-        )
+        if args.stitch:
+            lib = run_stitch_learn(
+                version=rnd,
+                previous_library=lib,
+                synthesis_results=corpus,
+                max_instructions=10,
+                top_k=5,
+                args=args,
+                api_key=api_key,
+            )
+        else:
+            lib = run_library_learn_task(
+                version=rnd,
+                previous_library=lib,
+                synthesis_results=corpus,
+                args=args,
+                api_key=api_key,
+            )
 
     print("Library learning complete")
 
