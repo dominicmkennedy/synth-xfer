@@ -9,6 +9,7 @@ from agents import Agent, Runner, function_tool
 from .agent_helper import format_agent_run_dump
 from .util import (
     LibraryState,
+    LibraryFunction,
     SynthesisResult,
     SynthesisTask,
     dump_library,
@@ -18,6 +19,7 @@ from .util import (
     print_token_usage,
     save_file,
 )
+from agent.stitch.search import search_patterns
 
 
 def _run_agent_learn(
@@ -105,6 +107,54 @@ def _run_agent_learn(
     result = Runner.run_sync(agent, prompt, max_turns=max_turns)
 
     return (result.final_output, result)
+
+
+def _name_one_function(
+    prompt: str,
+    model: str,
+    ops_path: Path,
+    instructions_path: Path,
+    max_turns: int,
+    func_to_name: LibraryFunction,
+) -> LibraryFunction:
+    pass
+
+
+def _run_stitch_learn(
+    prompt: str,
+    api_key: str,
+    previous_library: LibraryState,
+    synthesis_results: list[SynthesisResult],
+    model: str,
+    ops_path: Path,
+    instructions_path: Path,
+    max_turns: int,
+    max_instructions: int,
+    top_k: int,
+) -> tuple[LibraryState, object]:
+    """Learns library functions with Stitch. Learns func names and docstring agentically. Returns (LibraryState, run_result)."""
+    del api_key  # Reserved for future model/provider auth parity.
+
+    progs: list[str] = []
+    for result in synthesis_results:
+        progs += result.solution_iters
+
+    result = search_patterns(
+        progs=progs, 
+        max_instructions=max_instructions, 
+        top_k=top_k
+    )
+    hits = [h for h in result.hits if h.pattern.inst_count >= 2]
+
+    lib_funcs: list[LibraryFunction] = []
+    for i in range(len(hits)):
+        lib_funcs.append(
+            LibraryFunction(
+                function_name=f"func{i}",
+                docstring="",
+                source=str(hits[i].pattern)
+            )
+        )
 
 
 def run_library_learn_task(
