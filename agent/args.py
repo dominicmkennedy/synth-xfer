@@ -36,6 +36,7 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         ("--agent-instructions", args.agent_instructions),
         ("--meet-instructions", args.meet_instructions),
         ("--library-instructions", args.library_instructions),
+        ("--autodoc-instructions", args.autodoc_instructions),
         ("--library-prompt", args.library_prompt),
         ("--ops", args.ops),
         ("--template", args.template),
@@ -112,6 +113,11 @@ def parse_args() -> argparse.Namespace:
         help="Dump full agent run (messages, tool calls, outputs) to output dir",
     )
     parser.add_argument(
+        "--stitch",
+        action="store_true",
+        help="Run library learning with Stitch",
+    )
+    parser.add_argument(
         "--max-turns",
         type=int,
         default=20,
@@ -140,6 +146,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         default=Path(__file__).parent / "md" / "compress_instructions.md",
         help="Path to compress agent instructions file (default: agent/md/compress_instructions.md)",
+    )
+    parser.add_argument(
+        "--autodoc-instructions",
+        type=Path,
+        default=Path(__file__).parent / "md" / "autodoc_instructions.md",
+        help="Path to autodoc agent instructions file (default: agent/md/autodoc_instructions.md)"
     )
     parser.add_argument(
         "--library-prompt",
