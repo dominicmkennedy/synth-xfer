@@ -26,6 +26,7 @@ class SearchResult:
     op_sigs: list[Opcode]
     hits: list[PatternHit]
     patterns_considered: int
+    program_dags: dict[str, DAG]
 
 
 def _pattern_key(root: Vertex) -> str:
@@ -321,4 +322,6 @@ def search_patterns(
             heapq.heappush(heap, (-child_ub, next(counter), child))
 
     hits = sorted([h for _, _, h in top_hits], key=lambda h: (-h.utility, h.pattern_key))
-    return SearchResult(op_sigs=op_sigs, hits=hits, patterns_considered=ptn_cnt)
+    return SearchResult(
+        op_sigs=op_sigs, hits=hits, patterns_considered=ptn_cnt, program_dags=program_dags
+    )

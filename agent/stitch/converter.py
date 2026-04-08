@@ -138,6 +138,128 @@ def dag_to_mlir_program(dag: DAG) -> str:
     return output.getvalue()
 
 
+def pattern_to_mlir_program(pattern: DAG, program_dags: dict[str, DAG]) -> str:
+    """Synthesise a valid MLIR function for a pattern DAG.
+
+    Pattern DAGs carry no type information, so a concrete match is found in
+    `program_dags` to borrow types and attributes from.  The returned function
+    contains exactly the matched subgraph; pattern leaves become function
+    arguments.
+    """
+    from io import StringIO
+
+    from xdsl.ir import BlockArgument as BA
+    from xdsl.printer import Printer
+
+    from agent.stitch.matcher import match_with_all_bindings
+
+    # ------------------------------------------------------------------ #
+    # 1. Find one concrete binding: {id(pattern_vertex) -> program_vertex} #
+    # ------------------------------------------------------------------ #
+    binding: dict[int, Vertex] | None = None
+    for dag in program_dags.values():
+        hits = match_with_all_bindings(dag, pattern)
+        if hits:
+            binding = hits[0]
+            break
+
+    if binding is None:
+        raise ValueError("pattern_to_mlir_program: pattern matches no program DAG")
+
+    # ------------------------------------------------------------------ #
+    # 2. Walk pattern in post-order; collect leaves and internals          #
+    # ------------------------------------------------------------------ #
+    seen: set[int] = set()
+    postorder: list[Vertex] = []
+
+    def _walk(v: Vertex) -> None:
+        if id(v) in seen:
+            return
+        seen.add(id(v))
+        for arg in v.args:
+            _walk(arg)
+        postorder.append(v)
+
+    _walk(pattern.root)
+
+    leaves = [v for v in postorder if v.opcode == Opcode.leaf()]
+    internals = [v for v in postorder if v.opcode != Opcode.leaf()]
+
+    # ------------------------------------------------------------------ #
+    # 3. Assign SSA names                                                  #
+    # ------------------------------------------------------------------ #
+    # id(program_vertex) -> SSA name string
+    name: dict[int, str] = {}
+    for i, pv in enumerate(leaves):
+        name[id(binding[id(pv)])] = f"%arg{i}"
+    for i, pv in enumerate(internals):
+        name[id(binding[id(pv)])] = f"%{i}"
+
+    # ------------------------------------------------------------------ #
+    # 4. Helper: print a single xdsl Attribute to a string                #
+    # ------------------------------------------------------------------ #
+    def _attr_str(attr: object) -> str:
+        out = StringIO()
+        Printer(stream=out).print_attribute(attr)  # type: ignore[arg-type]
+        return out.getvalue()
+
+    def _result_type(prog_v: Vertex) -> str:
+        op = prog_v.mlir_op
+        if op is None:
+            raise ValueError("program vertex has no mlir_op")
+        if isinstance(op, BA):
+            return _attr_str(op.type)
+        return _attr_str(op.results[0].type)
+
+    # ------------------------------------------------------------------ #
+    # 5. Build function signature                                          #
+    # ------------------------------------------------------------------ #
+    arg_parts = [
+        f"{name[id(binding[id(lv)])]} : {_result_type(binding[id(lv)])}" for lv in leaves
+    ]
+    root_prog = binding[id(pattern.root)]
+    ret_type = _result_type(root_prog)
+
+    lines: list[str] = [f"func.func @pattern({', '.join(arg_parts)}) -> {ret_type} {{"]
+
+    # ------------------------------------------------------------------ #
+    # 6. Emit body ops                                                     #
+    # ------------------------------------------------------------------ #
+    for pat_v in internals:
+        prog_v = binding[id(pat_v)]
+        op = prog_v.mlir_op
+        if op is None or isinstance(op, BA):
+            raise ValueError("internal pattern vertex missing Operation mlir_op")
+
+        result_name = name[id(prog_v)]
+        result_type = _result_type(prog_v)
+        operand_names = ", ".join(name[id(binding[id(a)])] for a in pat_v.args)
+        operand_types = ", ".join(_result_type(binding[id(a)]) for a in pat_v.args)
+
+        # Attributes + properties (xdsl keeps them in separate dicts)
+        all_attrs = dict(op.attributes) | dict(op.properties)
+        if all_attrs:
+            attr_out = StringIO()
+            Printer(stream=attr_out).print_attr_dict(all_attrs)
+            attrs_part = f" {attr_out.getvalue()}"
+        else:
+            attrs_part = ""
+
+        lines.append(
+            f'  {result_name} = "{op.name}"({operand_names}){attrs_part}'
+            f" : ({operand_types}) -> {result_type}"
+        )
+
+    # ------------------------------------------------------------------ #
+    # 7. Return and close                                                  #
+    # ------------------------------------------------------------------ #
+    root_name = name[id(root_prog)]
+    lines.append(f"  func.return {root_name} : {ret_type}")
+    lines.append("}")
+
+    return "\n".join(lines)
+
+
 def dag_vertices(dag: DAG) -> list[Vertex]:
     """Convenience helper for callers that want all vertices in a DAG."""
 
