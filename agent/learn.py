@@ -6,6 +6,7 @@ from pathlib import Path
 
 from agents import Agent, Runner, function_tool
 
+from agent.stitch.converter import pattern_to_mlir_program
 from agent.stitch.search import search_patterns
 
 from .agent_helper import format_agent_run_dump
@@ -119,7 +120,7 @@ def _name_one_function(
     max_turns: int,
     library: LibraryState,
     func_to_name: str,
-) -> LibraryFunction:
+) -> tuple[LibraryFunction, object]:
     """Given the source for an MLIR function, provide a name and docstring for it agentically."""
     del api_key  # Reserved for future model/provider auth parity.
 
@@ -158,50 +159,100 @@ def _name_one_function(
 
     result = Runner.run_sync(agent, prompt, max_turns=max_turns)
 
-    new_source = "" # TODO: reformat the source code using docstring and name
+    def _reformat_source(source: str, func_name: str, docstring: str) -> str:
+        """Takes in MLIR function, sets name to func_name, and adds docstring"""
+        comment = "\n// " + " ".join(docstring.splitlines())
+        renamed = source.replace("@pattern", f"@{func_name}", 1)
+        first, _, rest = renamed.partition("\n")
+        return f"{first}  {comment}\n{rest}"
 
-    return LibraryFunction(
-        function_name=result.function_name,
-        docstring=result.docstring,
+    new_source = _reformat_source(
+        source=func_to_name,
+        func_name=result.final_output.function_name,
+        docstring=result.final_output.docstring,
+    )
+    lib_func = LibraryFunction(
+        function_name=result.final_output.function_name,
+        docstring=result.final_output.docstring,
         source=new_source,
     )
 
+    return (lib_func, result)
 
-def _run_stitch_learn(
-    api_key: str,
+
+def run_stitch_learn(
+    version: int,
     previous_library: LibraryState,
     synthesis_results: list[SynthesisResult],
-    model: str,
-    ops_path: Path,
-    instructions_path: Path,
-    max_turns: int,
     max_instructions: int,
     top_k: int,
+    args,
+    api_key: str,
 ) -> LibraryState:
     """Learns library functions with Stitch. Learns func names and docstring agentically."""
+
+    print(f"Library learning with Stitch and autodoc agent, version {version}")
+
+    output_dir = Path(args.output)
 
     progs: list[str] = []
     for result in synthesis_results:
         progs += result.solution_iters
 
     result = search_patterns(progs=progs, max_instructions=max_instructions, top_k=top_k)
-    hits = [h for h in result.hits if h.pattern.inst_count >= 2]
+    mlir_hits = [
+        pattern_to_mlir_program(h.pattern, result.program_dags)
+        for h in result.hits
+        if h.pattern.inst_count >= 2
+    ]
+
+    if args.dump_agent_run:
+        hits = [h for h in result.hits if h.pattern.inst_count >= 2]
+        stitch_log = ""
+        for hit in hits:
+            stitch_log += f"=== utility={hit.utility} | size = {hit.pattern.inst_count} | {hit.total_matches} matches ===\n"
+            stitch_log += f"{hit.pattern}\n"
+
+        dump_path = save_file(
+            stitch_log,
+            output_dir,
+            f"stitch_log_{version}.log",
+        )
+        print(f"  Stitch run dump: {dump_path}")
+
+    print(f"  Using model {args.model}")
 
     new_lib_funcs: list[LibraryFunction] = []
-    for hit in hits:
-        new_lib_funcs.append(
-            _name_one_function(
-                api_key=api_key,
-                model=model,
-                ops_path=ops_path,
-                instructions_path=instructions_path,
-                max_turns=max_turns,
-                library=previous_library,
-                func_to_name=hit,
-            )
+    agent_log = ""
+    for i, hit in enumerate(mlir_hits):
+        print(f"  Documenting function {i + 1}/{len(mlir_hits)}")
+        lib_func, run_result = _name_one_function(
+            api_key=api_key,
+            model=args.model,
+            ops_path=args.ops,
+            instructions_path=args.autodoc_instructions,
+            max_turns=args.max_turns,
+            library=previous_library,
+            func_to_name=hit,
         )
+        new_lib_funcs.append(lib_func)
+        agent_log += f"\n========== Autodoc for {lib_func.function_name} ==========\n"
+        agent_log += format_agent_run_dump(run_result)
 
-    return LibraryState(previous_library.functions + new_lib_funcs)
+    if args.dump_agent_run:
+        dump_path = save_file(
+            agent_log,
+            output_dir,
+            f"autodoc_log_{version}.log",
+        )
+        print(f"  Autodoc run dump: {dump_path}")
+
+    merged = LibraryState(functions=previous_library.functions + new_lib_funcs)
+    lib_dir = output_dir / f"library{version}"
+    dump_library(merged, lib_dir)
+    print(f"Library: {lib_dir}")
+
+    return merged
 
 
 def run_library_learn_task(
