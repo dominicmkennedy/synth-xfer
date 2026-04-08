@@ -12,6 +12,7 @@ from .agent_helper import format_agent_run_dump
 from .util import (
     LibraryFunction,
     LibraryState,
+    FunctionDocumentation,
     SynthesisResult,
     SynthesisTask,
     dump_library,
@@ -111,7 +112,6 @@ def _run_agent_learn(
 
 
 def _name_one_function(
-    prompt: str,
     api_key: str,
     model: str,
     ops_path: Path,
@@ -122,11 +122,52 @@ def _name_one_function(
 ) -> LibraryFunction:
     """Given the source for an MLIR function, provide a name and docstring for it agentically."""
     del api_key  # Reserved for future model/provider auth parity.
-    pass
+
+    prompt = "" # TODO: create a short prompt similar to md/library_prompt.md, md/compress_prompt.md, or synth.py:_make_initial_prompt()
+
+    @function_tool
+    def get_function_code() -> str:
+        """Return the code of the function to be named and documented"""
+        return func_to_name
+
+    @function_tool
+    def get_library_function(name: str) -> str:
+        """Return the source of a func.call by its name"""
+        for func in library.functions:
+            if func.function_name == name:
+                return func.source
+
+        raise ValueError("name must refer to a function in the library")
+
+    @function_tool
+    def get_primitives() -> str:
+        """Return the primitive operators documentation (agent/ops.md)."""
+        return ops_path.read_text(encoding="utf-8")
+
+    agent = Agent(
+        name="AutoDocumenter",
+        instructions=instructions_path.read_text(encoding="utf-8").strip(),
+        tools=[
+            get_function_code,
+            get_library_function,
+            get_primitives,
+        ],
+        model=model,
+        output_type=FunctionDocumentation,
+    )
+
+    result = Runner.run_sync(agent, prompt, max_turns=max_turns)
+
+    new_source = "" # TODO: reformat the source code using docstring and name
+
+    return LibraryFunction(
+        function_name=result.function_name,
+        docstring=result.docstring,
+        source=new_source,
+    )
 
 
 def _run_stitch_learn(
-    prompt: str,
     api_key: str,
     previous_library: LibraryState,
     synthesis_results: list[SynthesisResult],
@@ -150,7 +191,6 @@ def _run_stitch_learn(
     for hit in hits:
         new_lib_funcs.append(
             _name_one_function(
-                prompt=prompt,
                 api_key=api_key,
                 model=model,
                 ops_path=ops_path,
