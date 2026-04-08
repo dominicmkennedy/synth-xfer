@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from io import StringIO
 from pathlib import Path
 
 from xdsl.dialects.func import FuncOp, ReturnOp
-from xdsl.ir import BlockArgument, Operation, SSAValue
+from xdsl.ir import Block, BlockArgument, Operation, Region, SSAValue
+from xdsl.printer import Printer
 from xdsl_smt.dialects.transfer import Constant as ConstantOp
 
 from agent.stitch.util import DAG, Opcode, Vertex, iter_vertices
@@ -90,6 +92,50 @@ def mlir_program_to_single_dag(program_or_path: str | Path) -> DAG:
     if not dags:
         raise ValueError("no FuncOp found in MLIR program")
     return next(iter(dags.values()))
+
+
+def dag_to_mlir_program(dag: DAG) -> str:
+    """Convert a DAG into the MLIR code that it represents.
+
+    Recovers the original FuncOp by navigating up the xdsl IR from any vertex
+    that carries a non-None mlir_op, then uses xdsl's Printer to serialise it.
+    Raises ValueError if no vertex with an attached mlir_op can be found.
+    """
+
+    func_op: FuncOp | None = None
+    for v in iter_vertices(dag.root):
+        if v.mlir_op is None:
+            continue
+        mlir_op = v.mlir_op
+
+        # Resolve the containing Block.
+        if isinstance(mlir_op, BlockArgument):
+            block: Block | None = mlir_op.block
+        else:
+            block = mlir_op.parent
+
+        if block is None:
+            continue
+
+        # Block → Region → parent Operation (FuncOp).
+        region: Region | None = block.parent
+        if region is None:
+            continue
+
+        parent = region.parent
+        if isinstance(parent, FuncOp):
+            func_op = parent
+            break
+
+    if func_op is None:
+        raise ValueError(
+            "dag_to_mlir_program: no vertex with an attached mlir_op found; "
+            "cannot recover the original FuncOp"
+        )
+
+    output = StringIO()
+    Printer(stream=output).print_op(func_op)
+    return output.getvalue()
 
 
 def dag_vertices(dag: DAG) -> list[Vertex]:
