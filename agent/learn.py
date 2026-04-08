@@ -123,7 +123,7 @@ def _name_one_function(
     """Given the source for an MLIR function, provide a name and docstring for it agentically."""
     del api_key  # Reserved for future model/provider auth parity.
 
-    prompt = "" # TODO: create a short prompt similar to md/library_prompt.md, md/compress_prompt.md, or synth.py:_make_initial_prompt()
+    prompt = "Name and document the MLIR function. Call get_function_code() to fetch it, look up any func.call callees with get_library_function(), and consult get_primitives() if needed. Return a snake_case function_name and a one-to-two sentence docstring describing what the function computes semantically."
 
     @function_tool
     def get_function_code() -> str:
