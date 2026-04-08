@@ -6,10 +6,12 @@ from pathlib import Path
 
 from agents import Agent, Runner, function_tool
 
+from agent.stitch.search import search_patterns
+
 from .agent_helper import format_agent_run_dump
 from .util import (
-    LibraryState,
     LibraryFunction,
+    LibraryState,
     SynthesisResult,
     SynthesisTask,
     dump_library,
@@ -19,7 +21,6 @@ from .util import (
     print_token_usage,
     save_file,
 )
-from agent.stitch.search import search_patterns
 
 
 def _run_agent_learn(
@@ -142,11 +143,7 @@ def _run_stitch_learn(
     for result in synthesis_results:
         progs += result.solution_iters
 
-    result = search_patterns(
-        progs=progs, 
-        max_instructions=max_instructions, 
-        top_k=top_k
-    )
+    result = search_patterns(progs=progs, max_instructions=max_instructions, top_k=top_k)
     hits = [h for h in result.hits if h.pattern.inst_count >= 2]
 
     new_lib_funcs: list[LibraryFunction] = []
@@ -163,7 +160,7 @@ def _run_stitch_learn(
                 func_to_name=hit,
             )
         )
-    
+
     return LibraryState(previous_library.functions + new_lib_funcs)
 
 
