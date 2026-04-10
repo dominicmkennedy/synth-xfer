@@ -241,6 +241,7 @@ def main():
         result = SynthesisResult(
             task=task,
             solution_text=Path(input_file).read_text(),
+            solution_iters=[],
             transformer_path=None,
             eval_summary=None,
         )
