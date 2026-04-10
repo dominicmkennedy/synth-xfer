@@ -214,8 +214,7 @@ class SynthesisAgent:
             If the transformer is not fully sound or not fully exact, following lines may include a short legend and up to a few concrete counterexamples per bitwidth (unsound vs imprecise), labeled with bw=..., so you can see inputs, your abstract output, and the optimal abstract output.
             """
             print(f"[{task.op_name.upper()}] [TOOL] run_eval_tool", flush=True)
-            self._soln_iters.append(transformer_mlir)
-            result = eval_transformer(
+            result, soundness, _ = eval_transformer(
                 [transformer_mlir],
                 EvalArgs(
                     op_path=Path(task.op_file),
@@ -232,6 +231,8 @@ class SynthesisAgent:
                 f"[{task.op_name.upper()}] [TOOL] run_eval_tool result:\n{result}",
                 flush=True,
             )
+            if abs(soundness - 100) < 0.1:
+                self._soln_iters.append(transformer_mlir)
             return result
 
         @function_tool
@@ -407,7 +408,7 @@ async def run_single_synthesis_task(
                 no_previous=True,
             )
         else:
-            eval_summary = eval_transformer(
+            eval_summary, _, _ = eval_transformer(
                 [solution_text],
                 EvalArgs(
                     op_path=Path(task.op_file),
