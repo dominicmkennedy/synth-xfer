@@ -360,8 +360,8 @@ def eval_transformer(
     eval_args: EvalArgs,
     *,
     lib: list[str] = [],
-) -> str:
-    """Run eval on a transformer (MLIR string) and return a summary string.
+) -> tuple[str, float, float]:
+    """Run eval on a transformer (MLIR string) and returns (summary, soundness, exactness).
 
     For use by the agent and by main.run_eval(). On failure returns 'error: ...'.
     """
@@ -372,9 +372,14 @@ def eval_transformer(
             f"Exact %: {result.get_exact_prop() * 100:.2f}, "
             f"Dist: {result.sound_dist:.4f}"
         )
-        return summary + _format_eval_examples_for_agent(result, eval_args.domain)
+        return (
+            summary + _format_eval_examples_for_agent(result, eval_args.domain),
+            result.get_sound_prop() * 100,
+            result.get_exact_prop() * 100,
+        )
+
     except Exception as e:
         msg = str(e).strip() or repr(e) or type(e).__name__
         # Single line, truncated, so the agent reliably sees parse/location info
         msg_flat = " ".join(msg.splitlines())[:1500]
-        return f"error: {msg_flat}"
+        return (f"error: {msg_flat}", 0.0, 0.0)

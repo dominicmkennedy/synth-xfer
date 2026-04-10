@@ -91,7 +91,7 @@ def _run_agent_compress(
 
         # Get eval of current transformer
         if not target.eval_summary:
-            curr_eval_summary = eval_transformer(
+            curr_eval_summary, soundness, exactness = eval_transformer(
                 [target.solution_text],
                 EvalArgs(
                     op_path=Path(target.task.op_file),
@@ -100,15 +100,14 @@ def _run_agent_compress(
                 ),
                 lib=[func.source for func in library.functions],
             )
-            match = re.search(pattern, curr_eval_summary)
-            if match is None:
+            if soundness < 0.1:
                 return (
                     "Problem in eval of original file. Proceed with compression.\n"
                     f"{curr_eval_summary}"
                 )
 
-            curr_sound = float(match.group("sound"))
-            curr_exact = float(match.group("exact"))
+            curr_sound = soundness
+            curr_exact = exactness
         else:
             match = re.search(pattern, target.eval_summary)
             if match is None:
@@ -121,7 +120,7 @@ def _run_agent_compress(
             curr_exact = float(match.group("exact"))
 
         # Get eval of new transformer
-        compressed_eval_summary = eval_transformer(
+        compressed_eval_summary, soundness, exactness = eval_transformer(
             [transformer_mlir],
             EvalArgs(
                 op_path=Path(target.task.op_file),
@@ -130,11 +129,10 @@ def _run_agent_compress(
             ),
             lib=[func.source for func in library.functions],
         )
-        match = re.search(pattern, compressed_eval_summary)
-        if match is None:
+        if soundness < 0.1:
             return compressed_eval_summary
-        compressed_sound = float(match.group("sound"))
-        compressed_exact = float(match.group("exact"))
+        compressed_sound = soundness
+        compressed_exact = exactness
 
         if abs(compressed_sound - curr_sound) > 0.1:
             return (
