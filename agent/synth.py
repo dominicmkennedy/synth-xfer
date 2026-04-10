@@ -231,6 +231,8 @@ class SynthesisAgent:
                 f"[{task.op_name.upper()}] [TOOL] run_eval_tool result:\n{result}",
                 flush=True,
             )
+            if abs(soundness - 100) < 0.1:
+                self._soln_iters.append(transformer_mlir)
             return result
 
         @function_tool
