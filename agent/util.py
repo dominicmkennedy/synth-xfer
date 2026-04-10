@@ -1,6 +1,6 @@
 """Agent utilities."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import os
 from pathlib import Path
 import re
@@ -12,8 +12,21 @@ from synth_xfer._util.eval import enum, eval_transfer_func
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
-from synth_xfer._util.parse_mlir import get_helper_funcs, parse_mlir_mod
+from synth_xfer._util.parse_mlir import get_helper_funcs, parse_mlir_mod, top_as_xfer
 from synth_xfer._util.random import Random, Sampler
+
+
+@dataclass
+class EvalArgs:
+    """Arguments for evaluating a transfer function."""
+
+    op_path: Path
+    domain: AbstractDomain
+    lbw: list[int]
+    mbw: list[tuple[int, int]] = field(default_factory=list)
+    hbw: list[tuple[int, int, int]] = field(default_factory=list)
+    unsound_ex: int = 0
+    imprecise_ex: int = 0
 
 
 @dataclass
@@ -270,58 +283,96 @@ def _format_eval_examples_for_agent(
     return "\n".join(lines).rstrip("\n")
 
 
+def _get_xfer_name(solution: str) -> str:
+    """Extract the first func.func name from an MLIR solution string."""
+    match = re.search(r"func\.func\s+@(\w+)\s*\(", solution)
+    if not match:
+        raise ValueError("No func.func definition found in solution")
+    return match.group(1)
+
+
+def rename_xfer(solution: str, new_name: str) -> str:
+    """Rename the transfer function in an MLIR solution string."""
+    old_name = _get_xfer_name(solution)
+    return re.sub(rf"@{re.escape(old_name)}\b", f"@{new_name}", solution)
+
+
+def _run_eval(
+    xfer: list[str],
+    base: list[str],
+    lib: list[str],
+    eval_args: EvalArgs,
+) -> EvalResult:
+    """Core eval logic shared by eval_transformer and AgentSolutionSet.
+
+    xfer: candidate transfer function(s); empty list uses top as candidate.
+    base: existing solutions combined via meet for comparison.
+    lib:  library helper functions.
+    """
+    lbw, mbw, hbw = eval_args.lbw, eval_args.mbw, eval_args.hbw
+    all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
+    EvalResult.init_bw_settings(set(lbw), set(x[0] for x in mbw), set(x[0] for x in hbw))
+    sampler = Sampler.uniform()
+
+    base_names = [_get_xfer_name(s) for s in base]
+    helpers = get_helper_funcs(eval_args.op_path, eval_args.domain)
+    seed = Random(None).randint(0, 1_000_000)
+
+    combined = ""
+    for p in lib + base + xfer:
+        if p.strip():
+            combined = merge_library_text(combined, p)
+
+    lowerer = LowerToLLVM(all_bws)
+    lowerer.add_fn(helpers.meet_func)
+    lowerer.add_fn(helpers.get_top_func)
+
+    if xfer:
+        xfer_name = _get_xfer_name(xfer[0])
+        lowerer.add_mod(parse_mlir_mod(combined), [xfer_name] + base_names)
+        cand_shim_names = {bw: f"{xfer_name}_{bw}_shim" for bw in all_bws}
+    else:
+        top_bw_fns = lowerer.add_fn(top_as_xfer(helpers.transfer_func), shim=True)
+        cand_shim_names = {bw: fn.name for bw, fn in top_bw_fns.items()}
+        if combined:
+            lowerer.add_mod(parse_mlir_mod(combined), base_names)
+
+    to_eval = enum(lbw, mbw, hbw, seed, helpers, sampler)
+    with Jit() as jit:
+        jit.add_mod(lowerer)
+        eval_input = {
+            bw: (
+                to_eval[bw],
+                [jit.get_fn_ptr(cand_shim_names[bw])],
+                [jit.get_fn_ptr(f"{bn}_{bw}_shim") for bn in base_names],
+            )
+            for bw in all_bws
+        }
+        (result,) = eval_transfer_func(
+            eval_input, eval_args.unsound_ex, eval_args.imprecise_ex
+        )
+
+    return result
+
+
 def eval_transformer(
-    solution: str,
-    op_path: Path,
-    domain: AbstractDomain,
-    xfer_name: str,
+    xfer: list[str],
+    eval_args: EvalArgs,
     *,
-    lbw: list[int],
-    mbw: list[tuple[int, int]] = [],
-    hbw: list[tuple[int, int, int]] = [],
-    random_seed: int | None = None,
-    unsound_ex: int = 0,
-    imprecise_ex: int = 0,
+    lib: list[str] = [],
 ) -> str:
     """Run eval on a transformer (MLIR string) and return a summary string.
 
     For use by the agent and by main.run_eval(). On failure returns 'error: ...'.
     """
     try:
-        all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
-        EvalResult.init_bw_settings(
-            set(lbw), set(x[0] for x in mbw), set(x[0] for x in hbw)
-        )
-        sampler = Sampler.uniform()
-
-        helpers = get_helper_funcs(op_path, domain)
-        sol_module = parse_mlir_mod(solution)
-        seed = (
-            Random(random_seed).randint(0, 1_000_000)
-            if random_seed is None
-            else random_seed
-        )
-
-        lowerer = LowerToLLVM(all_bws)
-        lowerer.add_fn(helpers.meet_func)
-        lowerer.add_fn(helpers.get_top_func)
-        lowerer.add_mod(sol_module, [xfer_name])
-
-        to_eval = enum(lbw, mbw, hbw, seed, helpers, sampler)
-        with Jit() as jit:
-            jit.add_mod(lowerer)
-            eval_input = {
-                bw: (to_eval[bw], [jit.get_fn_ptr(f"{xfer_name}_{bw}_shim")], [])
-                for bw in all_bws
-            }
-            (synth_r,) = eval_transfer_func(eval_input, unsound_ex, imprecise_ex)
-
+        result = _run_eval(xfer, [], lib, eval_args)
         summary = (
-            f"Sound %: {synth_r.get_sound_prop() * 100:.2f}, "
-            f"Exact %: {synth_r.get_exact_prop() * 100:.2f}, "
-            f"Dist: {synth_r.sound_dist:.4f}"
+            f"Sound %: {result.get_sound_prop() * 100:.2f}, "
+            f"Exact %: {result.get_exact_prop() * 100:.2f}, "
+            f"Dist: {result.sound_dist:.4f}"
         )
-        return summary + _format_eval_examples_for_agent(synth_r, domain)
+        return summary + _format_eval_examples_for_agent(result, eval_args.domain)
     except Exception as e:
         msg = str(e).strip() or repr(e) or type(e).__name__
         # Single line, truncated, so the agent reliably sees parse/location info

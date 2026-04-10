@@ -6,6 +6,20 @@ from pathlib import Path
 import yaml
 
 
+def _parse_bw_pair(s: str) -> tuple[int, int]:
+    parts = [int(x.strip()) for x in s.split(",")]
+    if len(parts) != 2:
+        raise argparse.ArgumentTypeError(f"Expected 'bw,samples', got: {s!r}")
+    return (parts[0], parts[1])
+
+
+def _parse_bw_triple(s: str) -> tuple[int, int, int]:
+    parts = [int(x.strip()) for x in s.split(",")]
+    if len(parts) != 3:
+        raise argparse.ArgumentTypeError(f"Expected 'bw,lo,hi', got: {s!r}")
+    return (parts[0], parts[1], parts[2])
+
+
 def _load_ops_from_bench(bench_path: Path) -> list[str]:
     """Parse bench.yaml and return list of MLIR op file paths."""
     with bench_path.open() as f:
@@ -20,6 +34,7 @@ def _load_ops_from_bench(bench_path: Path) -> list[str]:
 def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     for name, path in [
         ("--agent-instructions", args.agent_instructions),
+        ("--meet-instructions", args.meet_instructions),
         ("--library-instructions", args.library_instructions),
         ("--compress-instructions", args.compress_instructions),
         ("--library-prompt", args.library_prompt),
@@ -92,6 +107,12 @@ def parse_args() -> argparse.Namespace:
         help="Path to agent instructions file (default: agent/md/agent_instructions.md)",
     )
     parser.add_argument(
+        "--meet-instructions",
+        type=Path,
+        default=Path(__file__).parent / "md" / "meet_instructions.md",
+        help="Path to agent instructions for meet mode (default: agent/md/meet_instructions.md)",
+    )
+    parser.add_argument(
         "--library-instructions",
         type=Path,
         default=Path(__file__).parent / "md" / "library_instructions.md",
@@ -158,14 +179,44 @@ def parse_args() -> argparse.Namespace:
         help="Skip the compress step after synthesis (default: compress is enabled)",
     )
     parser.add_argument(
-        "--exact-bw",
+        "--lbw",
         type=int,
-        nargs="+",
-        default=[8],
+        nargs="*",
+        default=[4],
         metavar="BW",
-        help="Exact bitwidth(s) for eval (default: 8)",
+        help="Low (exact) bitwidth(s) for eval (default: 4)",
     )
-
+    parser.add_argument(
+        "--mbw",
+        type=_parse_bw_pair,
+        nargs="*",
+        default=[(8, 10000)],
+        metavar="BW,SAMPLES",
+        help="Medium bitwidth(s) for eval as 'bw,samples' (default: 8,10000)",
+    )
+    parser.add_argument(
+        "--hbw",
+        type=_parse_bw_triple,
+        nargs="*",
+        default=[],
+        metavar="BW,LO,HI",
+        help="High bitwidth(s) for eval as 'bw,lo,hi' (default: none)",
+    )
+    parser.add_argument(
+        "--meet",
+        action="store_true",
+        help="Accumulate solutions into a SolutionSet and combine via meet",
+    )
+    parser.add_argument(
+        "--mock-synth",
+        action="store_true",
+        help="Skip synthesis agent; return a random example from examples_dir for fast pipeline testing",
+    )
+    parser.add_argument(
+        "--no-learn",
+        action="store_true",
+        help="Skip the library learning step after each synthesis round",
+    )
     args = parser.parse_args()
     _validate_args(parser, args)
     return args

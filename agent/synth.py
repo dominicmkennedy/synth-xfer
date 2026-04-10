@@ -8,16 +8,17 @@ from typing import Any
 
 from agents import Agent, Runner, function_tool
 
+from agent.agent_solution_set import AgentSolutionSet
 from synth_xfer._util.domain import AbstractDomain
 
 from .agent_helper import format_agent_run_dump
 from .util import (
+    EvalArgs,
     LibraryState,
     SynthesisResult,
     SynthesisTask,
     clean_llm_output,
     eval_transformer,
-    merge_library_text,
     print_token_usage,
     save_file,
 )
@@ -55,6 +56,7 @@ class SynthesisAgent:
         self._history: list[Any] | None = None
         self._soln_iters: list[str] = []
         self._agent = self._build_agent(args, api_key)
+        self.solution_set = AgentSolutionSet(current_lib)
 
     def update_library(self, new_lib: LibraryState) -> None:
         """Update the library used by this agent's tools."""
@@ -66,11 +68,14 @@ class SynthesisAgent:
         template_path: Path = args.template
         ops_path: Path = args.ops
         examples_dir: Path = args.examples_dir
-        instructions_path: Path = args.agent_instructions
+        instructions_path: Path = (
+            args.meet_instructions if args.meet else args.agent_instructions
+        )
 
         @function_tool
         def get_task_bundle() -> str:
             """Return the concrete operation/task bundle as JSON (op_name, op_file, and op_content)."""
+            print(f"[{task.op_name.upper()}] [TOOL] get_task_bundle", flush=True)
             op_path = Path(task.op_file)
             bundle = {
                 "op_name": task.op_name,
@@ -82,16 +87,19 @@ class SynthesisAgent:
         @function_tool
         def get_program_templates() -> str:
             """Return the MLIR output templates (agent/template.mlir)."""
+            print(f"[{task.op_name.upper()}] [TOOL] get_program_templates", flush=True)
             return template_path.read_text(encoding="utf-8")
 
         @function_tool
         def get_available_primitives() -> str:
             """Return the allowed primitive operators documentation (agent/ops.md)."""
+            print(f"[{task.op_name.upper()}] [TOOL] get_available_primitives", flush=True)
             return ops_path.read_text(encoding="utf-8")
 
         @function_tool
         def list_library_functions() -> str:
             """List available library functions as JSON dictionary of func names and docstrings"""
+            print(f"[{task.op_name.upper()}] [TOOL] list_library_functions", flush=True)
             funcs = {
                 func.function_name: func.docstring for func in self._library.functions
             }
@@ -100,6 +108,10 @@ class SynthesisAgent:
         @function_tool
         def get_library_function(name: str) -> str:
             """Return the source of a function by its name"""
+            print(
+                f"[{task.op_name.upper()}] [TOOL] get_library_function: {name!r}",
+                flush=True,
+            )
             for func in self._library.functions:
                 if func.function_name == name:
                     return func.source
@@ -109,6 +121,11 @@ class SynthesisAgent:
         @function_tool
         def search_library_functions(query: str, top_k: int = 3) -> str:
             """Search inside library functions by substring 'query' to understand how specific operators are used. Returns JSON array of matches with function name and docstring."""
+            # Xuanyu: I am not sure whether this tool is actually useful, since search_examples show usage of operators.
+            print(
+                f"[{task.op_name.upper()}] [TOOL] search_library_functions: {query!r}",
+                flush=True,
+            )
             if top_k <= 0:
                 return "[]"
             q = query.strip()
@@ -132,6 +149,7 @@ class SynthesisAgent:
         @function_tool
         def list_examples() -> str:
             """List available example transformer files as JSON array of filenames."""
+            print(f"[{task.op_name.upper()}] [TOOL] list_examples", flush=True)
             names = (
                 [p.name for p in sorted(examples_dir.glob("*.mlir"))]
                 if examples_dir.exists()
@@ -142,6 +160,7 @@ class SynthesisAgent:
         @function_tool
         def get_example(name: str) -> str:
             """Return the contents of one example transformer file by filename (e.g. 'kb_xor.mlir')."""
+            print(f"[{task.op_name.upper()}] [TOOL] get_example: {name!r}", flush=True)
             p = (examples_dir / name).resolve()
             ex_dir = examples_dir.resolve()
             if ex_dir not in p.parents:
@@ -155,6 +174,9 @@ class SynthesisAgent:
         @function_tool
         def search_examples(query: str, top_k: int = 3) -> str:
             """Search inside reference implementations by substring 'query' to understand the usage of operators. Returns JSON array of matches with filename and snippet."""
+            print(
+                f"[{task.op_name.upper()}] [TOOL] search_examples: {query!r}", flush=True
+            )
             if top_k <= 0:
                 return "[]"
             q = query.strip()
@@ -191,18 +213,70 @@ class SynthesisAgent:
 
             If the transformer is not fully sound or not fully exact, following lines may include a short legend and up to a few concrete counterexamples per bitwidth (unsound vs imprecise), labeled with bw=..., so you can see inputs, your abstract output, and the optimal abstract output.
             """
+            print(f"[{task.op_name.upper()}] [TOOL] run_eval_tool", flush=True)
             self._soln_iters.append(transformer_mlir)
-            lib_text = "\n".join(func.source for func in self._library.functions)
-            full_soln = merge_library_text(lib_text, transformer_mlir)
-            return eval_transformer(
-                solution=full_soln,
-                op_path=Path(task.op_file),
-                domain=AbstractDomain.KnownBits,
-                xfer_name=f"kb_{task.op_name.lower()}",
-                lbw=args.exact_bw,
-                unsound_ex=3,
-                imprecise_ex=3,
+            result = eval_transformer(
+                [transformer_mlir],
+                EvalArgs(
+                    op_path=Path(task.op_file),
+                    domain=AbstractDomain.KnownBits,
+                    lbw=args.lbw,
+                    mbw=args.mbw,
+                    hbw=args.hbw,
+                    unsound_ex=0,
+                    imprecise_ex=0,
+                ),
+                lib=[func.source for func in self._library.functions],
             )
+            print(
+                f"[{task.op_name.upper()}] [TOOL] run_eval_tool result:\n{result}",
+                flush=True,
+            )
+            return result
+
+        @function_tool
+        def get_existing_solutions() -> str:
+            """Return the MLIR source of all solutions currently in the solution set. Each solution will be combined with your candidate via meet when eval_improve is called. Use this to understand what cases are already covered before writing a new candidate."""
+            print(f"[{task.op_name.upper()}] [TOOL] get_existing_solutions", flush=True)
+            if not self.solution_set.solutions:
+                return "No solutions in the solution set yet."
+            return "\n\n".join(self.solution_set.solutions)
+
+        @function_tool
+        def run_eval_improve(transformer_mlir: str) -> str:
+            """Evaluate the transformer MLIR combined with all previously accepted solutions via meet. Returns two summary lines so you can compare before and after:
+
+            Previous: Sound/Exact/Dist of the existing solution set alone
+            Updated:  Sound/Exact/Dist after adding your candidate via meet
+
+            Each line has the format: Sound %: ..., Exact %: ..., Dist: ...
+            An improvement shows higher Exact % or lower Dist on the Updated line.
+
+            If the combined transformer is not fully sound or not fully precise, following lines may includeshort legend and up to a few concrete counterexamples per bitwidth (unsound vs imprecise labeled with bw=..., so you can see inputs, your abstract output, and the optimal abstract output.
+            """
+
+            print(f"[{task.op_name.upper()}] [TOOL] run_eval_improve:", flush=True)
+            try:
+                result = self.solution_set.eval_improve(
+                    transformer_mlir,
+                    EvalArgs(
+                        op_path=Path(task.op_file),
+                        domain=AbstractDomain.KnownBits,
+                        lbw=args.lbw,
+                        mbw=args.mbw,
+                        hbw=args.hbw,
+                        unsound_ex=5,
+                        imprecise_ex=5,
+                    ),
+                )
+            except Exception as e:
+                msg = str(e).strip() or repr(e) or type(e).__name__
+                result = f"error: {' '.join(msg.splitlines())[:1500]}"
+            print(
+                f"[{task.op_name.upper()}] [TOOL] run_eval_improve result:\n{result}",
+                flush=True,
+            )
+            return result
 
         return Agent(
             name="TransformerSynthesizer",
@@ -215,13 +289,16 @@ class SynthesisAgent:
                 get_task_bundle,
                 get_program_templates,
                 get_available_primitives,
-                list_library_functions,
-                get_library_function,
-                search_library_functions,
                 list_examples,
                 get_example,
                 search_examples,
-                run_eval_tool,
+                list_library_functions,
+                get_library_function,
+                *(
+                    [get_existing_solutions, run_eval_improve]
+                    if args.meet
+                    else [run_eval_tool]
+                ),
             ],
             model=args.model,
         )
@@ -248,26 +325,6 @@ class SynthesisAgent:
         return result.final_output, result, inp, list(self._soln_iters)
 
 
-def run_eval(
-    op_file_path: str,
-    transformer: SynthesisResult,
-    library: LibraryState,
-    op_name: str,
-    lbw: list[int],
-) -> str:
-    """Evaluate the transformer via eval_transformer (no subprocess)."""
-    cleaned_mlir = clean_llm_output(transformer.solution_text)
-    full_soln = merge_library_text(library.functions_text, cleaned_mlir)
-
-    return eval_transformer(
-        full_soln,
-        Path(op_file_path),
-        AbstractDomain.KnownBits,
-        f"kb_{op_name.lower()}",
-        lbw=lbw,
-    )
-
-
 async def run_single_synthesis_task(
     synth_agent: SynthesisAgent,
     task: SynthesisTask,
@@ -280,31 +337,50 @@ async def run_single_synthesis_task(
     print(f"{tag} Synthesizing: round={round_num}, op={task.op_name}")
 
     output_dir = Path(args.output)
-    print(f"{tag} Using model: {args.model}")
-    t0 = time.monotonic()
-    llm_output, run_result, agent_input, soln_iters = await synth_agent.run(round_num)
-    synthesis_time = time.monotonic() - t0
 
-    if args.dump_agent_run:
-        input_dump = (
-            agent_input
-            if isinstance(agent_input, str)
-            else json.dumps(agent_input, indent=2)
-        )
-        input_path = save_file(
-            input_dump,
-            output_dir,
-            f"synth_input_r{round_num}_{task.op_name.lower()}.json",
-        )
-        print(f"{tag} Agent input dump: {input_path}")
-        dump_path = save_file(
-            format_agent_run_dump(run_result),
-            output_dir,
-            f"synth_agent_r{round_num}_{task.op_name.lower()}.log",
-        )
-        print(f"{tag} Agent run dump: {dump_path}")
+    run_result = None
+    agent_input = None
+    soln_iters: list[str] = []
+    synthesis_time = 0.0
+    if args.mock_synth:
+        llm_output = (Path(__file__).parent / "examples" / "kb_top.mlir").read_text()
+    else:
+        print(f"{tag} Using model: {args.model}")
+        t0 = time.monotonic()
+        llm_output, run_result, agent_input, soln_iters = await synth_agent.run(round_num)
+        synthesis_time = time.monotonic() - t0
 
-    print_token_usage(run_result)
+    if not args.mock_synth:
+        if args.dump_agent_run:
+            input_dump = (
+                agent_input
+                if isinstance(agent_input, str)
+                else json.dumps(agent_input, indent=2)
+            )
+            input_path = save_file(
+                input_dump,
+                output_dir,
+                f"synth_input_r{round_num}_{task.op_name.lower()}.json",
+            )
+            print(f"{tag} Agent input dump: {input_path}")
+            dump_path = save_file(
+                format_agent_run_dump(run_result),
+                output_dir,
+                f"synth_agent_r{round_num}_{task.op_name.lower()}.log",
+            )
+            print(f"{tag} Agent run dump: {dump_path}")
+
+        print_token_usage(run_result)
+
+    if args.meet and llm_output.strip() == "NO_IMPROVEMENT":
+        print(f"{tag} No improvement found, skipping solution update.")
+        return SynthesisResult(
+            task=task,
+            solution_text="NO_IMPROVEMENT",
+            solution_iters=soln_iters,
+            transformer_path=Path(),
+        )
+
     transformer_file = save_file(
         clean_llm_output(llm_output),
         output_dir,
@@ -312,21 +388,36 @@ async def run_single_synthesis_task(
     )
     print(f"{tag} Transformer: {transformer_file}")
 
-    result = SynthesisResult(
-        task=task,
-        solution_text=llm_output,
-        solution_iters=soln_iters,
-        transformer_path=transformer_file,
-        eval_summary=None,
-    )
+    solution_text = clean_llm_output(llm_output)
 
     eval_summary: str | None = None
     if not args.skip_eval:
         print(f"{tag} Evaluating transformer...")
         eval_t0 = time.monotonic()
-        eval_summary = run_eval(
-            task.op_file, result, library, task.op_name, lbw=args.exact_bw
-        )
+        if args.meet:
+            eval_summary = synth_agent.solution_set.eval_improve(
+                solution_text,
+                EvalArgs(
+                    op_path=Path(task.op_file),
+                    domain=AbstractDomain.KnownBits,
+                    lbw=args.lbw,
+                    mbw=args.mbw,
+                    hbw=args.hbw,
+                ),
+                no_previous=True,
+            )
+        else:
+            eval_summary = eval_transformer(
+                [solution_text],
+                EvalArgs(
+                    op_path=Path(task.op_file),
+                    domain=AbstractDomain.KnownBits,
+                    lbw=args.lbw,
+                    mbw=args.mbw,
+                    hbw=args.hbw,
+                ),
+                lib=[func.source for func in library.functions],
+            )
         eval_time = time.monotonic() - eval_t0
         print(f"{tag} Eval result: {eval_summary}")
         save_file(
@@ -337,7 +428,7 @@ async def run_single_synthesis_task(
 
     return SynthesisResult(
         task=task,
-        solution_text=llm_output,
+        solution_text=solution_text,
         solution_iters=soln_iters,
         transformer_path=transformer_file,
         eval_summary=eval_summary,

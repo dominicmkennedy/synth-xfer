@@ -293,6 +293,9 @@ You can omit `--dump-agent-run` if you don't need the full run dump.
 | `--model` | OpenAI model (default: `gpt-4`). See [OpenAI pricing](https://developers.openai.com/api/docs/pricing). |
 | `--skip-eval` | Skip running eval-final after synthesis. |
 | `--dump-agent-run` | Write a full dump of the agent run (messages, tool calls, token usage) to the output dir. |
+| `--rounds` | Number of library-update rounds; `0` = synthesis-only (default: `0`). |
+| `--meet` | Accumulate solutions across rounds into a `SolutionSet` and combine them via meet. |
+| `--no-learn` | Skip the library learning step after each synthesis round. |
 
 **Using `--benchmark` with a `bench.yaml` file:**
 
@@ -312,6 +315,31 @@ agent-synth --benchmark bench.yaml -o outputs/test-lib/ --model gpt-5.1-codex-mi
 Op names in `concrete_ops` are resolved to `mlir/Operations/{Name}.mlir` relative to the project root.
 
 Each run prints the **model** in use and **token usage** (input/output/reasoning and total). The agent is prompted to reason about the operation and KnownBits before writing MLIR and to use multiple turns to improve quality rather than stopping at the first candidate that passes eval.
+
+### Meet Mode
+
+`--meet` enables meet-combination across synthesis rounds: each round's best solution is accumulated into a `SolutionSet`, and the final result is the meet of all collected solutions. This typically yields a more precise transformer than any single round alone.
+
+`--no-learn` disables library learning between rounds, which is useful when you want to test meet-combination in isolation or when you don't yet have a library to update.
+
+Single-op run with meet mode and no library learning (fast test):
+```bash
+agent-synth mlir/Operations/Umax.mlir \
+    -o outputs/umax                   \
+    --model gpt-5.1-codex-mini        \
+    --rounds 3                        \
+    --meet                            \
+    --no-learn
+```
+
+Multi-op run with meet mode and library learning enabled:
+```bash
+agent-synth mlir/Operations/Umin.mlir mlir/Operations/Umax.mlir \
+    -o outputs/meet-test              \
+    --model gpt-5.1-codex-mini        \
+    --rounds 3                        \
+    --meet
+```
 
 ## Important CLI Options for `simplifier`
 

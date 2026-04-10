@@ -3,6 +3,7 @@
 
 import asyncio
 from pathlib import Path
+import re
 import sys
 
 from .args import parse_args
@@ -17,6 +18,14 @@ from .util import (
     get_api_key,
     load_initial_library,
 )
+
+
+def _is_fully_sound(eval_summary: str | None) -> bool:
+    """Return True if eval_summary reports Sound % = 100."""
+    if not eval_summary:
+        return False
+    m = re.search(r"Sound %:\s*([\d.]+)", eval_summary)
+    return m is not None and float(m.group(1)) == 100.0
 
 
 def run_library_learning_loop(
@@ -43,7 +52,16 @@ def run_library_learning_loop(
         latest_results = asyncio.run(
             run_synthesis_tasks(synth_agents, tasks, round_idx, library, args)
         )
-        if round_idx < num_rounds:
+        if args.meet:
+            for result in latest_results:
+                if result.solution_text != "NO_IMPROVEMENT" and _is_fully_sound(
+                    result.eval_summary
+                ):
+                    agent = synth_agents[result.task.op_name]
+                    agent.solution_set.upd_solution(result.solution_text)
+
+        # Xuanyu: maybe when meet is enabled, not only the latest solution but the entire solution set should be sent to the library learning.
+        if round_idx < num_rounds and not args.no_learn:
             library = run_library_learn_task(
                 version=round_idx + 1,
                 previous_library=library,

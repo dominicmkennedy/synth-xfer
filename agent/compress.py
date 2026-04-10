@@ -10,11 +10,11 @@ from synth_xfer._util.domain import AbstractDomain
 
 from .agent_helper import format_agent_run_dump
 from .util import (
+    EvalArgs,
     LibraryState,
     SynthesisResult,
     clean_llm_output,
     eval_transformer,
-    merge_library_text,
     print_token_usage,
     save_file,
 )
@@ -30,6 +30,8 @@ def _run_agent_compress(
     instructions_path: Path,
     max_turns: int,
     lbw: list[int],
+    mbw: list[int],
+    hbw: list[int],
 ) -> tuple[str, object]:
     """Run agent to compress a target file. Returns (final_output, run_result)."""
     del api_key  # Reserved for future model/provider auth parity.
@@ -89,13 +91,14 @@ def _run_agent_compress(
 
         # Get eval of current transformer
         if not target.eval_summary:
-            full_soln = merge_library_text(library.functions_text, target.solution_text)
             curr_eval_summary = eval_transformer(
-                solution=full_soln,
-                op_path=Path(target.task.op_file),
-                domain=AbstractDomain.KnownBits,
-                xfer_name=f"kb_{target.task.op_name.lower()}",
-                lbw=lbw,
+                [target.solution_text],
+                EvalArgs(
+                    op_path=Path(target.task.op_file),
+                    domain=AbstractDomain.KnownBits,
+                    lbw=lbw,
+                ),
+                lib=[func.source for func in library.functions],
             )
             match = re.search(pattern, curr_eval_summary)
             if match is None:
@@ -118,13 +121,14 @@ def _run_agent_compress(
             curr_exact = float(match.group("exact"))
 
         # Get eval of new transformer
-        full_soln = merge_library_text(library.functions_text, transformer_mlir)
         compressed_eval_summary = eval_transformer(
-            solution=full_soln,
-            op_path=Path(target.task.op_file),
-            domain=AbstractDomain.KnownBits,
-            xfer_name=f"kb_{target.task.op_name.lower()}",
-            lbw=lbw,
+            [transformer_mlir],
+            EvalArgs(
+                op_path=Path(target.task.op_file),
+                domain=AbstractDomain.KnownBits,
+                lbw=lbw,
+            ),
+            lib=[func.source for func in library.functions],
         )
         match = re.search(pattern, compressed_eval_summary)
         if match is None:
@@ -193,7 +197,9 @@ def run_compress_task(
         ops_path=args.ops,
         instructions_path=args.compress_instructions,
         max_turns=args.max_turns,
-        lbw=args.exact_bw,
+        lbw=args.lbw,
+        mbw=args.mbw,
+        hbw=args.hbw,
     )
     print_token_usage(run_result)
 
