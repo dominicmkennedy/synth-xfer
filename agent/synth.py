@@ -55,6 +55,15 @@ class SynthesisAgent:
         self._library = current_lib
         self._history: list[Any] | None = None
         self._soln_iters: list[str] = []
+        self._eval_args = EvalArgs(
+            op_path=Path(task.op_file),
+            domain=AbstractDomain.KnownBits,
+            lbw=args.lbw,
+            mbw=args.mbw,
+            hbw=args.hbw,
+            unsound_ex=5,
+            imprecise_ex=5,
+        )
         self._agent = self._build_agent(args, api_key)
         self.solution_set = AgentSolutionSet(current_lib)
 
@@ -217,15 +226,7 @@ class SynthesisAgent:
             self._soln_iters.append(transformer_mlir)
             result = eval_transformer(
                 [transformer_mlir],
-                EvalArgs(
-                    op_path=Path(task.op_file),
-                    domain=AbstractDomain.KnownBits,
-                    lbw=args.lbw,
-                    mbw=args.mbw,
-                    hbw=args.hbw,
-                    unsound_ex=0,
-                    imprecise_ex=0,
-                ),
+                self._eval_args,
                 lib=[func.source for func in self._library.functions],
             )
             print(
@@ -259,15 +260,7 @@ class SynthesisAgent:
             try:
                 result = self.solution_set.eval_improve(
                     transformer_mlir,
-                    EvalArgs(
-                        op_path=Path(task.op_file),
-                        domain=AbstractDomain.KnownBits,
-                        lbw=args.lbw,
-                        mbw=args.mbw,
-                        hbw=args.hbw,
-                        unsound_ex=5,
-                        imprecise_ex=5,
-                    ),
+                    self._eval_args,
                 )
             except Exception as e:
                 msg = str(e).strip() or repr(e) or type(e).__name__
@@ -352,17 +345,6 @@ async def run_single_synthesis_task(
 
     if not args.mock_synth:
         if args.dump_agent_run:
-            input_dump = (
-                agent_input
-                if isinstance(agent_input, str)
-                else json.dumps(agent_input, indent=2)
-            )
-            input_path = save_file(
-                input_dump,
-                output_dir,
-                f"synth_input_r{round_num}_{task.op_name.lower()}.json",
-            )
-            print(f"{tag} Agent input dump: {input_path}")
             dump_path = save_file(
                 format_agent_run_dump(run_result),
                 output_dir,
@@ -397,25 +379,13 @@ async def run_single_synthesis_task(
         if args.meet:
             eval_summary = synth_agent.solution_set.eval_improve(
                 solution_text,
-                EvalArgs(
-                    op_path=Path(task.op_file),
-                    domain=AbstractDomain.KnownBits,
-                    lbw=args.lbw,
-                    mbw=args.mbw,
-                    hbw=args.hbw,
-                ),
+                synth_agent._eval_args,
                 no_previous=True,
             )
         else:
             eval_summary = eval_transformer(
                 [solution_text],
-                EvalArgs(
-                    op_path=Path(task.op_file),
-                    domain=AbstractDomain.KnownBits,
-                    lbw=args.lbw,
-                    mbw=args.mbw,
-                    hbw=args.hbw,
-                ),
+                synth_agent._eval_args,
                 lib=[func.source for func in library.functions],
             )
         eval_time = time.monotonic() - eval_t0

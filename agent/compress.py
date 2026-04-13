@@ -6,8 +6,6 @@ import re
 
 from agents import Agent, Runner, function_tool
 
-from synth_xfer._util.domain import AbstractDomain
-
 from .agent_helper import format_agent_run_dump
 from .util import (
     EvalArgs,
@@ -29,9 +27,7 @@ def _run_agent_compress(
     ops_path: Path,
     instructions_path: Path,
     max_turns: int,
-    lbw: list[int],
-    mbw: list[int],
-    hbw: list[int],
+    eval_args: EvalArgs,
 ) -> tuple[str, object]:
     """Run agent to compress a target file. Returns (final_output, run_result)."""
     del api_key  # Reserved for future model/provider auth parity.
@@ -93,11 +89,7 @@ def _run_agent_compress(
         if not target.eval_summary:
             curr_eval_summary = eval_transformer(
                 [target.solution_text],
-                EvalArgs(
-                    op_path=Path(target.task.op_file),
-                    domain=AbstractDomain.KnownBits,
-                    lbw=lbw,
-                ),
+                eval_args,
                 lib=[func.source for func in library.functions],
             )
             match = re.search(pattern, curr_eval_summary)
@@ -123,11 +115,7 @@ def _run_agent_compress(
         # Get eval of new transformer
         compressed_eval_summary = eval_transformer(
             [transformer_mlir],
-            EvalArgs(
-                op_path=Path(target.task.op_file),
-                domain=AbstractDomain.KnownBits,
-                lbw=lbw,
-            ),
+            eval_args,
             lib=[func.source for func in library.functions],
         )
         match = re.search(pattern, compressed_eval_summary)
@@ -176,6 +164,7 @@ def run_compress_task(
     round_num: int,
     args,
     api_key,
+    eval_args: EvalArgs,
 ) -> SynthesisResult:
     """Run compression on a synthesis result"""
     op_name = target.task.op_name
@@ -197,9 +186,7 @@ def run_compress_task(
         ops_path=args.ops,
         instructions_path=args.compress_instructions,
         max_turns=args.max_turns,
-        lbw=args.lbw,
-        mbw=args.mbw,
-        hbw=args.hbw,
+        eval_args=eval_args,
     )
     print_token_usage(run_result)
 

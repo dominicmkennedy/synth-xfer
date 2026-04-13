@@ -49,6 +49,8 @@ def run_library_learning_loop(
 
     # Round 0 is synthesis-only (single-shot equivalent).
     for round_idx in range(num_rounds + 1):
+        sep = "=" * 60
+        print(f"\n{sep}\n ROUND {round_idx}\n")
         latest_results = asyncio.run(
             run_synthesis_tasks(synth_agents, tasks, round_idx, library, args)
         )
@@ -71,12 +73,19 @@ def run_library_learning_loop(
             )
             for agent in synth_agents.values():
                 agent.update_library(library)
-        if not args.no_compress:
-            new_results: list[SynthesisResult] = []
-            for result in latest_results:
-                new_result = run_compress_task(result, library, round_idx, args, api_key)
-                new_results.append(new_result)
-            latest_results = new_results
+            if not args.no_compress:
+                new_results: list[SynthesisResult] = []
+                for result in latest_results:
+                    new_result = run_compress_task(
+                        result,
+                        library,
+                        round_idx,
+                        args,
+                        api_key,
+                        eval_args=synth_agents[result.task.op_name]._eval_args,
+                    )
+                    new_results.append(new_result)
+                latest_results = new_results
     return library, latest_results
 
 

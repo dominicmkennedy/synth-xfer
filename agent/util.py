@@ -27,6 +27,7 @@ class EvalArgs:
     hbw: list[tuple[int, int, int]] = field(default_factory=list)
     unsound_ex: int = 0
     imprecise_ex: int = 0
+    to_eval: dict | None = field(default=None, repr=False)
 
 
 @dataclass
@@ -316,7 +317,6 @@ def _run_eval(
 
     base_names = [_get_xfer_name(s) for s in base]
     helpers = get_helper_funcs(eval_args.op_path, eval_args.domain)
-    seed = Random(None).randint(0, 1_000_000)
 
     combined = ""
     for p in lib + base + xfer:
@@ -337,7 +337,10 @@ def _run_eval(
         if combined:
             lowerer.add_mod(parse_mlir_mod(combined), base_names)
 
-    to_eval = enum(lbw, mbw, hbw, seed, helpers, sampler)
+    if eval_args.to_eval is None:
+        seed = Random(None).randint(0, 1_000_000)
+        eval_args.to_eval = enum(lbw, mbw, hbw, seed, helpers, sampler)
+    to_eval = eval_args.to_eval
     with Jit() as jit:
         jit.add_mod(lowerer)
         eval_input = {
