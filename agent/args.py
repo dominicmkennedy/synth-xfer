@@ -36,9 +36,7 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         ("--agent-instructions", args.agent_instructions),
         ("--meet-instructions", args.meet_instructions),
         ("--library-instructions", args.library_instructions),
-        ("--compress-instructions", args.compress_instructions),
         ("--library-prompt", args.library_prompt),
-        ("--compress-prompt", args.compress_prompt),
         ("--ops", args.ops),
         ("--template", args.template),
     ]:
@@ -60,6 +58,12 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         if not args.benchmark.exists():
             parser.error(f"--benchmark: path does not exist: {args.benchmark}")
         args.op_file = _load_ops_from_bench(args.benchmark)
+
+    if args.compress is not None:
+        if not args.compress_instructions.exists():
+            parser.error(f"--compress-instructions: path does not exist: {args.compress_instructions}")
+        if not args.compress_prompt.exists():
+            parser.error(f"--compress-prompt: path does not exist: {args.compress_prompt}")
 
     for op_file in args.op_file:
         if not Path(op_file).exists():
@@ -183,9 +187,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.set_defaults(parallel=True)
     parser.add_argument(
-        "--no-compress",
+        "--compress",
         action="store_true",
-        help="Skip the compress step after synthesis (default: compress is enabled)",
+        help="Run a compress step after synthesis (default: compress is disabled)",
     )
     parser.add_argument(
         "--lbw",

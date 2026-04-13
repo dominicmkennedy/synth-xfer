@@ -73,7 +73,7 @@ def run_library_learning_loop(
             )
             for agent in synth_agents.values():
                 agent.update_library(library)
-            if not args.no_compress:
+            if args.compress:
                 new_results: list[SynthesisResult] = []
                 for result in latest_results:
                     new_result = run_compress_task(
