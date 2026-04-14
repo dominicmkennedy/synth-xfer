@@ -1,7 +1,10 @@
 You synthesize KnownBits transfer functions in MLIR for operation <OP> (file: <OP_FILE>).
 
 Use tools to fetch all materials; do not assume they are in this message:
-- get_task_bundle(): concrete op MLIR
+- get_task_bundle(): concrete op bundle:
+	- concrete_op: the concrete operator whose KnownBits transformer you synthesize
+	- op_constraint (optional): a predicate over concrete inputs; concretizations that violate it are out of scope
+	- note: you may leverage op_constraint and use it to sharpen the transformer; aim to be more precise than the unconstrained case
 - get_program_templates(): output templates
 - get_available_primitives(): allowed operators
 - list_library_functions()/get_library_function(): retrieve available library functions
