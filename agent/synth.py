@@ -66,6 +66,7 @@ class SynthesisAgent:
         )
         self._agent = self._build_agent(args, api_key)
         self.solution_set = AgentSolutionSet(current_lib)
+        self.is_perfect = False
 
     def update_library(self, new_lib: LibraryState) -> None:
         """Update the library used by this agent's tools."""
@@ -83,7 +84,12 @@ class SynthesisAgent:
 
         @function_tool
         def get_task_bundle() -> str:
-            """Return the concrete operation/task bundle as JSON (op_name, op_file, and op_content)."""
+            """Return JSON with op_name, op_file, and op_content.
+
+            op_content is the MLIR module from op_file and includes:
+            - concrete_op: the concrete operator whose KnownBits transformer you must synthesize.
+            - op_constraint (optional): a predicate over concrete inputs; concretizations that violate it are out of scope.
+            """
             print(f"[{task.op_name.upper()}] [TOOL] get_task_bundle", flush=True)
             op_path = Path(task.op_file)
             bundle = {

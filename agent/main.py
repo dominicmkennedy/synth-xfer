@@ -28,6 +28,14 @@ def _is_fully_sound(eval_summary: str | None) -> bool:
     return m is not None and float(m.group(1)) == 100.0
 
 
+def _is_fully_exact(eval_summary: str | None) -> bool:
+    """Return True if eval_summary reports Exact % = 100."""
+    if not eval_summary:
+        return False
+    m = re.search(r"Exact %:\s*([\d.]+)", eval_summary)
+    return m is not None and float(m.group(1)) == 100.0
+
+
 def run_library_learning_loop(
     tasks: list[SynthesisTask],
     num_rounds: int,
@@ -51,16 +59,30 @@ def run_library_learning_loop(
     for round_idx in range(num_rounds + 1):
         sep = "=" * 60
         print(f"\n{sep}\n ROUND {round_idx}\n")
+
+        tasks_to_run: list[SynthesisTask] = []
+        for task in tasks:
+            agent = synth_agents[task.op_name]
+            if args.meet and agent.is_perfect:
+                print(
+                    f"[{task.op_name.upper()}] Skipping synthesis: already marked perfect."
+                )
+                continue
+            tasks_to_run.append(task)
         latest_results = asyncio.run(
-            run_synthesis_tasks(synth_agents, tasks, round_idx, library, args)
+            run_synthesis_tasks(synth_agents, tasks_to_run, round_idx, library, args)
         )
+
         if args.meet:
             for result in latest_results:
                 if result.solution_text != "NO_IMPROVEMENT" and _is_fully_sound(
                     result.eval_summary
                 ):
-                    agent = synth_agents[result.task.op_name]
-                    agent.solution_set.upd_solution(result.solution_text)
+                    synth_agents[result.task.op_name].solution_set.upd_solution(
+                        result.solution_text
+                    )
+                if _is_fully_exact(result.eval_summary):
+                    synth_agents[result.task.op_name].is_perfect = True
 
         # Xuanyu: maybe when meet is enabled, not only the latest solution but the entire solution set should be sent to the library learning.
         if round_idx < num_rounds and not args.no_learn:
@@ -86,6 +108,18 @@ def run_library_learning_loop(
                     )
                     new_results.append(new_result)
                 latest_results = new_results
+
+    for op_name, agent in synth_agents.items():
+        if not agent.solution_set.solutions:
+            continue
+        try:
+            final_solution = agent.solution_set.build_final_solution()
+            final_solution_path = output_dir / f"final_solution_{op_name.lower()}.mlir"
+            final_solution_path.write_text(final_solution)
+            print(f"[{op_name.upper()}] Final solution: {final_solution_path}")
+        except Exception as e:
+            print(f"[{op_name.upper()}] Failed to build final solution: {e}")
+
     return library, latest_results
 
 
@@ -103,10 +137,6 @@ def main():
 
     final_library, latest_results = run_library_learning_loop(
         tasks, args.rounds, initial_library, args, api_key
-    )
-    print(
-        f"Library learning complete: version={args.rounds}, "
-        f"latest_results={len(latest_results)}"
     )
 
     return 0
