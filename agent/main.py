@@ -8,7 +8,7 @@ import sys
 
 from .args import parse_args
 from .compress import run_compress_task
-from .learn import run_library_learn_task
+from .learn import run_library_learn_task, run_stitch_learn
 from .synth import SynthesisAgent, run_synthesis_tasks
 from .util import (
     LibraryState,
@@ -64,13 +64,24 @@ def run_library_learning_loop(
 
         # Xuanyu: maybe when meet is enabled, not only the latest solution but the entire solution set should be sent to the library learning.
         if round_idx < num_rounds and not args.no_learn:
-            library = run_library_learn_task(
-                version=round_idx + 1,
-                previous_library=library,
-                synthesis_results=latest_results,
-                args=args,
-                api_key=api_key,
-            )
+            if args.stitch:
+                library = run_stitch_learn(
+                    version=round_idx + 1,
+                    previous_library=library,
+                    synthesis_results=latest_results,
+                    max_instructions=10,
+                    top_k=7,
+                    args=args,
+                    api_key=api_key,
+                )
+            else:
+                library = run_library_learn_task(
+                    version=round_idx + 1,
+                    previous_library=library,
+                    synthesis_results=latest_results,
+                    args=args,
+                    api_key=api_key,
+                )
             for agent in synth_agents.values():
                 agent.update_library(library)
             if args.compress:
