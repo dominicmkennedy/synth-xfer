@@ -408,7 +408,6 @@ def main():
             solution_iters=[],
             transformer_path=None,
             eval_summary=None,
-            solution_iters=[Path(input_file).read_text()],
         )
         corpus.append(result)
 
