@@ -9,6 +9,7 @@ from agent.util import (
     _get_xfer_name,
     _run_eval,
     merge_library_text,
+    format_result,
     rename_xfer,
 )
 from synth_xfer._util.eval_result import EvalResult
@@ -27,14 +28,6 @@ class AgentSolutionSet:
         self.library = library
         self._base_result_cache = None
 
-    @staticmethod
-    def _format_result(result: EvalResult) -> str:
-        return (
-            f"Sound %: {result.get_sound_prop() * 100:.2f}, "
-            f"Exact %: {result.get_exact_prop() * 100:.2f}, "
-            f"Dist: {result.sound_dist:.4f}"
-        )
-
     def eval_improve(
         self, new_sol: str, eval_args: EvalArgs, no_previous: bool = False
     ) -> str:
@@ -45,7 +38,7 @@ class AgentSolutionSet:
             lib=[self.library.functions_text],
             eval_args=eval_args,
         )
-        upd_res = self._format_result(upd_result) + _format_eval_examples_for_agent(
+        upd_res = format_result(upd_result) + _format_eval_examples_for_agent(
             upd_result, eval_args.domain
         )
         if no_previous:
@@ -62,7 +55,7 @@ class AgentSolutionSet:
                 lib=[self.library.functions_text],
                 eval_args=eval_args,
             )
-        return self._format_result(self._base_result_cache)
+        return format_result(self._base_result_cache)
 
     def upd_solution(self, new_sol: str) -> None:
         old_name = _get_xfer_name(new_sol)

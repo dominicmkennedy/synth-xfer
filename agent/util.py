@@ -46,7 +46,7 @@ class SynthesisResult:
     solution_text: str
     solution_iters: list[str]
     transformer_path: Path
-    eval_summary: str | None = None
+    eval_summary: str
 
 
 class LibraryFunction(BaseModel):
@@ -358,31 +358,35 @@ def _run_eval(
     return result
 
 
+def format_result(result: EvalResult) -> str:
+    """Format EvalResult summary metrics for agent-facing output."""
+    return (
+        f"Sound %: {result.get_sound_prop() * 100:.2f}, "
+        f"Exact %: {result.get_exact_prop() * 100:.2f}, "
+        f"Dist: {result.sound_dist:.4f}"
+    )
+
+
 def eval_transformer(
     xfer: list[str],
     eval_args: EvalArgs,
     *,
     lib: list[str] = [],
-) -> tuple[str, float, float]:
-    """Run eval on a transformer (MLIR string) and returns (summary, soundness, exactness).
+) -> tuple[str, EvalResult | None]:
+    """Run eval on a transformer (MLIR string) and return (summary, eval_result).
 
     For use by the agent and by main.run_eval(). On failure returns 'error: ...'.
     """
     try:
         result = _run_eval(xfer, [], lib, eval_args)
-        summary = (
-            f"Sound %: {result.get_sound_prop() * 100:.2f}, "
-            f"Exact %: {result.get_exact_prop() * 100:.2f}, "
-            f"Dist: {result.sound_dist:.4f}"
-        )
+        summary = format_result(result)
         return (
             summary + _format_eval_examples_for_agent(result, eval_args.domain),
-            result.get_sound_prop() * 100,
-            result.get_exact_prop() * 100,
+            result,
         )
 
     except Exception as e:
         msg = str(e).strip() or repr(e) or type(e).__name__
         # Single line, truncated, so the agent reliably sees parse/location info
         msg_flat = " ".join(msg.splitlines())[:1500]
-        return (f"error: {msg_flat}", 0.0, 0.0)
+        return (f"error: {msg_flat}", None)

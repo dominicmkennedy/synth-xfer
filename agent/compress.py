@@ -85,56 +85,26 @@ def _run_agent_compress(
         """Confirm that the compressed transformer has the same eval results as uncompressed transformer"""
         pattern = r"Sound %:\s*(?P<sound>[\d.]+),\s*Exact %:\s*(?P<exact>[\d.]+)"
 
-        # Get eval of current transformer
-        if not target.eval_summary:
-            curr_eval_summary, soundness, exactness = eval_transformer(
-                [target.solution_text],
-                eval_args,
-                lib=[func.source for func in library.functions],
+        # Xuanyu: target.eval_summary are guaranteed to exist, check text equivalence should be enough
+        match = re.search(pattern, target.eval_summary)
+        if match is None:
+            return (
+                "Problem in eval of original file. Proceed with compression.\n"
+                f"{target.eval_summary}"
             )
-            if soundness < 0.1:
-                return (
-                    "Problem in eval of original file. Proceed with compression.\n"
-                    f"{curr_eval_summary}"
-                )
-
-            curr_sound = soundness
-            curr_exact = exactness
-        else:
-            match = re.search(pattern, target.eval_summary)
-            if match is None:
-                return (
-                    "Problem in eval of original file. Proceed with compression.\n"
-                    f"{target.eval_summary}"
-                )
-
-            curr_sound = float(match.group("sound"))
-            curr_exact = float(match.group("exact"))
 
         # Get eval of new transformer
-        compressed_eval_summary, soundness, exactness = eval_transformer(
+        compressed_eval_summary, compressed_eval_result = eval_transformer(
             [transformer_mlir],
             eval_args,
             lib=[func.source for func in library.functions],
         )
-        if soundness < 0.1:
-            return compressed_eval_summary
-        compressed_sound = soundness
-        compressed_exact = exactness
-
-        if abs(compressed_sound - curr_sound) > 0.1:
+        if target.eval_summary != compressed_eval_summary:
             return (
                 "Correctness check failed.\n"
-                f"Soundness before compression: {curr_sound}\n"
-                f"Soundness after compression: {compressed_sound}\n"
+                f"Original eval summary: {target.eval_summary}\n"
+                f"Compressed eval summary: {compressed_eval_summary}"
             )
-        if abs(compressed_exact - curr_exact) > 0.1:
-            return (
-                "Correctness check failed.\n"
-                f"Exactness before compression: {curr_exact}\n"
-                f"Exactness after compression: {compressed_exact}"
-            )
-
         return "Correctness check successful! Compression is valid."
 
     agent = Agent(
