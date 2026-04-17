@@ -300,7 +300,7 @@ class SynthesisAgent:
                     else [run_eval_tool]
                 ),
             ],
-            model=args.model,
+            model=args.synth_model,
         )
 
     async def run(self, round_num: int) -> tuple[str, object, Any, list[str]]:
@@ -345,7 +345,7 @@ async def run_single_synthesis_task(
     if args.mock_synth:
         llm_output = (Path(__file__).parent / "examples" / "kb_top.mlir").read_text()
     else:
-        print(f"{tag} Using model: {args.model}")
+        print(f"{tag} Using model: {args.synth_model}")
         t0 = time.monotonic()
         llm_output, run_result, agent_input, soln_iters = await synth_agent.run(round_num)
         synthesis_time = time.monotonic() - t0

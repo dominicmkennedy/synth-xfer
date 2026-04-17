@@ -26,6 +26,7 @@ class SearchResult:
     op_sigs: list[Opcode]
     hits: list[PatternHit]
     patterns_considered: int
+    program_dags: dict[str, DAG]
 
 
 def _pattern_key(root: Vertex) -> str:
@@ -139,11 +140,22 @@ def _expand_pattern_guided(
     return results
 
 
-def _collect_program_dags(paths: list[Path]) -> dict[str, DAG]:
+def _dags_from_paths(paths: list[Path]) -> dict[str, DAG]:
     dags: dict[str, DAG] = {}
     for path in paths:
         for fn, dag in mlir_program_to_dags(path).items():
             dags[f"{path.name}:{fn}"] = dag
+    return dags
+
+
+def _dags_from_strs(progs: list[str]) -> dict[str, DAG]:
+    dags: dict[str, DAG] = {}
+    for i, prog in enumerate(progs):
+        try:
+            for fn, dag in mlir_program_to_dags(prog).items():
+                dags[f"func{i}:{fn}"] = dag
+        except Exception:
+            print(f"Exception on the following program:\n{prog}")
     return dags
 
 
@@ -233,7 +245,7 @@ def _upper_bound(
 
 
 def search_patterns(
-    paths: list[Path], max_instructions: int = 3, top_k: int | None = None
+    progs: list[Path | str], max_instructions: int = 3, top_k: int | None = None
 ) -> SearchResult:
     """Branch-and-bound search for high-utility DAG patterns.
 
@@ -242,7 +254,12 @@ def search_patterns(
         UB(P) = sum_{r in match_roots(P)} |reachable_vertices(r)|
     Branches are pruned when UB <= k-th best utility seen so far.
     """
-    program_dags = _collect_program_dags(paths)
+
+    if isinstance(progs[0], Path):
+        program_dags = _dags_from_paths(progs)
+    else:
+        program_dags = _dags_from_strs(progs)
+
     op_sigs = _collect_opcode_signatures(program_dags)
     reachable_sizes = _precompute_reachable_sizes(program_dags)
 
@@ -321,4 +338,6 @@ def search_patterns(
             heapq.heappush(heap, (-child_ub, next(counter), child))
 
     hits = sorted([h for _, _, h in top_hits], key=lambda h: (-h.utility, h.pattern_key))
-    return SearchResult(op_sigs=op_sigs, hits=hits, patterns_considered=ptn_cnt)
+    return SearchResult(
+        op_sigs=op_sigs, hits=hits, patterns_considered=ptn_cnt, program_dags=program_dags
+    )

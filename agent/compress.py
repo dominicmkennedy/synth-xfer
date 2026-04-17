@@ -143,14 +143,14 @@ def run_compress_task(
     prompt = args.compress_prompt.read_text()
 
     output_dir = Path(args.output)
-    print(f"Using model: {args.model}")
+    print(f"Using model: {args.library_model}")
 
     llm_output, run_result = _run_agent_compress(
         prompt=prompt,
         api_key=api_key,
         target=target,
         library=library,
-        model=args.model,
+        model=args.library_model,
         ops_path=args.ops,
         instructions_path=args.compress_instructions,
         max_turns=args.max_turns,

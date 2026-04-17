@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from agent.stitch.converter import pattern_to_mlir_program
 from agent.stitch.search import search_patterns
 
 
@@ -41,7 +42,7 @@ def main() -> None:
         print(
             f"=== utility={hit.utility} | size = {hit.pattern.inst_count} | {hit.total_matches} matches ==="
         )
-        print(hit.pattern)
+        print(pattern_to_mlir_program(hit.pattern, result.program_dags))
         print()
 
     print(f"patterns considered: {result.patterns_considered}")

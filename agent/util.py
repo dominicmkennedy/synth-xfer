@@ -57,6 +57,13 @@ class LibraryFunction(BaseModel):
     source: str
 
 
+class FunctionDocumentation(BaseModel):
+    """Name and docstring of a function"""
+
+    function_name: str
+    docstring: str
+
+
 class LibraryState(BaseModel):
     """Current learned library state passed to synthesis prompts."""
 
