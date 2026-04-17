@@ -28,14 +28,6 @@ def _is_fully_sound(eval_summary: str | None) -> bool:
     return m is not None and float(m.group(1)) == 100.0
 
 
-def _is_fully_exact(eval_summary: str | None) -> bool:
-    """Return True if eval_summary reports Exact % = 100."""
-    if not eval_summary:
-        return False
-    m = re.search(r"Exact %:\s*([\d.]+)", eval_summary)
-    return m is not None and float(m.group(1)) == 100.0
-
-
 def run_library_learning_loop(
     tasks: list[SynthesisTask],
     num_rounds: int,
@@ -63,11 +55,7 @@ def run_library_learning_loop(
         tasks_to_run: list[SynthesisTask] = []
         for task in tasks:
             agent = synth_agents[task.op_name]
-            if args.meet and agent.is_perfect:
-                print(
-                    f"[{task.op_name.upper()}] Skipping synthesis: already marked perfect."
-                )
-                continue
+            # Xuanyu's TODO: skip if the solution set is already perfect
             tasks_to_run.append(task)
         latest_results = asyncio.run(
             run_synthesis_tasks(synth_agents, tasks_to_run, round_idx, library, args)
@@ -81,8 +69,11 @@ def run_library_learning_loop(
                     synth_agents[result.task.op_name].solution_set.upd_solution(
                         result.solution_text
                     )
-                if _is_fully_exact(result.eval_summary):
-                    synth_agents[result.task.op_name].is_perfect = True
+        else:
+            for result in latest_results:
+                solution_set = synth_agents[result.task.op_name].solution_set
+                solution_set.solutions = [result.solution_text]
+                solution_set._base_result_cache = None
 
         # Xuanyu: maybe when meet is enabled, not only the latest solution but the entire solution set should be sent to the library learning.
         if round_idx < num_rounds and not args.no_learn:
@@ -110,8 +101,6 @@ def run_library_learning_loop(
                 latest_results = new_results
 
     for op_name, agent in synth_agents.items():
-        if not agent.solution_set.solutions:
-            continue
         try:
             final_solution = agent.solution_set.build_final_solution()
             final_solution_path = output_dir / f"final_solution_{op_name.lower()}.mlir"

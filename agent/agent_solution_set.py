@@ -8,8 +8,8 @@ from agent.util import (
     _format_eval_examples_for_agent,
     _get_xfer_name,
     _run_eval,
-    merge_library_text,
     format_result,
+    merge_library_text,
     rename_xfer,
 )
 from synth_xfer._util.eval_result import EvalResult

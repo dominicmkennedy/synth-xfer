@@ -10,7 +10,6 @@ from agents import Agent, Runner, function_tool
 
 from agent.agent_solution_set import AgentSolutionSet
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.eval_result import EvalResult
 
 from .agent_helper import format_agent_run_dump
 from .util import (
@@ -67,11 +66,11 @@ class SynthesisAgent:
         )
         self._agent = self._build_agent(args, api_key)
         self.solution_set = AgentSolutionSet(current_lib)
-        self.eval_results: EvalResult
 
     def update_library(self, new_lib: LibraryState) -> None:
         """Update the library used by this agent's tools."""
         self._library = new_lib
+        self.solution_set.library = new_lib
 
     def _build_agent(self, args, api_key: str) -> Agent:
         del api_key  # Reserved for future model/provider auth parity.
