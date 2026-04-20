@@ -154,3 +154,15 @@ def build_enum_data(
     )
 
     return EnumData(metadata, df)
+
+
+def resolve_dataset_op_path(op: str) -> Path:
+    op_input = Path(op)
+    if op_input.suffix != ".mlir":
+        raise ValueError("Dataset metadata 'op' must be a .mlir path")
+    if op_input.is_file():
+        return op_input
+    repo_path = Path(__file__).resolve().parents[2] / op_input
+    if repo_path.is_file():
+        return repo_path
+    raise FileNotFoundError(f"Could not find mlir op from dataset path: {op_input}")

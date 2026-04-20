@@ -317,7 +317,7 @@ def generate_pattern_inputs(
 
     metadata = EnumMetaData(
         domain=domain,
-        op=f"pattern_{path.stem}",
+        op=f"{path}",
         arity=len(dag.args),
         seed=None,
         lbw=[],

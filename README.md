@@ -74,6 +74,17 @@ Final Soln   | Exact 96.7078% | 3 solutions |
 
 The command reads the MLIR program `mlir/Operations/And.mlir` and writes addtional output infor into `outputs/KnownBits_And/`.
 
+### Dataset-Driven Run
+
+Use an existing input dataset (metadata in the TSV determines op/domain/bitwidth workloads):
+
+```bash
+sxf --input knownbits_and_input_data.tsv \
+    --num-iters 2                        \
+    --num-steps 100                      \
+    --num-mcmc 50
+```
+
 ### Full Experiment Setup
 
 This is a more comprehensive invocation closer to the experiment setup used in the paper (this can take up to an hour depending on your machine):
@@ -94,6 +105,7 @@ sxf --op mlir/Operations/Add.mlir     \
 | CLI flag                         | Description                                                                                                                                                                          |
 |----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `--op <path>`                    | Path to a concrete operation or pattern (`.mlir` file) to synthesize an abstract transformer for.                                                                                    |
+| `-i, --input <path>`             | Path to an existing dataset TSV. In dataset mode, op/domain/bitwidth workloads are read from dataset metadata.                                                                       |
 | `--benchmark <path>`             | Path to a benchmark YAML file. Runs multiple synthesis jobs in parallel using the per-domain, per-arity settings from the file.                                                      |
 | `-o <path>`                      | Output directory where synthesized results and intermediate outputs will be written.                                                                                                 |
 | `--seed <int>`                   | Seed for the random number generator to make runs reproducible.                                                                                                                      |
@@ -115,6 +127,8 @@ sxf --op mlir/Operations/Add.mlir     \
 Exactly one of `--op` or `--benchmark` must be provided.
 
 When using `--benchmark`, the bitwidth controls come from the YAML file rather than the command line.
+
+When using `--input`, do not pass `--op`, `--domain`, `--benchmark`, `--lbw`, `--mbw`, or `--hbw`.
 
 ### Benchmark Configs
 

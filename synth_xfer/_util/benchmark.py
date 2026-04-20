@@ -11,6 +11,7 @@ import yaml
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.log import init_logging
 from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
+from synth_xfer._util.tsv import EnumData, resolve_dataset_op_path
 from synth_xfer.cli.args import get_sampler
 from synth_xfer.cli.sxf import run
 
@@ -141,6 +142,7 @@ def _execute_job(
     args: Namespace,
     output_folder: Path,
     allow_existing: bool,
+    eval_data: EnumData | None = None,
 ) -> dict[str, Any]:
     sampler = get_sampler(args)
 
@@ -181,6 +183,7 @@ def _execute_job(
             num_unsound_candidates=args.num_unsound_candidates,
             optimize=args.optimize,
             sampler=sampler,
+            eval_data=eval_data,
         )
 
         return {
@@ -232,20 +235,38 @@ def _execute_benchmark_job(x: tuple[BenchmarkInput, Namespace]) -> dict[str, Any
 
 
 def run_single_synth(args: Namespace) -> None:
-    assert args.op is not None
-    assert args.domain is not None
-
-    domain = AbstractDomain[args.domain]
-    op_path = Path(args.op)
+    eval_data: EnumData | None = None
+    if args.input is not None:
+        with args.input.open("r", encoding="utf-8") as f:
+            eval_data = EnumData.read_tsv(f)
+        domain = eval_data.metadata.domain
+        op_path = resolve_dataset_op_path(eval_data.metadata.op)
+        arity = len(get_fns(parse_mlir_mod(op_path))["concrete_op"].args)
+        if arity != eval_data.metadata.arity:
+            raise ValueError(
+                f"Dataset arity {eval_data.metadata.arity} does not match inferred op arity {arity}"
+            )
+        lbw = eval_data.metadata.lbw
+        mbw = eval_data.metadata.mbw
+        hbw = eval_data.metadata.hbw
+    else:
+        assert args.op is not None
+        assert args.domain is not None
+        domain = AbstractDomain[args.domain]
+        op_path = Path(args.op)
+        arity = len(get_fns(parse_mlir_mod(op_path))["concrete_op"].args)
+        lbw = args.lbw
+        mbw = args.mbw
+        hbw = args.hbw
 
     bench = BenchmarkInput(
         name=op_path.stem,
         domain=domain,
         op_path=op_path,
-        arity=len(get_fns(parse_mlir_mod(op_path))["concrete_op"].args),
-        lbw=args.lbw,
-        mbw=args.mbw,
-        hbw=args.hbw,
+        arity=arity,
+        lbw=lbw,
+        mbw=mbw,
+        hbw=hbw,
     )
 
     output_folder = (
@@ -254,7 +275,13 @@ def run_single_synth(args: Namespace) -> None:
         else Path(args.output)
     )
 
-    ret = _execute_job(bench, args, output_folder, allow_existing=True)
+    ret = _execute_job(
+        bench,
+        args,
+        output_folder,
+        allow_existing=True,
+        eval_data=eval_data,
+    )
     if not ret["Success"]:
         print(f"Error: {ret['Termanation Error']}")
 

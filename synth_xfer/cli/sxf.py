@@ -20,6 +20,8 @@ from synth_xfer._util.parse_mlir import HelperFuncs, get_helper_funcs, top_as_xf
 from synth_xfer._util.random import Random, Sampler
 from synth_xfer._util.solution_set import EvalFn, SolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
+from synth_xfer._util.tsv import EnumData
+from synth_xfer._util.xfer_data import enumdata_to_eval_inputs
 from synth_xfer._util.xfer_func import XferFunc
 from synth_xfer.cli.args import int_list, int_triple, int_tuple, make_sampler_parser
 
@@ -79,6 +81,19 @@ def _setup_context(
     return c
 
 
+def _prepare_dataset_eval_inputs(
+    eval_data: EnumData,
+) -> tuple[
+    dict[int, ToEval],
+    list[int],
+    list[tuple[int, int]],
+    list[tuple[int, int, int]],
+]:
+    to_eval = enumdata_to_eval_inputs(eval_data)
+    metadata = eval_data.metadata
+    return to_eval, metadata.lbw, metadata.mbw, metadata.hbw
+
+
 def run(
     domain: AbstractDomain,
     num_mcmc: int,
@@ -99,6 +114,7 @@ def run(
     num_unsound_candidates: int,
     optimize: bool,
     sampler: Sampler,
+    eval_data: EnumData | None = None,
 ) -> EvalResult:
     logger = get_logger()
     dsl_ops: DslOpSet | None = load_dsl_ops(dsl_ops_path) if dsl_ops_path else None
@@ -108,17 +124,22 @@ def run(
     seed = random.randint(0, 2**32 - 1) if seed is None else seed
 
     helper_funcs = get_helper_funcs(transformer_file, domain)
-    all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
-    low_and_med_bw = set(lbw) | {t[0] for t in mbw}
 
     context = _setup_context(random, False, dsl_ops)
     context_weighted = _setup_context(random, False, dsl_ops)
     context_cond = _setup_context(random, True, dsl_ops)
 
-    start_time = perf_counter()
-    to_eval = enum(lbw, mbw, hbw, seed, helper_funcs, sampler)
-    run_time = perf_counter() - start_time
-    logger.perf(f"Enum engine took {run_time:.4f}s")
+    if eval_data is None:
+        start_time = perf_counter()
+        to_eval = enum(lbw, mbw, hbw, seed, helper_funcs, sampler)
+        run_time = perf_counter() - start_time
+        logger.perf(f"Enum engine took {run_time:.4f}s")
+    else:
+        to_eval, lbw, mbw, hbw = _prepare_dataset_eval_inputs(eval_data)
+        logger.perf("Dataset mode: using provided eval dataset")
+
+    all_bws = list(set(lbw) | set(x[0] for x in mbw) | set(x[0] for x in hbw))
+    low_and_med_bw = set(lbw) | set(t[0] for t in mbw)
 
     eval_fn = _eval_helper(to_eval, all_bws, helper_funcs, low_and_med_bw)
     solution_set = SolutionSet([], optimize=optimize)
@@ -247,6 +268,12 @@ def _build_arg_parser() -> Namespace:
         help="YAML config specifying benchmark inputs and per-arity settings",
     )
     p.add_argument(
+        "-i",
+        "--input",
+        type=Path,
+        help="Path to EnumData TSV used as evaluation dataset",
+    )
+    p.add_argument(
         "--dsl-ops",
         type=Path,
         help="Path to DSL op-set JSON (e.g., dsl/ops_set_0.json)",
@@ -352,6 +379,31 @@ def _build_arg_parser() -> Namespace:
 def _validate_args(args: Namespace) -> None:
     has_op = args.op is not None
     has_benchmark = args.benchmark is not None
+    has_input = args.input is not None
+
+    if has_input:
+        invalid_flags: list[str] = []
+        if has_op:
+            invalid_flags.append("--op")
+        if has_benchmark:
+            invalid_flags.append("--benchmark")
+        if args.domain is not None:
+            invalid_flags.append("--domain")
+        if invalid_flags:
+            raise ValueError(f"{', '.join(invalid_flags)} cannot be used with --input")
+
+        invalid_bw_flags: list[str] = []
+        if args.lbw != [4]:
+            invalid_bw_flags.append("--lbw")
+        if args.mbw != []:
+            invalid_bw_flags.append("--mbw")
+        if args.hbw != []:
+            invalid_bw_flags.append("--hbw")
+        if invalid_bw_flags:
+            raise ValueError(
+                f"{', '.join(invalid_bw_flags)} cannot be used with --input; bitwidths come from dataset metadata"
+            )
+        return
 
     if has_op == has_benchmark:
         raise ValueError("Specify exactly one of --op or --benchmark")
@@ -381,10 +433,10 @@ def main() -> None:
     args = _build_arg_parser()
     _validate_args(args)
 
-    if args.op is not None:
-        run_single_synth(args)
-    else:
+    if args.benchmark is not None:
         run_benchmark(args)
+    else:
+        run_single_synth(args)
 
 
 if __name__ == "__main__":
