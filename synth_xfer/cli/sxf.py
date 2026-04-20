@@ -81,19 +81,6 @@ def _setup_context(
     return c
 
 
-def _prepare_dataset_eval_inputs(
-    eval_data: EnumData,
-) -> tuple[
-    dict[int, ToEval],
-    list[int],
-    list[tuple[int, int]],
-    list[tuple[int, int, int]],
-]:
-    to_eval = enumdata_to_eval_inputs(eval_data)
-    metadata = eval_data.metadata
-    return to_eval, metadata.lbw, metadata.mbw, metadata.hbw
-
-
 def run(
     domain: AbstractDomain,
     num_mcmc: int,
@@ -135,7 +122,7 @@ def run(
         run_time = perf_counter() - start_time
         logger.perf(f"Enum engine took {run_time:.4f}s")
     else:
-        to_eval, lbw, mbw, hbw = _prepare_dataset_eval_inputs(eval_data)
+        to_eval = enumdata_to_eval_inputs(eval_data)
         logger.perf("Dataset mode: using provided eval dataset")
 
     all_bws = list(set(lbw) | set(x[0] for x in mbw) | set(x[0] for x in hbw))

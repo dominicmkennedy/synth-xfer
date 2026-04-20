@@ -242,10 +242,6 @@ def run_single_synth(args: Namespace) -> None:
         domain = eval_data.metadata.domain
         op_path = resolve_dataset_op_path(eval_data.metadata.op)
         arity = len(get_fns(parse_mlir_mod(op_path))["concrete_op"].args)
-        if arity != eval_data.metadata.arity:
-            raise ValueError(
-                f"Dataset arity {eval_data.metadata.arity} does not match inferred op arity {arity}"
-            )
         lbw = eval_data.metadata.lbw
         mbw = eval_data.metadata.mbw
         hbw = eval_data.metadata.hbw
