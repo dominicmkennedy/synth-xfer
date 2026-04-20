@@ -200,6 +200,9 @@ class EvalResult:
     def is_sound(self):
         return self.sounds == self.all_cases
 
+    def is_perfect(self):
+        return self.exacts == self.all_low_med_cases
+
     def get_potential_improve(self):
         try:
             return (self.base_dist - self.sound_dist) / (self.base_dist)
