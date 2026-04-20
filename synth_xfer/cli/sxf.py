@@ -25,7 +25,10 @@ from synth_xfer.cli.args import int_list, int_triple, int_tuple, make_sampler_pa
 
 
 def _eval_helper(
-    to_eval: dict[int, ToEval], bws: list[int], helper_funcs: HelperFuncs
+    to_eval: dict[int, ToEval],
+    bws: list[int],
+    helper_funcs: HelperFuncs,
+    low_and_med_bw: set[int],
 ) -> EvalFn:
     def helper(
         xfer: list[XferFunc],
@@ -59,7 +62,7 @@ def _eval_helper(
                 for bw in to_eval
             }
 
-            results = eval_transfer_func(input)
+            results = eval_transfer_func(input, low_and_med_bw)
 
         return results
 
@@ -99,11 +102,6 @@ def run(
 ) -> EvalResult:
     logger = get_logger()
     dsl_ops: DslOpSet | None = load_dsl_ops(dsl_ops_path) if dsl_ops_path else None
-
-    EvalResult.init_bw_settings(
-        set(lbw), set([t[0] for t in mbw]), set([t[0] for t in hbw])
-    )
-
     logger.debug("Round_ID\tSound%\tUExact%\tDisReduce\tCost")
 
     random = Random(seed)
@@ -111,6 +109,7 @@ def run(
 
     helper_funcs = get_helper_funcs(transformer_file, domain)
     all_bws = lbw + [x[0] for x in mbw] + [x[0] for x in hbw]
+    low_and_med_bw = set(lbw) | {t[0] for t in mbw}
 
     context = _setup_context(random, False, dsl_ops)
     context_weighted = _setup_context(random, False, dsl_ops)
@@ -121,7 +120,7 @@ def run(
     run_time = perf_counter() - start_time
     logger.perf(f"Enum engine took {run_time:.4f}s")
 
-    eval_fn = _eval_helper(to_eval, all_bws, helper_funcs)
+    eval_fn = _eval_helper(to_eval, all_bws, helper_funcs, low_and_med_bw)
     solution_set = SolutionSet([], optimize=optimize)
 
     start_time = perf_counter()
@@ -221,7 +220,7 @@ def run(
         jit.add_mod(lowerer)
         sol_ptrs = {bw: jit.get_fn_ptr(f"solution_{bw}_shim") for bw in all_bws}
         sol_to_eval = {bw: (to_eval[bw], [sol_ptrs[bw]], []) for bw in all_bws}
-        solution_result = eval_transfer_func(sol_to_eval)[0]
+        solution_result = eval_transfer_func(sol_to_eval, low_and_med_bw)[0]
 
     solution_exact = solution_result.get_exact_prop() * 100
     print(

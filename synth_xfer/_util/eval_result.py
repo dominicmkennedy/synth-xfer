@@ -74,14 +74,10 @@ class PerBitRes:
 
 
 class EvalResult:
-    # Static variables
-    lbws: set[int] = set()
-    mbws: set[int] = set()
-    hbws: set[int] = set()
-
     # Per Bit Results
     per_bit_res: list[PerBitRes]
     max_bit: int
+    low_and_med_bw: set[int]
 
     # These metrics are defined over all bitwidths
     all_cases: int
@@ -100,20 +96,10 @@ class EvalResult:
     unsound_examples: list[CaseExample]
     imprecise_examples: list[CaseExample]
 
-    @classmethod
-    def init_bw_settings(
-        cls,
-        lbws: set[int],
-        mbws: set[int],
-        hbws: set[int],
-    ):
-        cls.lbws = lbws
-        cls.mbws = mbws
-        cls.hbws = hbws
-
-    def __init__(self, per_bit_res: list[PerBitRes]):
+    def __init__(self, per_bit_res: list[PerBitRes], low_and_med_bw: set[int]):
         per_bit_res.sort(key=lambda x: x.bitwidth)
         self.per_bit_res = per_bit_res
+        self.low_and_med_bw = set(low_and_med_bw)
         self.max_bit = max(per_bit_res, key=lambda x: x.bitwidth).bitwidth
         self.all_cases = sum(res.all_cases for res in per_bit_res)
         self.sounds = sum(res.sounds for res in per_bit_res)
@@ -164,14 +150,12 @@ class EvalResult:
         return "\n".join(lines)
 
     def get_low_med_res(self) -> list[PerBitRes]:
-        return [
-            res
-            for res in self.per_bit_res
-            if res.bitwidth in EvalResult.lbws | EvalResult.mbws
-        ]
+        return [res for res in self.per_bit_res if res.bitwidth in self.low_and_med_bw]
 
     def get_high_res(self) -> list[PerBitRes]:
-        return [res for res in self.per_bit_res if res.bitwidth in EvalResult.hbws]
+        return [
+            res for res in self.per_bit_res if res.bitwidth not in self.low_and_med_bw
+        ]
 
     def get_unsolved_cases(self) -> int:
         return self.unsolved_cases
@@ -195,13 +179,23 @@ class EvalResult:
         return self.sounds / self.all_cases
 
     def get_exact_prop(self) -> float:
-        return self.exacts / self.all_low_med_cases
+        return (
+            0.0 if self.all_low_med_cases == 0 else self.exacts / self.all_low_med_cases
+        )
 
     def get_unsolved_exact_prop(self) -> float:
-        return self.unsolved_exacts / self.unsolved_cases
+        return (
+            0.0
+            if self.unsolved_cases == 0
+            else self.unsolved_exacts / self.unsolved_cases
+        )
 
     def get_new_exact_prop(self) -> float:
-        return self.unsolved_exacts / self.all_low_med_cases
+        return (
+            0.0
+            if self.all_low_med_cases == 0
+            else self.unsolved_exacts / self.all_low_med_cases
+        )
 
     def is_sound(self):
         return self.sounds == self.all_cases

@@ -249,17 +249,20 @@ def enum(
     return low_to_evals | mid_to_evals | high_to_evals
 
 
-def get_eval_res(per_bits: list[list[PerBitRes]]) -> list[EvalResult]:
+def get_eval_res(
+    per_bits: list[list[PerBitRes]], low_and_med_bw: set[int]
+) -> list[EvalResult]:
     ds: list[list[PerBitRes]] = [[] for _ in range(len(per_bits[0]))]
     for es in per_bits:
         for i, e in enumerate(es):
             ds[i].append(e)
 
-    return [EvalResult(x) for x in ds]
+    return [EvalResult(x, low_and_med_bw) for x in ds]
 
 
 def eval_transfer_func(
     x: EvalInputMap,
+    low_and_med_bw: set[int],
     unsound_ex: int = 0,
     imprecise_ex: int = 0,
 ) -> list[EvalResult]:
@@ -272,7 +275,7 @@ def eval_transfer_func(
         )
         per_bits.append(get_per_bit(result))
 
-    return get_eval_res(per_bits)
+    return get_eval_res(per_bits, low_and_med_bw)
 
 
 def parse_to_run_inputs(

@@ -253,6 +253,7 @@ def _eval_group(group: EvalGroup, args: Namespace) -> list[OutputRow]:
     selected_to_eval = {exact_bw: to_eval[exact_bw]}
     if dist_bw != exact_bw:
         selected_to_eval[dist_bw] = to_eval[dist_bw]
+    low_and_med_bw = {exact_bw}
 
     helpers = get_helper_funcs(group.op_path, group.domain)
     top_mlir = top_as_xfer(helpers.transfer_func)
@@ -278,6 +279,7 @@ def _eval_group(group: EvalGroup, args: Namespace) -> list[OutputRow]:
                 )
                 for bw, values in selected_to_eval.items()
             },
+            low_and_med_bw=low_and_med_bw,
             unsound_ex=args.unsound_ex,
             imprecise_ex=args.imprecise_ex,
         )
