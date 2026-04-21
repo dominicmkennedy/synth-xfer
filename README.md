@@ -383,6 +383,7 @@ You can omit `--dump-agent-run` if you don't need the full run dump.
 |--------|-------------|
 | `op_file` | Operation MLIR file(s) (e.g. `mlir/Operations/And.mlir mlir/Operations/Or.mlir`). Mutually exclusive with `--benchmark`. |
 | `--benchmark` | Path to a `bench.yaml` file specifying ops per domain (see below). Mutually exclusive with `op_file`. |
+| `-i, --input` | One or more EnumData TSV datasets used for eval-driven synthesis (`--input a.tsv b.tsv ...`). In this mode, task/op and bitwidths come from each dataset metadata. |
 | `-o, --output` | Output directory (default: `outputs/agent`). |
 | `--model` | OpenAI model (default: `gpt-4`). See [OpenAI pricing](https://developers.openai.com/api/docs/pricing). |
 | `--skip-eval` | Skip running eval-final after synthesis. |
@@ -390,6 +391,17 @@ You can omit `--dump-agent-run` if you don't need the full run dump.
 | `--rounds` | Number of library-update rounds; `0` = synthesis-only (default: `0`). |
 | `--meet` | Accumulate solutions across rounds into a `SolutionSet` and combine them via meet. |
 | `--no-learn` | Skip the library learning step after each synthesis round. |
+
+**Dataset mode (`--input`) constraints:**
+- Accepts only EnumData TSV files (frontmatter + tab-separated rows), not plain CSV.
+- One TSV per op; pass multiple TSV paths to synthesize multiple ops in one run.
+- Do not combine with `op_file`, `--benchmark`, `--lbw`, `--mbw`, or `--hbw`.
+- Current support is for `KnownBits` datasets.
+
+Example:
+```bash
+agent-synth --input kb_and_input_data.tsv kb_or_input_data.tsv -o outputs/agent-kb
+```
 
 **Using `--benchmark` with a `bench.yaml` file:**
 

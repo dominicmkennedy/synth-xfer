@@ -49,13 +49,14 @@ class SynthesisAgent:
         args,
         api_key: str,
         current_lib: LibraryState,
+        eval_args_override: EvalArgs | None = None,
     ) -> None:
         self._task = task
         self._args = args
         self._library = current_lib
         self._history: list[Any] | None = None
         self._soln_iters: list[str] = []
-        self._eval_args = EvalArgs(
+        self._eval_args = eval_args_override or EvalArgs(
             op_path=Path(task.op_file),
             domain=AbstractDomain.KnownBits,
             lbw=args.lbw,

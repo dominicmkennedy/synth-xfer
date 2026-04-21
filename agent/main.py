@@ -6,11 +6,16 @@ from pathlib import Path
 import re
 import sys
 
+from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.tsv import EnumData, resolve_dataset_op_path
+from synth_xfer._util.xfer_data import enumdata_to_eval_inputs
+
 from .args import parse_args
 from .compress import run_compress_task
 from .learn import run_library_learn_task, run_stitch_learn
 from .synth import SynthesisAgent, run_synthesis_tasks
 from .util import (
+    EvalArgs,
     LibraryState,
     SynthesisResult,
     SynthesisTask,
@@ -34,6 +39,7 @@ def run_library_learning_loop(
     initial_library: LibraryState,
     args,
     api_key: str,
+    eval_args_by_op: dict[str, EvalArgs] | None = None,
 ) -> tuple[LibraryState, list[SynthesisResult]]:
     """Top-level loop: synthesize tasks, then improve library."""
     library = initial_library
@@ -44,7 +50,16 @@ def run_library_learning_loop(
 
     # Create one persistent agent per task (agent + tools built once).
     synth_agents = {
-        task.op_name: SynthesisAgent(task, args, api_key, library) for task in tasks
+        task.op_name: SynthesisAgent(
+            task,
+            args,
+            api_key,
+            library,
+            eval_args_override=(
+                eval_args_by_op.get(task.op_name) if eval_args_by_op else None
+            ),
+        )
+        for task in tasks
     }
 
     # Round 0 is synthesis-only (single-shot equivalent).
@@ -123,20 +138,67 @@ def run_library_learning_loop(
     return library, latest_results
 
 
+def build_tasks_and_eval_args(
+    args,
+) -> tuple[list[SynthesisTask], dict[str, EvalArgs] | None]:
+    """Build synthesis tasks and optional eval overrides from CLI args."""
+    if not args.input:
+        tasks = [
+            SynthesisTask(op_file=op_file, op_name=extract_op_name(op_file))
+            for op_file in args.op_file
+        ]
+        return tasks, None
+
+    tasks: list[SynthesisTask] = []
+    eval_args_by_op: dict[str, EvalArgs] = {}
+    for input_path in args.input:
+        with input_path.open("r", encoding="utf-8") as f:
+            data = EnumData.read_tsv(f)
+
+        if data.metadata.domain != AbstractDomain.KnownBits:
+            raise ValueError(
+                "agent-synth --input currently supports only KnownBits datasets"
+            )
+
+        op_path = resolve_dataset_op_path(data.metadata.op)
+        op_name = extract_op_name(str(op_path))
+        if op_name in eval_args_by_op:
+            raise ValueError(
+                f"Duplicate op '{op_name}' inferred from --input datasets; each input TSV must target a distinct op"
+            )
+
+        task = SynthesisTask(op_file=str(op_path), op_name=op_name)
+        eval_args = EvalArgs(
+            op_path=op_path,
+            domain=data.metadata.domain,
+            lbw=data.metadata.lbw,
+            mbw=data.metadata.mbw,
+            hbw=data.metadata.hbw,
+            unsound_ex=5,
+            imprecise_ex=5,
+            to_eval=enumdata_to_eval_inputs(data),
+        )
+        tasks.append(task)
+        eval_args_by_op[op_name] = eval_args
+    return tasks, eval_args_by_op
+
+
 def main():
     """Synthesize transformer using selected method."""
     args = parse_args()
 
     api_key = get_api_key()
 
-    tasks = [
-        SynthesisTask(op_file=op_file, op_name=extract_op_name(op_file))
-        for op_file in args.op_file
-    ]
+    tasks, eval_args_by_op = build_tasks_and_eval_args(args)
     initial_library = load_initial_library(args.library_dir)
 
     final_library, latest_results = run_library_learning_loop(
-        tasks, args.rounds, initial_library, args, api_key
+        tasks,
+        args.rounds,
+        initial_library,
+        args,
+        api_key,
+        eval_args_by_op,
     )
 
     return 0

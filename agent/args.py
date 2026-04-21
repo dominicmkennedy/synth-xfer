@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+from synth_xfer._util.tsv import EnumData
+
 
 def _parse_bw_pair(s: str) -> tuple[int, int]:
     parts = [int(x.strip()) for x in s.split(",")]
@@ -50,12 +52,43 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
     if args.library_dir is not None and not args.library_dir.is_dir():
         parser.error(f"--library-dir: not a directory: {args.library_dir}")
 
-    if args.benchmark is not None and args.op_file:
-        parser.error("op_file and --benchmark are mutually exclusive")
-    if args.benchmark is None and not args.op_file:
-        parser.error("provide op_file or --benchmark")
+    has_input = bool(args.input)
+    has_benchmark = args.benchmark is not None
+    has_op_file = bool(args.op_file)
 
-    if args.benchmark is not None:
+    if has_input:
+        if has_benchmark:
+            parser.error("--input and --benchmark are mutually exclusive")
+        if has_op_file:
+            parser.error("--input and op_file are mutually exclusive")
+        for input_path in args.input:
+            if not input_path.exists():
+                parser.error(f"--input: path does not exist: {input_path}")
+
+            try:
+                with input_path.open(encoding="utf-8") as f:
+                    EnumData.read_tsv(f)
+            except Exception as e:
+                parser.error(f"--input: failed to parse EnumData TSV '{input_path}': {e}")
+
+        invalid_bw_flags: list[str] = []
+        if args.lbw != [4]:
+            invalid_bw_flags.append("--lbw")
+        if args.mbw != [(8, 10000)]:
+            invalid_bw_flags.append("--mbw")
+        if args.hbw != []:
+            invalid_bw_flags.append("--hbw")
+        if invalid_bw_flags:
+            parser.error(
+                f"{', '.join(invalid_bw_flags)} cannot be used with --input; bitwidths come from dataset metadata"
+            )
+    else:
+        if has_benchmark and has_op_file:
+            parser.error("op_file and --benchmark are mutually exclusive")
+        if not has_benchmark and not has_op_file:
+            parser.error("provide op_file, --benchmark, or --input")
+
+    if has_benchmark:
         if not args.benchmark.exists():
             parser.error(f"--benchmark: path does not exist: {args.benchmark}")
         args.op_file = _load_ops_from_bench(args.benchmark)
@@ -92,6 +125,14 @@ def parse_args() -> argparse.Namespace:
         default=None,
         metavar="YAML",
         help="Path to bench.yaml specifying ops per domain (mutually exclusive with op_file)",
+    )
+    parser.add_argument(
+        "-i",
+        "--input",
+        type=Path,
+        nargs="+",
+        default=None,
+        help="EnumData TSV input(s) used as evaluation dataset (one per op)",
     )
     parser.add_argument(
         "-o", "--output", default="outputs/agent", help="Output directory"
