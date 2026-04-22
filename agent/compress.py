@@ -13,8 +13,9 @@ from .util import (
     SynthesisResult,
     clean_llm_output,
     eval_transformer,
-    print_token_usage,
+    get_op_output_dir,
     save_file,
+    summarize_token_usage,
 )
 
 
@@ -143,6 +144,7 @@ def run_compress_task(
     prompt = args.compress_prompt.read_text()
 
     output_dir = Path(args.output)
+    op_output_dir = get_op_output_dir(output_dir, op_name)
     print(f"Using model: {args.library_model}")
 
     llm_output, run_result = _run_agent_compress(
@@ -156,21 +158,22 @@ def run_compress_task(
         max_turns=args.max_turns,
         eval_args=eval_args,
     )
-    print_token_usage(run_result)
+    summary = summarize_token_usage(run_result, model=args.library_model)
+    print(summary)
 
     target_text = clean_llm_output(llm_output)
 
     if args.dump_agent_run:
         dump_path = save_file(
-            format_agent_run_dump(run_result),
-            output_dir,
+            format_agent_run_dump(run_result, model=args.library_model),
+            op_output_dir,
             f"compress_run{round_num}_{op_name}.log",
         )
         print(f"Agent run dump: {dump_path}")
 
     transformer_file = save_file(
         target_text,
-        output_dir,
+        op_output_dir,
         f"kb_r{round_num}_{op_name}_compressed.mlir",
     )
     print(f"Transformer: {transformer_file}")

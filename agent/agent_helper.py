@@ -8,6 +8,8 @@ from agents.items import (
     ToolCallOutputItem,
 )
 
+from .util import summarize_token_usage
+
 # Helper stuff for debugging
 
 
@@ -26,9 +28,15 @@ def _format_tool_call_args(args) -> str:
     return args if isinstance(args, str) else str(args)
 
 
-def format_agent_run_dump(result) -> str:
+def format_agent_run_dump(result, model: str | None = None) -> str:
     """Format a RunResult into a readable dump of the full agent run (messages, tool calls, outputs)."""
-    lines: list[str] = ["=== Agent run dump ===", ""]
+    token_summary = summarize_token_usage(result, model=model)
+    lines: list[str] = [
+        "=== Agent run dump ===",
+        "",
+        str(token_summary),
+        "",
+    ]
 
     for i, item in enumerate(result.new_items):
         lines.append(

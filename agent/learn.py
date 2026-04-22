@@ -20,8 +20,8 @@ from .util import (
     extract_op_name,
     get_api_key,
     load_initial_library,
-    print_token_usage,
     save_file,
+    summarize_token_usage,
 )
 
 
@@ -241,7 +241,7 @@ def run_stitch_learn(
         )
         new_lib_funcs.append(lib_func)
         agent_log += f"\n========== Autodoc for {lib_func.function_name} ==========\n"
-        agent_log += format_agent_run_dump(run_result)
+        agent_log += format_agent_run_dump(run_result, model=args.library_model)
 
     if args.dump_agent_run:
         dump_path = save_file(
@@ -286,11 +286,12 @@ def run_library_learn_task(
         max_turns=args.max_turns,
     )
 
-    print_token_usage(run_result)
+    summary = summarize_token_usage(run_result, model=args.library_model)
+    print(summary)
 
     if args.dump_agent_run:
         dump_path = save_file(
-            format_agent_run_dump(run_result),
+            format_agent_run_dump(run_result, model=args.library_model),
             output_dir,
             f"learn_agent_{version}.log",
         )

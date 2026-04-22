@@ -19,8 +19,9 @@ from .util import (
     SynthesisTask,
     clean_llm_output,
     eval_transformer,
-    print_token_usage,
+    get_op_output_dir,
     save_file,
+    summarize_token_usage,
 )
 
 
@@ -259,6 +260,9 @@ class SynthesisAgent:
             Updated:  Sound/Exact/Dist after adding your candidate via meet
 
             Each line has the format: Sound %: ..., Exact %: ..., Dist: ...
+            - Sound %: fraction of inputs where the abstract output is sound
+            - Exact %: fraction where the result matches the optimal transfer (full precision)
+            - Dist: sound-distance metric for this eval
             An improvement shows higher Exact % or lower Dist on the Updated line.
 
             If the combined transformer is not fully sound or not fully precise, following lines may includeshort legend and up to a few concrete counterexamples per bitwidth (unsound vs imprecise labeled with bw=..., so you can see inputs, your abstract output, and the optimal abstract output.
@@ -338,6 +342,7 @@ async def run_single_synthesis_task(
     print(f"{tag} Synthesizing: round={round_num}, op={task.op_name}")
 
     output_dir = Path(args.output)
+    op_output_dir = get_op_output_dir(output_dir, task.op_name)
 
     run_result = None
     agent_input = None
@@ -354,17 +359,17 @@ async def run_single_synthesis_task(
     if not args.mock_synth:
         if args.dump_agent_run:
             dump_path = save_file(
-                format_agent_run_dump(run_result),
-                output_dir,
+                format_agent_run_dump(run_result, args.synth_model),
+                op_output_dir,
                 f"synth_agent_r{round_num}_{task.op_name.lower()}.log",
             )
             print(f"{tag} Agent run dump: {dump_path}")
 
-        print_token_usage(run_result)
+        print(f"{tag} Token usage: {summarize_token_usage(run_result, args.synth_model)}")
 
     transformer_file = save_file(
         clean_llm_output(llm_output),
-        output_dir,
+        op_output_dir,
         f"kb_r{round_num}_{task.op_name.lower()}.mlir",
     )
     print(f"{tag} Transformer: {transformer_file}")
@@ -389,7 +394,7 @@ async def run_single_synthesis_task(
     print(f"{tag} Eval result: {eval_summary}")
     save_file(
         f"synthesis_time: {synthesis_time:.2f}s\neval_time: {eval_time:.2f}s\n\n{eval_summary}",
-        output_dir,
+        op_output_dir,
         f"eval_r{round_num}_{task.op_name.lower()}.txt",
     )
 

@@ -21,6 +21,7 @@ from .util import (
     SynthesisTask,
     extract_op_name,
     get_api_key,
+    get_op_output_dir,
     load_initial_library,
 )
 
@@ -129,7 +130,8 @@ def run_library_learning_loop(
     for op_name, agent in synth_agents.items():
         try:
             final_solution = agent.solution_set.build_final_solution()
-            final_solution_path = output_dir / f"final_solution_{op_name.lower()}.mlir"
+            op_output_dir = get_op_output_dir(output_dir, op_name)
+            final_solution_path = op_output_dir / f"final_solution_{op_name.lower()}.mlir"
             final_solution_path.write_text(final_solution)
             print(f"[{op_name.upper()}] Final solution: {final_solution_path}")
         except Exception as e:
