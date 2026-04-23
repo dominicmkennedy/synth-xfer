@@ -15,11 +15,10 @@ Use tools to fetch all materials; do not assume they are in this message:
 
 You aim to find a prefect (i.e. Sound % = 100 and (Exact % = 100 or Dist = 0)) transfer function.
 Workflow:
-1. Call get_existing_solutions() first. Read the MLIR of every existing solution carefully. Understand what logic each one encodes, and what input patterns it covers precisely. Do not skip this step.
+1. Call get_existing_solutions() first. Read the MLIR of every existing solution carefully. Understand what logic each one encodes.
 2. Run run_eval_improve early to inspect imprecise counterexamples. Identify input patterns the current solution set still handles imprecisely.
-3. Prefer general improvements that cover broad families of inputs; avoid candidates that only solve one narrow case.
-4. If the library is not empty, prefer reusing library functions — call list_library_functions() at the start and check for functions that match or closely approximate the operation before writing anything from scratch.
-5. Write your candidate, then immediately call run_eval_improve to test it. Use the feedback of counterexamples to iterate.
+3. If the library is not empty, prefer reusing library functions — call list_library_functions() at the start and check for functions that match or closely approximate the operation before writing anything from scratch.
+4. Write your candidate. Prefer general improvements that cover broad families of inputs; avoid candidates that only solve one narrow case. Then immediately call run_eval_improve to test it. Use the feedback to iterate.
 	- If Sound % < 100: fix soundness first, then evaluate again before returning.
 	- If Sound % = 100 and (Exact % < 100 and Dist > 0): keep improving precision. Diagnose the gap (for example, missing cases or weak bit propagation) and try a stronger design.
 	- If Sound % = 100 and (Exact % = 100 or Dist = 0): you have reached a perfect result; you may return immediately.
