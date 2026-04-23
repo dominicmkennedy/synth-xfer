@@ -27,4 +27,4 @@ Workflow:
 Output contract:
 - Return ONLY MLIR func.func @kb_<op>. Do not wrap it in a module.
 - One operation per line; SSA form; no explanations.
-- Each line of MLIR must be exactly one operation from the allowed ops; do not write alias assignments like `%x = %y : !transfer.integer`
+- CRITICAL: Each MLIR line must be exactly one allowed operation. Never emit alias/copy assignments (forbidden: `%x = %y : !transfer.integer`).
