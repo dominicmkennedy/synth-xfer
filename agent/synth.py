@@ -55,7 +55,6 @@ class SynthesisAgent:
         self._task = task
         self._args = args
         self._library = current_lib
-        self._history: list[Any] | None = None
         self._soln_iters: list[str] = []
         self._current_round: int = 0
         self._eval_call_idx: int = 0
@@ -327,7 +326,7 @@ class SynthesisAgent:
         self._soln_iters = []
         self._current_round = round_num
         self._eval_call_idx = 0
-        if self._history is None:
+        if round_num <= 0:
             user_content = f"{_make_initial_prompt(self._task)}\n"
         else:
             user_content = (
@@ -338,11 +337,8 @@ class SynthesisAgent:
                 "applicable."
             )
         user_content += f"\nYou have a maximum of {self._args.max_turns} iterations to complete this task, If you are going to exceed the limit, return the current MLIR you have generated."
-        inp: list[Any] = (self._history or []) + [
-            {"role": "user", "content": user_content}
-        ]
+        inp: list[Any] = [{"role": "user", "content": user_content}]
         result = await Runner.run(self._agent, inp, max_turns=self._args.max_turns)
-        self._history = result.to_input_list()
         return result.final_output, result, inp, list(self._soln_iters)
 
 
