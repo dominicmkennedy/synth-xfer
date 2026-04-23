@@ -53,10 +53,13 @@ class SynthesisResult:
     """High-level synthesis output for one task."""
 
     task: SynthesisTask
-    solution_text: str
     solution_iters: list[str]
-    transformer_path: Path
     eval_summary: str
+
+    @property
+    def solution_text(self) -> str | None:
+        """Return the latest synthesized solution, if available."""
+        return self.solution_iters[-1] if self.solution_iters else None
 
 
 class LibraryFunction(BaseModel):

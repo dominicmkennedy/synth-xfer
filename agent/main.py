@@ -79,7 +79,7 @@ def run_library_learning_loop(
 
         if args.meet:
             for result in latest_results:
-                if result.solution_text != "NO_IMPROVEMENT" and _is_fully_sound(
+                if result.solution_text is not None and _is_fully_sound(
                     result.eval_summary
                 ):
                     synth_agents[result.task.op_name].solution_set.upd_solution(
@@ -87,9 +87,10 @@ def run_library_learning_loop(
                     )
         else:
             for result in latest_results:
-                solution_set = synth_agents[result.task.op_name].solution_set
-                solution_set.solutions = [result.solution_text]
-                solution_set._base_result_cache = None
+                if result.solution_text is not None:
+                    solution_set = synth_agents[result.task.op_name].solution_set
+                    solution_set.solutions = [result.solution_text]
+                    solution_set._base_result_cache = None
 
         # Xuanyu: maybe when meet is enabled, not only the latest solution but the entire solution set should be sent to the library learning.
         if round_idx < num_rounds and not args.no_learn:
