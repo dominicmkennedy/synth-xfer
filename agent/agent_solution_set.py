@@ -30,21 +30,28 @@ class AgentSolutionSet:
 
     def eval_improve(
         self, new_sol: str, eval_args: EvalArgs, no_previous: bool = False
-    ) -> str:
-        """Evaluate new_sol against existing base solutions. Returns summary string."""
-        upd_result = _run_eval(
-            xfer=[new_sol],
-            base=self.solutions,
-            lib=[self.library.functions_text],
-            eval_args=eval_args,
-        )
-        upd_res = format_result(upd_result) + _format_eval_examples_for_agent(
-            upd_result, eval_args.domain
-        )
-        if no_previous:
-            return upd_res
-        base_res = self.eval_base(eval_args)
-        return f"Previous: {base_res}\n Updated: {upd_res}"
+    ) -> tuple[str, EvalResult | None]:
+        """Evaluate new_sol against existing base solutions.
+        Returns:
+            (summary, upd_result) where summary is the formatted comparison text.
+        """
+        try:
+            upd_result = _run_eval(
+                xfer=[new_sol],
+                base=self.solutions,
+                lib=[self.library.functions_text],
+                eval_args=eval_args,
+            )
+            upd_res = format_result(upd_result) + _format_eval_examples_for_agent(
+                upd_result, eval_args.domain
+            )
+            if no_previous:
+                return upd_res, upd_result
+            base_res = self.eval_base(eval_args)
+            return f"Previous: {base_res}\n Updated: {upd_res}", upd_result
+        except Exception as e:
+            msg = str(e).strip() or repr(e) or type(e).__name__
+            return f"error: {' '.join(msg.splitlines())[:1500]}", None
 
     def eval_base(self, eval_args: EvalArgs) -> str:
         """Evaluate existing solutions with top as the candidate. Returns summary string."""

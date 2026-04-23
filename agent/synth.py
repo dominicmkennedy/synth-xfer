@@ -271,16 +271,12 @@ class SynthesisAgent:
             """
 
             print(f"[{task.op_name.upper()}] [TOOL] run_eval_improve:", flush=True)
-            try:
-                result = self.solution_set.eval_improve(
-                    transformer_mlir,
-                    self._eval_args,
-                )
-            except Exception as e:
-                msg = str(e).strip() or repr(e) or type(e).__name__
-                result = f"error: {' '.join(msg.splitlines())[:1500]}"
+            summary, eval_result = self.solution_set.eval_improve(
+                transformer_mlir,
+                self._eval_args,
+            )
             print(
-                f"[{task.op_name.upper()}] [TOOL] run_eval_improve result:\n{result}",
+                f"[{task.op_name.upper()}] [TOOL] run_eval_improve result:\n{summary}",
                 flush=True,
             )
 
@@ -294,10 +290,12 @@ class SynthesisAgent:
                 f"xfer_{round_tag}_{task.op_name}_{call_tag}.mlir",
             )
             _ = save_file(
-                result, op_output_dir, f"eval_{round_tag}_{task.op_name}_{call_tag}.txt"
+                summary, op_output_dir, f"eval_{round_tag}_{task.op_name}_{call_tag}.txt"
             )
+            if eval_result and eval_result.is_sound():
+                self._soln_iters.append(transformer_mlir)
 
-            return result
+            return summary
 
         return Agent(
             name="TransformerSynthesizer",
@@ -397,7 +395,7 @@ async def run_single_synthesis_task(
     print(f"{tag} Evaluating transformer...")
     eval_t0 = time.monotonic()
     if args.meet:
-        eval_summary = synth_agent.solution_set.eval_improve(
+        eval_summary, _ = synth_agent.solution_set.eval_improve(
             solution_text,
             synth_agent._eval_args,
             no_previous=True,
