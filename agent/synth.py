@@ -36,7 +36,7 @@ def build_agent_instructions(
 ) -> str:
     """Instantiate agent_instructions.md template with task-specific values."""
     instructions = template.replace("<OP>", op_name)
-    instructions = instructions.replace("<op>", op_name.lower())
+    instructions = instructions.replace("<op>", op_name)
     instructions = instructions.replace("<OP_FILE>", op_file)
     return instructions
 
@@ -57,6 +57,8 @@ class SynthesisAgent:
         self._library = current_lib
         self._history: list[Any] | None = None
         self._soln_iters: list[str] = []
+        self._current_round: int = 0
+        self._eval_call_idx: int = 0
         self._eval_args = eval_args_override or EvalArgs(
             op_path=Path(task.op_file),
             domain=AbstractDomain.KnownBits,
@@ -281,6 +283,20 @@ class SynthesisAgent:
                 f"[{task.op_name.upper()}] [TOOL] run_eval_improve result:\n{result}",
                 flush=True,
             )
+
+            round_tag = f"r{self._current_round}"
+            call_tag = f"{self._eval_call_idx:03d}"
+            self._eval_call_idx += 1
+            op_output_dir = get_op_output_dir(Path(self._args.output), task.op_name)
+            _ = save_file(
+                transformer_mlir,
+                op_output_dir,
+                f"xfer_{round_tag}_{task.op_name}_{call_tag}.mlir",
+            )
+            _ = save_file(
+                result, op_output_dir, f"eval_{round_tag}_{task.op_name}_{call_tag}.txt"
+            )
+
             return result
 
         return Agent(
@@ -311,6 +327,8 @@ class SynthesisAgent:
     async def run(self, round_num: int) -> tuple[str, object, Any, list[str]]:
         """Run one synthesis round. Returns (final_output, run_result, inp, evalled_transformers)."""
         self._soln_iters = []
+        self._current_round = round_num
+        self._eval_call_idx = 0
         if self._history is None:
             user_content = f"{_make_initial_prompt(self._task)}\n"
         else:
@@ -361,7 +379,7 @@ async def run_single_synthesis_task(
             dump_path = save_file(
                 format_agent_run_dump(run_result, args.synth_model),
                 op_output_dir,
-                f"synth_agent_r{round_num}_{task.op_name.lower()}.log",
+                f"synth_agent_r{round_num}_{task.op_name}.log",
             )
             print(f"{tag} Agent run dump: {dump_path}")
 
@@ -370,7 +388,7 @@ async def run_single_synthesis_task(
     transformer_file = save_file(
         clean_llm_output(llm_output),
         op_output_dir,
-        f"kb_r{round_num}_{task.op_name.lower()}.mlir",
+        f"xfer_r{round_num}_{task.op_name}.mlir",
     )
     print(f"{tag} Transformer: {transformer_file}")
 
@@ -395,7 +413,7 @@ async def run_single_synthesis_task(
     save_file(
         f"synthesis_time: {synthesis_time:.2f}s\neval_time: {eval_time:.2f}s\n\n{eval_summary}",
         op_output_dir,
-        f"eval_r{round_num}_{task.op_name.lower()}.txt",
+        f"eval_r{round_num}_{task.op_name}.txt",
     )
 
     return SynthesisResult(
