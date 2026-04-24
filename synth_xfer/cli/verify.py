@@ -15,7 +15,7 @@ from synth_xfer._util.parse_mlir import (
     parse_mlir_mod,
 )
 from synth_xfer._util.verifier import verify_transfer_function
-from synth_xfer._util.xfer_data import resolve_xfer_name
+from synth_xfer._util.xfer_data import prepare_exec_module, resolve_xfer_name
 from synth_xfer.cli.args import int_list
 
 
@@ -180,11 +180,12 @@ def _print_counterexample(
         conc_output = None
     else:
         try:
+            exec_mod = prepare_exec_module(mlir_mod.clone(), helper_funcs)
             input_args = parse_to_run_inputs(domain, bw, func_arity, [tuple(abst_args)])
             abst_output = run_xfer_fns(
                 domain,
                 {bw: input_args},
-                mlir_mod,
+                exec_mod,
                 [xfer_name],
             )[0][0]
         except ImportError as e:

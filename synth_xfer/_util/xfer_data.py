@@ -14,7 +14,7 @@ from synth_xfer._util.eval import (
     parse_to_eval_inputs,
     parse_to_run_inputs,
 )
-from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
+from synth_xfer._util.parse_mlir import HelperFuncs, get_fns, parse_mlir_mod
 from synth_xfer._util.tsv import EnumData
 
 
@@ -130,6 +130,22 @@ def namespace_module(mod: ModuleOp, prefix: str) -> ModuleOp:
                 op.callee = SymbolRefAttr(rename_map[callee])
 
     return cloned
+
+
+def prepare_exec_module(mod: ModuleOp, helpers: HelperFuncs) -> ModuleOp:
+    # Modifies `mod` in place by adding missing domain helpers needed for JIT
+    existing = get_fns(mod)
+    helper_defs = (
+        helpers.get_top_func,
+        helpers.meet_func,
+    )
+
+    for helper in helper_defs:
+        if helper is not None and helper.sym_name.data not in existing:
+            mod.body.block.add_op(helper.clone())
+            existing[helper.sym_name.data] = helper
+
+    return mod
 
 
 def _parse_config(config_path: Path) -> tuple[Path, AbstractDomain]:

@@ -5,11 +5,13 @@ import pandas as pd
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import RunInputMap, parse_to_run_inputs, run_xfer_fns
+from synth_xfer._util.parse_mlir import get_helper_funcs
 from synth_xfer._util.tsv import EnumData
 from synth_xfer._util.xfer_data import (
     PreparedCandidates,
     enumdata_to_run_inputs,
     load_file_candidates,
+    prepare_exec_module,
 )
 
 
@@ -60,6 +62,7 @@ def _validate_args(args: Namespace, p: ArgumentParser) -> None:
 
 def _run_apply(
     prepared: PreparedCandidates,
+    helper_funcs,
     domain: AbstractDomain,
     to_eval: RunInputMap,
     df: pd.DataFrame,
@@ -68,7 +71,7 @@ def _run_apply(
     run_outputs = run_xfer_fns(
         domain,
         to_eval,
-        prepared.merged_mod,
+        prepare_exec_module(prepared.merged_mod.clone(), helper_funcs),
         prepared.xfer_names,
     )
 
@@ -95,6 +98,7 @@ def main() -> None:
     args = _register_parser()
     candidates = load_file_candidates(args.xfer_file, args.xfer_name)
     prepared = PreparedCandidates.from_candidates(candidates)
+    data: EnumData | None = None
 
     if args.input is not None:
         with args.input.open("r", encoding="utf-8") as f:
@@ -114,7 +118,8 @@ def main() -> None:
         }
         df = pd.DataFrame({f"arg_{n}": [x] for n, x in enumerate(fn_args[0])})
 
-    _run_apply(prepared, domain, to_eval, df, args.output)
+    helper_funcs = get_helper_funcs(args.op, domain)
+    _run_apply(prepared, helper_funcs, domain, to_eval, df, args.output)
 
 
 if __name__ == "__main__":
