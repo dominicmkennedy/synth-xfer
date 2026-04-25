@@ -11,6 +11,9 @@ class SolverKind(str, Enum):
     cvc5 = "cvc5"
     bitwuzla = "bitwuzla"
 
+    def __str__(self) -> str:
+        return self.value
+
 
 class Model(Protocol):
     def get_bv(self, name: str) -> int | None: ...

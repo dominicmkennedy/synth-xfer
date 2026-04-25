@@ -10,6 +10,7 @@ import pandas as pd
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.max_precise import RowProcessor, RowTask
 from synth_xfer._util.pattern import PatternDag, _load_pattern
+from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.tsv import EnumData, EnumMetaData
 
 _COMMUTATIVE_OPS = {
@@ -208,6 +209,7 @@ def generate_pattern_inputs(
     weight_beta: float,
     timeout: int,
     max_failures: int,
+    solver_kind: SolverKind,
 ) -> tuple[EnumData, dict[int, int]]:
     dag = _load_pattern(path)
     generator = PatternInputGenerator(
@@ -227,7 +229,7 @@ def generate_pattern_inputs(
     max_workers = os.cpu_count() or 1
 
     with Pool(processes=max_workers) as pool:
-        processor = RowProcessor(path, domain, timeout)
+        processor = RowProcessor(path, domain, timeout, solver_kind)
         for bw, samples in sorted(mbw_specs, key=lambda spec: spec[0]):
             rows_for_bw: list[tuple[object, ...]] = []
             seen_args: set[tuple[str, ...]] = set()

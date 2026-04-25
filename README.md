@@ -307,6 +307,7 @@ pattern make-sequential \
 | `--sampling-alpha <Float>` | Exponent applied to `count` before weighted row sampling. Default `0.70`                        |
 | `--weight-beta <Float>`    | Exponent applied to the proposal probability when emitting row weights. Default `0.15`          |
 | `--timeout <int>`          | Per-row ideal-computation timeout in seconds for `--mbw` rows.                                  |
+| `--solver <Name>`          | SMT solver backend for ideal computation. Choices: `z3`, `cvc5`, `bitwuzla`.                    |
 | `--max-failures <int>`     | Max consecutive duplicate/timeout rejections before failing. Default `1000`.                    |
 | `-o, --output <Path>`      | Output enum TSV.                                                                                |
 

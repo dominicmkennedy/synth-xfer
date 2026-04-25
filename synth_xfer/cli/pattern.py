@@ -10,6 +10,7 @@ from synth_xfer._util.pattern import (
     construct_pattern_solution,
     eval_pattern,
 )
+from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer.cli.args import int_tuple
 
 
@@ -91,6 +92,13 @@ def _gen_args(p: ArgumentParser):
         type=int,
         default=10,
         help="Timeout in seconds for ideal computation",
+    )
+    p.add_argument(
+        "--solver",
+        type=SolverKind,
+        choices=list(SolverKind),
+        default=SolverKind.bitwuzla,
+        help="SMT solver backend for ideal computation",
     )
     p.add_argument(
         "--max-failures",
@@ -194,6 +202,7 @@ def main() -> None:
             weight_beta=args.weight_beta,
             timeout=args.timeout,
             max_failures=args.max_failures,
+            solver_kind=args.solver,
         )
         generated_inputs.write_tsv(args.output)
         for bw, timeout in timeouts.items():
