@@ -4,7 +4,6 @@ from time import perf_counter
 
 from xdsl.dialects.func import FuncOp
 from xdsl.parser import ModuleOp
-from z3 import BitVecNumRef, FuncDeclRef, ModelRef
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import parse_to_run_inputs, run_concrete_fn, run_xfer_fns
@@ -14,6 +13,7 @@ from synth_xfer._util.parse_mlir import (
     get_helper_funcs,
     parse_mlir_mod,
 )
+from synth_xfer._util.smt_solver import Model, SolverKind
 from synth_xfer._util.verifier import verify_transfer_function
 from synth_xfer._util.xfer_data import prepare_exec_module, resolve_xfer_name
 from synth_xfer.cli.args import int_list
@@ -25,7 +25,8 @@ def verify_function(
     xfer_helpers: list[FuncOp | None],
     helper_funcs: HelperFuncs,
     timeout: int,
-) -> tuple[bool | None, ModelRef | None]:
+    solver_kind: SolverKind = SolverKind.bitwuzla,
+) -> tuple[bool | None, Model | None]:
     xfer_helpers += [
         helper_funcs.get_top_func,
         helper_funcs.instance_constraint_func,
@@ -35,7 +36,14 @@ def verify_function(
     ]
     helpers = [x for x in xfer_helpers if x is not None]
 
-    return verify_transfer_function(func, helper_funcs.crt_func, helpers, bw, timeout)
+    return verify_transfer_function(
+        func,
+        helper_funcs.crt_func,
+        helpers,
+        bw,
+        timeout,
+        solver_kind,
+    )
 
 
 def _register_parser() -> Namespace:
@@ -60,7 +68,14 @@ def _register_parser() -> Namespace:
     p.add_argument("--op", type=Path, required=True, help="Concrete op")
     p.add_argument("--xfer-file", type=Path, required=True, help="Transformer file")
     p.add_argument("--xfer-name", type=str, help="Transformer to verify")
-    p.add_argument("--timeout", type=int, default=30, help="z3 timeout")
+    p.add_argument("--timeout", type=int, default=30, help="solver timeout")
+    p.add_argument(
+        "--solver",
+        type=SolverKind,
+        choices=list(SolverKind),
+        default=SolverKind.z3,
+        help="SMT solver backend",
+    )
     p.add_argument(
         "--continue-unsound",
         action="store_true",
@@ -77,20 +92,15 @@ def _register_parser() -> Namespace:
 
 
 def _parse_counter_example(
-    model: ModelRef, domain: AbstractDomain, bw: int, func_arity: int
+    model: Model, domain: AbstractDomain, bw: int, func_arity: int
 ) -> tuple[list[int], list[str]]:
     # TODO doesn't support all domains yet.
     assert domain.vec_size == 2
-    abst0_args: dict[int, BitVecNumRef] = {}
-    abst1_args: dict[int, BitVecNumRef] = {}
+    abst0_args: dict[int, int] = {}
+    abst1_args: dict[int, int] = {}
     conc_args: dict[int, int] = {}
 
-    for var_ref in model:
-        var_name = str(var_ref)
-        var_val = model[var_ref]
-        assert isinstance(var_ref, FuncDeclRef)
-        assert isinstance(var_val, BitVecNumRef)
-
+    for var_name, var_val in model.items():
         if var_name == "$const_first":
             abst0_args[0] = var_val
         elif var_name == "$const_second_first":
@@ -101,7 +111,7 @@ def _parse_counter_example(
 
             if number >= func_arity - 1:
                 arg_number = number - (func_arity - 1)
-                conc_args[arg_number] = var_val.as_long()
+                conc_args[arg_number] = var_val
             else:
                 arg_number = number + 1
                 abst0_args[arg_number] = var_val
@@ -134,12 +144,10 @@ def _format_concrete(x: int, domain: AbstractDomain, bw: int) -> str:
     raise ValueError(f"Unsupported domain: {domain}")
 
 
-def _bv_ref_to_abst_str(
-    domain: AbstractDomain, bw: int, abst_bv: tuple[BitVecNumRef, BitVecNumRef]
-) -> str:
+def _bv_ref_to_abst_str(domain: AbstractDomain, bw: int, abst_bv: tuple[int, int]) -> str:
     if domain == AbstractDomain.KnownBits:
-        known_zeros = bin(abst_bv[0].as_long())[2:].zfill(bw)
-        known_ones = bin(abst_bv[1].as_long())[2:].zfill(bw)
+        known_zeros = bin(abst_bv[0])[2:].zfill(bw)
+        known_ones = bin(abst_bv[1])[2:].zfill(bw)
         abst_val_str = ""
         for zero, one in zip(known_zeros, known_ones):
             if zero == "0" and one == "0":
@@ -152,9 +160,14 @@ def _bv_ref_to_abst_str(
                 abst_val_str = "(bottom)"
                 break
     elif domain == AbstractDomain.UConstRange:
-        abst_val_str = f"[{abst_bv[0].as_long()}, {abst_bv[1].as_long()}]"
+        abst_val_str = f"[{abst_bv[0]}, {abst_bv[1]}]"
     elif domain == AbstractDomain.SConstRange:
-        abst_val_str = f"[{abst_bv[0].as_signed_long()}, {abst_bv[1].as_signed_long()}]"
+
+        def _signed(x: int) -> int:
+            sign_bit = 1 << (bw - 1)
+            return x - (1 << bw) if x & sign_bit else x
+
+        abst_val_str = f"[{_signed(abst_bv[0])}, {_signed(abst_bv[1])}]"
     else:
         raise ValueError(f"Unsupported domain: {domain}")
 
@@ -163,7 +176,7 @@ def _bv_ref_to_abst_str(
 
 def _print_counterexample(
     op_name: str,
-    model: ModelRef,
+    model: Model,
     bw: int,
     domain: AbstractDomain,
     mlir_mod: ModuleOp,
@@ -171,7 +184,6 @@ def _print_counterexample(
     helper_funcs: HelperFuncs,
     no_exec: bool,
 ):
-    assert isinstance(model, ModelRef)
     func_arity = len(helper_funcs.crt_func.args)
     conc_args, abst_args = _parse_counter_example(model, domain, bw, func_arity)
     conc_args_str = [_format_concrete(x, domain, bw) for x in conc_args]
@@ -227,7 +239,12 @@ def main() -> None:
     for bw in args.bw:
         start_time = perf_counter()
         is_sound, model = verify_function(
-            bw, xfer_fn, list(xfer_fns.values()), helper_funcs, args.timeout
+            bw,
+            xfer_fn,
+            list(xfer_fns.values()),
+            helper_funcs,
+            args.timeout,
+            args.solver,
         )
         run_time = perf_counter() - start_time
 
@@ -246,7 +263,6 @@ def main() -> None:
             print(f"Verifier UNSOUND at {bw}-bits. Took {run_time:.4f}s.")
             print("Counterexample:")
 
-            assert isinstance(model, ModelRef)
             _print_counterexample(
                 str(args.op.stem),
                 model,

@@ -18,6 +18,7 @@ from synth_xfer._util.mcmc_sampler import setup_mcmc
 from synth_xfer._util.one_iter import synthesize_one_iteration
 from synth_xfer._util.parse_mlir import HelperFuncs, get_helper_funcs, top_as_xfer
 from synth_xfer._util.random import Random, Sampler
+from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.solution_set import EvalFn, SolutionSet
 from synth_xfer._util.synth_context import SynthesizerContext
 from synth_xfer._util.tsv import EnumData
@@ -101,6 +102,7 @@ def run(
     num_unsound_candidates: int,
     optimize: bool,
     sampler: Sampler,
+    solver: SolverKind,
     eval_data: EnumData | None = None,
 ) -> EvalResult:
     logger = get_logger()
@@ -179,6 +181,7 @@ def run(
             prec_set,
             lbw,
             vbw,
+            solver,
         )
 
         write_log_file(
@@ -352,6 +355,13 @@ def _build_arg_parser() -> Namespace:
         type=int,
         help="number of unsound candidates considered for abduction",
         default=15,
+    )
+    p.add_argument(
+        "--solver",
+        type=SolverKind,
+        choices=list(SolverKind),
+        default=SolverKind.bitwuzla,
+        help="SMT solver backend",
     )
     p.add_argument(
         "--debug",

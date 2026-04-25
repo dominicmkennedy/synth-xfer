@@ -3,11 +3,14 @@ from functools import lru_cache
 from itertools import product
 from pathlib import Path
 
+import pytest
+
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.max_precise import compute_max_precise
 from synth_xfer._util.parse_mlir import get_helper_funcs
+from synth_xfer._util.smt_solver import SolverKind
 
 PROJ_DIR = Path(__file__).parent.parent
 OPS_DIR = PROJ_DIR / "mlir" / "Operations"
@@ -191,25 +194,38 @@ def _expected(
 
 
 def _check_cases(
-    domain: AbstractDomain, cases: list[tuple[str, str, str]], bw: int = BW
+    domain: AbstractDomain,
+    cases: list[tuple[str, str, str]],
+    solver_kind: SolverKind,
+    bw: int = BW,
 ) -> None:
     for op_name, arg0, arg1 in cases:
         op_path = OPS_DIR / f"{op_name}.mlir"
         args = (arg0, arg1)
         expected = _expected(domain, op_name, args, bw)
-        actual = compute_max_precise(op_path, domain, bw, args, timeout=3)
+        actual = compute_max_precise(
+            op_path,
+            domain,
+            bw,
+            args,
+            timeout=3,
+            solver_kind=solver_kind,
+        )
         assert actual == expected, (
             f"{domain.name} {op_name} {args}: expected {expected}, got {actual}"
         )
 
 
-def test_max_precise_knownbits():
-    _check_cases(AbstractDomain.KnownBits, KB_CASES)
+@pytest.mark.parametrize("solver_kind", list(SolverKind))
+def test_max_precise_knownbits(solver_kind: SolverKind):
+    _check_cases(AbstractDomain.KnownBits, KB_CASES, solver_kind)
 
 
-def test_max_precise_ucr():
-    _check_cases(AbstractDomain.UConstRange, UCR_CASES)
+@pytest.mark.parametrize("solver_kind", list(SolverKind))
+def test_max_precise_ucr(solver_kind: SolverKind):
+    _check_cases(AbstractDomain.UConstRange, UCR_CASES, solver_kind)
 
 
-def test_max_precise_scr():
-    _check_cases(AbstractDomain.SConstRange, SCR_CASES)
+@pytest.mark.parametrize("solver_kind", list(SolverKind))
+def test_max_precise_scr(solver_kind: SolverKind):
+    _check_cases(AbstractDomain.SConstRange, SCR_CASES, solver_kind)

@@ -41,12 +41,11 @@ from xdsl_smt.utils.transfer_function_util import (
     SMTTransferFunction,
     TransferFunction,
 )
-from z3 import ModelRef, Solver, parse_smt2_string, sat, unknown
+
+from synth_xfer._util.smt_solver import Model, SolverKind, make_solver
 
 
-def _verify_pattern(
-    ctx: Context, op: ModuleOp, timeout: int
-) -> tuple[bool | None, ModelRef | None]:
+def _to_smtlib(ctx: Context, op: ModuleOp) -> str:
     cloned_op = op.clone()
     LowerPairs().apply(ctx, cloned_op)
     CanonicalizePass().apply(ctx, cloned_op)
@@ -54,18 +53,22 @@ def _verify_pattern(
 
     stream = StringIO()
     print_to_smtlib(cloned_op, stream)
+    return stream.getvalue()
 
-    s = Solver()
-    s.set(timeout=timeout * 1000)
-    s.add(parse_smt2_string(stream.getvalue()))
-    r = s.check()
 
-    if r == unknown:
+def _verify_pattern(
+    ctx: Context,
+    op: ModuleOp,
+    timeout: int,
+    solver_kind: SolverKind,
+) -> tuple[bool | None, Model | None]:
+    solver = make_solver(solver_kind, _to_smtlib(ctx, op), timeout)
+    is_sat = solver.check()
+    if is_sat is None:
         return None, None
-    elif r == sat:
-        return False, s.model()
-    else:
-        return True, None
+    if is_sat:
+        return False, solver.model()
+    return True, None
 
 
 def lower_to_smt_module(module: ModuleOp, width: int, ctx: Context):
@@ -135,7 +138,8 @@ def _soundness_check(
     int_attr: dict[int, int],
     ctx: Context,
     timeout: int,
-) -> tuple[bool | None, ModelRef | None]:
+    solver_kind: SolverKind,
+) -> tuple[bool | None, Model | None]:
     query_module = ModuleOp([])
     if smt_transfer_function.is_forward:
         added_ops: list[Operation] = forward_soundness_check(
@@ -154,7 +158,7 @@ def _soundness_check(
     query_module.body.block.add_ops(added_ops)
     FunctionCallInline(True, {}).apply(ctx, query_module)
 
-    return _verify_pattern(ctx, query_module, timeout)
+    return _verify_pattern(ctx, query_module, timeout, solver_kind)
 
 
 def _verify_smt_transfer_function(
@@ -163,7 +167,8 @@ def _verify_smt_transfer_function(
     instance_constraint: FunctionCollection,
     ctx: Context,
     timeout: int,
-) -> tuple[bool | None, ModelRef | None]:
+    solver_kind: SolverKind,
+) -> tuple[bool | None, Model | None]:
     assert smt_transfer_function.concrete_function is not None
     assert smt_transfer_function.transfer_function is not None
 
@@ -175,6 +180,7 @@ def _verify_smt_transfer_function(
         int_attr,
         ctx,
         timeout,
+        solver_kind,
     )
 
     return soundness_result
@@ -249,7 +255,8 @@ def verify_transfer_function(
     helper_funcs: list[FuncOp],
     width: int,
     timeout: int,
-) -> tuple[bool | None, ModelRef | None]:
+    solver_kind: SolverKind,
+) -> tuple[bool | None, Model | None]:
     ctx = Context()
 
     (
@@ -311,4 +318,5 @@ def verify_transfer_function(
         instance_constraint,
         ctx,
         timeout,
+        solver_kind,
     )

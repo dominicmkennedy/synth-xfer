@@ -10,6 +10,7 @@ from synth_xfer._util.dce import dce
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.log import get_logger, write_log_file
 from synth_xfer._util.parse_mlir import HelperFuncs
+from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.synth_context import SynthesizerContext
 from synth_xfer._util.xfer_func import XferFunc
 from synth_xfer.cli.verify import verify_function
@@ -160,6 +161,7 @@ class SolutionSet:
         helper_funcs: HelperFuncs,
         num_unsound_candidates: int,
         eval_func: EvalFn,
+        solver_kind: SolverKind,
     ) -> SolutionSet:
         logger = get_logger()
         candidates = self.solutions + new_candidates_sp + new_candidates_c
@@ -216,6 +218,7 @@ class SolutionSet:
                         [original.body, original.cond],
                         helper_funcs,
                         200,
+                        solver_kind,
                     )
                     if is_sound is None:
                         logger.info(
@@ -236,6 +239,7 @@ class SolutionSet:
                             [rewritten.body, rewritten.cond],
                             helper_funcs,
                             200,
+                            solver_kind,
                         )
                         if is_sound != is_sound_rwt:
                             logger.info(

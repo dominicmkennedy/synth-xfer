@@ -9,6 +9,7 @@ from synth_xfer._util.log import get_logger
 from synth_xfer._util.mcmc_sampler import MCMCSampler
 from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.random import Random
+from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.solution_set import EvalFn, SolutionSet
 from synth_xfer._util.xfer_func import XferFunc
 
@@ -59,6 +60,7 @@ def synthesize_one_iteration(
     prec_set: list[FuncOp],
     lbw: list[int],
     vbw: list[int],
+    solver_kind: SolverKind,
 ) -> SolutionSet:
     "Given ith_iter, performs num_steps mcmc sampling"
 
@@ -197,6 +199,7 @@ def synthesize_one_iteration(
         helper_funcs,
         num_unsound_candidates,
         eval_func,
+        solver_kind,
     )
     verif_time = perf_counter() - verif_start_time
     iter_time = perf_counter() - iter_start_time

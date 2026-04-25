@@ -25,22 +25,10 @@ from xdsl_smt.passes.lower_pairs import LowerPairs
 from xdsl_smt.passes.transfer_inline import FunctionCallInline
 from xdsl_smt.traits.smt_printer import print_to_smtlib
 from xdsl_smt.utils.transfer_function_util import get_argument_instances_with_effect
-from z3 import (
-    UGE,
-    ULE,
-    BitVec,
-    BitVecRef,
-    BitVecVal,
-    BoolRef,
-    Extract,
-    Solver,
-    parse_smt2_string,
-    sat,
-    unknown,
-)
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.parse_mlir import get_helper_funcs
+from synth_xfer._util.smt_solver import IncrementalSolver, SolverKind, make_solver
 from synth_xfer._util.verifier import lower_to_smt_module
 
 _CTX: Context | None = None
@@ -205,13 +193,17 @@ class MaxPreciseQueryBuilder:
 
 @dataclass(frozen=True)
 class PreparedQuery:
-    solver: Solver
-    result: BitVecRef
-    timeout: int
+    solver: IncrementalSolver
+    bitwidth: int
 
     @classmethod
     def from_module(
-        cls, ctx: Context, smt_mod: ModuleOp, bitwidth: int, timeout: int
+        cls,
+        ctx: Context,
+        smt_mod: ModuleOp,
+        bitwidth: int,
+        timeout: int,
+        solver_kind: SolverKind,
     ) -> "PreparedQuery":
         module = smt_mod.clone()
         FunctionCallInline(True, {}).apply(ctx, module)
@@ -221,31 +213,29 @@ class PreparedQuery:
         stream = StringIO()
         print_to_smtlib(module, stream)
 
-        solver = Solver()
-        solver.set(timeout=timeout * 1000)
-        solver.add(parse_smt2_string(stream.getvalue()))
-        return cls(solver=solver, result=BitVec("$result", bitwidth), timeout=timeout)
+        solver = make_solver(solver_kind, stream.getvalue(), timeout)
+        return cls(solver=solver, bitwidth=bitwidth)
 
     def is_sat(self) -> bool:
         result = self.solver.check()
-        if result == unknown:
+        if result is None:
             raise TimeoutError()
-        return result == sat
+        return result
 
-    def check(self, probe: BoolRef) -> bool:
+    def check(self, probe: str) -> bool:
         self.solver.push()
         try:
-            self.solver.add(probe)
+            self.solver.add_smt2(f"(assert {probe})")
             result = self.solver.check()
         finally:
             self.solver.pop()
 
-        if result == unknown:
+        if result is None:
             raise TimeoutError()
-        return result == sat
+        return result
 
-    def bv_val(self, val: int) -> BitVecRef:
-        return BitVecVal(val, self.result.size())
+    def bv_val(self, val: int) -> str:
+        return f"(_ bv{val % (2**self.bitwidth)} {self.bitwidth})"
 
 
 @dataclass(frozen=True)
@@ -260,13 +250,9 @@ class ComputeMaxPrecise:
 @dataclass(frozen=True)
 class KnownBitsMaxPrecise(ComputeMaxPrecise):
     def check_ith_bit(self, ith: int) -> str | None:
-        ith_bit = Extract(ith, ith, self.query.result)
-        probe_z = ith_bit == BitVecVal(0, 1)
-        probe_o = ith_bit == BitVecVal(1, 1)
-        assert isinstance(probe_z, BoolRef)
-        assert isinstance(probe_o, BoolRef)
-        can_be_z = self.query.check(probe_z)
-        can_be_o = self.query.check(probe_o)
+        ith_bit = f"((_ extract {ith} {ith}) $result)"
+        can_be_z = self.query.check(f"(= {ith_bit} (_ bv0 1))")
+        can_be_o = self.query.check(f"(= {ith_bit} (_ bv1 1))")
         if can_be_o and can_be_z:
             return "?"
         if (not can_be_z) and (not can_be_o):
@@ -290,15 +276,15 @@ class KnownBitsMaxPrecise(ComputeMaxPrecise):
 @dataclass(frozen=True)
 class IntervalMaxPrecise(ComputeMaxPrecise):
     def _can_be_leq(self, val: int) -> bool:
-        return self.query.check(self._cmp_leq(self.query.result, val))
+        return self.query.check(self._cmp_leq("$result", val))
 
     def _can_be_geq(self, val: int) -> bool:
-        return self.query.check(self._cmp_geq(self.query.result, val))
+        return self.query.check(self._cmp_geq("$result", val))
 
-    def _cmp_leq(self, concrete_res: BitVecRef, val: int) -> BoolRef:
+    def _cmp_leq(self, concrete_res: str, val: int) -> str:
         raise NotImplementedError
 
-    def _cmp_geq(self, concrete_res: BitVecRef, val: int) -> BoolRef:
+    def _cmp_geq(self, concrete_res: str, val: int) -> str:
         raise NotImplementedError
 
     def min_value(self) -> int:
@@ -342,11 +328,11 @@ class IntervalMaxPrecise(ComputeMaxPrecise):
 
 @dataclass(frozen=True)
 class UConstRangeMaxPrecise(IntervalMaxPrecise):
-    def _cmp_leq(self, concrete_res: BitVecRef, val: int) -> BoolRef:
-        return ULE(concrete_res, self.query.bv_val(val))
+    def _cmp_leq(self, concrete_res: str, val: int) -> str:
+        return f"(bvule {concrete_res} {self.query.bv_val(val)})"
 
-    def _cmp_geq(self, concrete_res: BitVecRef, val: int) -> BoolRef:
-        return UGE(concrete_res, self.query.bv_val(val))
+    def _cmp_geq(self, concrete_res: str, val: int) -> str:
+        return f"(bvuge {concrete_res} {self.query.bv_val(val)})"
 
     def min_value(self) -> int:
         return 0
@@ -360,11 +346,11 @@ class UConstRangeMaxPrecise(IntervalMaxPrecise):
 
 @dataclass(frozen=True)
 class SConstRangeMaxPrecise(IntervalMaxPrecise):
-    def _cmp_leq(self, concrete_res: BitVecRef, val: int) -> BoolRef:
-        return concrete_res <= self.query.bv_val(val)
+    def _cmp_leq(self, concrete_res: str, val: int) -> str:
+        return f"(bvsle {concrete_res} {self.query.bv_val(val)})"
 
-    def _cmp_geq(self, concrete_res: BitVecRef, val: int) -> BoolRef:
-        return concrete_res >= self.query.bv_val(val)
+    def _cmp_geq(self, concrete_res: str, val: int) -> str:
+        return f"(bvsge {concrete_res} {self.query.bv_val(val)})"
 
     def min_value(self) -> int:
         return -(2**self.bitwidth // 2)
@@ -408,13 +394,19 @@ class RowProcessor:
     op_path: Path
     domain: AbstractDomain
     timeout: int
+    solver_kind: SolverKind
 
     def __call__(self, task: RowTask) -> RowResult:
         try:
             return RowResult(
                 index=task.index,
                 ideal=compute_max_precise(
-                    self.op_path, self.domain, task.bw, task.args, self.timeout
+                    self.op_path,
+                    self.domain,
+                    task.bw,
+                    task.args,
+                    self.timeout,
+                    self.solver_kind,
                 ),
             )
         except TimeoutError:
@@ -427,6 +419,7 @@ def compute_max_precise(
     bw: int,
     args: tuple[str, ...],
     timeout: int,
+    solver_kind: SolverKind,
 ) -> str:
     ctx = _get_ctx()
 
@@ -455,6 +448,6 @@ def compute_max_precise(
         op_constraint=op_constraint,
     ).build()
 
-    query = PreparedQuery.from_module(ctx, smt_mod, bw, timeout)
+    query = PreparedQuery.from_module(ctx, smt_mod, bw, timeout, solver_kind)
     computer = _get_max_precise_computer(domain, query, bw)
     return computer.compute()

@@ -15,6 +15,7 @@ from synth_xfer._util.max_precise import (
     RowTask,
     compute_max_precise,
 )
+from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.tsv import EnumData
 
 
@@ -33,7 +34,14 @@ def _get_args() -> Namespace:
     )
     p.add_argument("--args", type=str, help="The abstract arguments")
     p.add_argument("--bw", type=int, help="Bitwidth")
-    p.add_argument("--timeout", type=int, help="z3 timeout", default=10)
+    p.add_argument("--timeout", type=int, help="solver timeout", default=10)
+    p.add_argument(
+        "--solver",
+        type=SolverKind,
+        choices=list(SolverKind),
+        default=SolverKind.bitwuzla,
+        help="SMT solver backend",
+    )
 
     args = p.parse_args()
     if args.input is not None:
@@ -76,7 +84,11 @@ def _comment_row(row: pd.Series, columns: list[str]) -> str:
     return "# " + "\t".join(str(row[column]) for column in columns)
 
 
-def _fill_hbw_rows(data: EnumData, timeout: int) -> tuple[EnumData, list[str]]:
+def _fill_hbw_rows(
+    data: EnumData,
+    timeout: int,
+    solver_kind: SolverKind,
+) -> tuple[EnumData, list[str]]:
     op_path = _resolve_metadata_op(data.metadata.op)
     hbw_bws = {bw for bw, _, _ in data.metadata.hbw}
     arg_cols = [f"arg_{i}" for i in range(data.metadata.arity)]
@@ -91,7 +103,10 @@ def _fill_hbw_rows(data: EnumData, timeout: int) -> tuple[EnumData, list[str]]:
     ]
 
     with Pool() as pool:
-        results = pool.map(RowProcessor(op_path, data.metadata.domain, timeout), tasks)
+        results = pool.map(
+            RowProcessor(op_path, data.metadata.domain, timeout, solver_kind),
+            tasks,
+        )
 
     df = data.enumdata.copy()
     columns = list(df.columns)
@@ -133,13 +148,20 @@ def main() -> None:
         with args.input.open() as f:
             data = EnumData.read_tsv(f)
 
-        updated, commented_rows = _fill_hbw_rows(data, args.timeout)
+        updated, commented_rows = _fill_hbw_rows(data, args.timeout, args.solver)
         output_path = args.input if args.output is None else args.output
         updated.write_tsv_with_comments(output_path, commented_rows)
     else:
         fn_args = tuple(x.strip() for x in args.args.split(";"))
         domain = AbstractDomain[args.domain]
-        max_prec = compute_max_precise(args.op, domain, args.bw, fn_args, args.timeout)
+        max_prec = compute_max_precise(
+            args.op,
+            domain,
+            args.bw,
+            fn_args,
+            args.timeout,
+            args.solver,
+        )
         print(max_prec)
 
 

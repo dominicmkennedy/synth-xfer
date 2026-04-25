@@ -183,6 +183,7 @@ def _execute_job(
             num_unsound_candidates=args.num_unsound_candidates,
             optimize=args.optimize,
             sampler=sampler,
+            solver=args.solver,
             eval_data=eval_data,
         )
 

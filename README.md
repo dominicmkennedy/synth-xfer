@@ -44,7 +44,7 @@ these executables depend on paths in the repo the should be run from the project
 | `lower-to-llvm` | Lowers a synthesized transformer from MLIR to LLVM IR                                                     |
 | `simplifier`    | Applies a peephole optimizer to simplify synthesized transformer code                                     |
 | `enum`          | Samples an abstract input space and enumerates the optimal output for a concrete operation                |
-| `max-precise`   | Computes the most precise abstract result for a concrete operation and abstract inputs using z3           |
+| `max-precise`   | Computes the most precise abstract result for a concrete operation and abstract inputs                    |
 | `pattern`       | Analyzes pattern completeness and generates pattern input datasets                                        |
 
 ## Example Synthesis Runs
@@ -121,6 +121,7 @@ sxf --op mlir/Operations/Add.mlir     \
 | `--num-abd-procs <int>`          | Number of MCMC processes used for abduction. Must be less than `num_mcmc` (default: `30`).                                                                                           |
 | `--condition-length <int>`       | Length of synthesized abduction (default: `10`).                                                                                                                                     |
 | `--num-unsound-candidates <int>` | Number of unsound candidates considered for abduction (default: `15`).                                                                                                               |
+| `--solver <Name>`                | SMT solver backend to use for verification. Choices: `z3`, `cvc5`, `bitwuzla` (default: `z3`).                                                                                       |
 | `--optimize`                     | Run e-graph-based rewrite optimizer on synthesized candidates.                                                                                                                       |
 | `--debug`                        | Write `debug.log` to the output directory (default: off).                                                                                                                            |
 
@@ -178,14 +179,16 @@ sxf --benchmark bench.yaml \
 | `--bw <list[int]>`   | Bitwidth(s) to verify at (e.g. `-bw 4`, `-bw 4-64` or `-bw 4,8,16`).                                                                               |
 | `--domain <Name>`    | Abstract domain semantics to verify with (e.g., `KnownBits`, `UConstRange`, `SConstRange`).                                                        |
 | `--op <Path>`        | Path to the concrete operation (`.mlir` file), for the concrete semantics to verify with.                                                          |
-| `--timeout <int>`    | Timeout flag (in seconds) to pass to z3 (this is a per bit-width timeout).                                                                         |
+| `--timeout <int>`    | Timeout flag (in seconds) to pass to the selected SMT solver (this is a per bit-width timeout).                                                    |
+| `--solver <Name>`    | SMT solver backend to use. Choices: `z3`, `cvc5`, `bitwuzla` (default: `bitwuzla`).                                                                |
 
 For example:
 ```bash
 verify --xfer-file tests/data/kb_xor.mlir \
        --bw 4-8,16,32                     \
        --domain KnownBits                 \
-       --op mlir/Operations/Xor.mlir
+       --op mlir/Operations/Xor.mlir      \
+       --solver cvc5
 ```
 Should produce:
 ```
@@ -347,14 +350,15 @@ pattern eval                             \
 
 ## Important CLI Options for `max-precise`
 
-| CLI flag    | Description                                            |
-|-------------|--------------------------------------------------------|
-| `--op`      | Path to a concrete operation or pattern (`.mlir` file) |
-| `--args`    | The string representation of abstract value inputs.    |
-| `--bw`      | The bitwidth of the arguments                          |
-| `--domain`  | The domain (only KnownBits is implemented now)         |
-| `--timeout` | Timeout in seconds                                     |
-| `--input`   | Takes an enum `.tsv`, and will sovle all `hbw` rows    |
+| CLI flag          | Description                                                                         |
+|-------------------|-------------------------------------------------------------------------------------|
+| `--op`            | Path to a concrete operation or pattern (`.mlir` file).                             |
+| `--args`          | The string representation of abstract value inputs.                                 |
+| `--bw`            | The bitwidth of the arguments.                                                      |
+| `--domain`        | The abstract domain (e.g. `KnownBits`, `UConstRange`, `SConstRange`).               |
+| `--timeout`       | Timeout in seconds for the selected SMT solver.                                     |
+| `--solver <Name>` | SMT solver backend to use. Choices: `z3`, `cvc5`, `bitwuzla` (default: `bitwuzla`). |
+| `--input`         | Takes an enum `.tsv`, and will solve all `hbw` rows.                                |
 
 Example:
 ```bash
