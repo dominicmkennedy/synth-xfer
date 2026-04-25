@@ -263,6 +263,7 @@ def main() -> None:
             print(f"Verifier UNSOUND at {bw}-bits. Took {run_time:.4f}s.")
             print("Counterexample:")
 
+            assert model is not None
             _print_counterexample(
                 str(args.op.stem),
                 model,
