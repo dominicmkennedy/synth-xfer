@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from io import StringIO
 from pathlib import Path
+import re
 from typing import TextIO
 
 import pandas as pd
@@ -67,17 +68,64 @@ class EnumMetaData:
         return cls.parse("\n".join(lines))
 
 
-@dataclass(frozen=True)
+@dataclass
 class EnumData:
     metadata: EnumMetaData
     enumdata: pd.DataFrame
+
+    def __post_init__(self) -> None:
+        self.enumdata = self._canonicalize_columns(self.enumdata)
+
+    @staticmethod
+    def _canonicalize_columns(frame: pd.DataFrame) -> pd.DataFrame:
+        columns = list(frame.columns)
+        arg_pattern = re.compile(r"arg_(\d+)$")
+
+        if "bw" not in columns:
+            raise ValueError("EnumData requires a 'bw' column")
+
+        arg_cols = sorted(
+            (
+                (int(match.group(1)), col)
+                for col in columns
+                if (match := arg_pattern.fullmatch(col)) is not None
+            ),
+            key=lambda item: item[0],
+        )
+        if not arg_cols:
+            raise ValueError("EnumData requires at least one 'arg_N' column")
+
+        ordered = ["bw"]
+        ordered.extend(col for _, col in arg_cols)
+        if "ideal" in frame.columns:
+            ordered.append("ideal")
+        if "count" in frame.columns:
+            ordered.append("count")
+        if "weight" in frame.columns:
+            ordered.append("weight")
+
+        seen = set(ordered)
+        ordered.extend(col for col in columns if col not in seen)
+        return frame.loc[:, ordered]
+
+    @classmethod
+    def _prepare_for_write(cls, frame: pd.DataFrame) -> pd.DataFrame:
+        out = cls._canonicalize_columns(frame)
+        sort_cols = ["bw"]
+        ascending = [True]
+        if "count" in out.columns:
+            sort_cols.append("count")
+            ascending.append(False)
+        return out.sort_values(
+            sort_cols, ascending=ascending, kind="mergesort"
+        ).reset_index(drop=True)
 
     def write_tsv(self, path: Path) -> None:
         frontmatter = f"# ---\n{self.metadata.dump_commented()}\n# ---\n"
 
         with path.open("w") as f:
             f.write(frontmatter)
-            self.enumdata.to_csv(
+            self._prepare_for_write(self.enumdata).to_csv(
                 f,
                 sep="\t",
                 index=False,
@@ -92,7 +140,7 @@ class EnumData:
             for row in commented_rows:
                 f.write(row)
                 f.write("\n")
-            self.enumdata.to_csv(
+            self._prepare_for_write(self.enumdata).to_csv(
                 f,
                 sep="\t",
                 index=False,
