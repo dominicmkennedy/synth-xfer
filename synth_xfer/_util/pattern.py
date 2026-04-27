@@ -117,6 +117,11 @@ _COMPLETENESS_TABLE: dict[str, dict[AbstractDomain, tuple[bool, bool]]] = {
     "Xor": {_KB: (True, True), _UCR: (False, False), _SCR: (False, False)},
 }
 
+_OP_FALLBACKS: dict[str, str] = {
+    op_name: _TRANSFER_BASE_TO_OP[transfer_op]
+    for (transfer_op, _), op_name in _TRANSFER_FLAG_TO_OP.items()
+}
+
 
 @dataclass(frozen=True)
 class DagNode:
@@ -218,6 +223,10 @@ def _resolve_metadata_op(op: str) -> Path:
     if op.startswith("pattern_"):
         return Path("mlir") / "Patterns" / f"{op.removeprefix('pattern_')}.mlir"
     return Path("mlir") / "Operations" / f"{op}.mlir"
+
+
+def get_fallback_op(op: str) -> str | None:
+    return _OP_FALLBACKS.get(op)
 
 
 def _load_pattern(pattern_path: Path) -> PatternDag:

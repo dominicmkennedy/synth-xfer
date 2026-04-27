@@ -9,7 +9,7 @@ import pandas as pd
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.max_precise import RowProcessor, RowTask
-from synth_xfer._util.pattern import PatternDag, _load_pattern
+from synth_xfer._util.pattern import PatternDag, _load_pattern, get_fallback_op
 from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.tsv import EnumData, EnumMetaData
 
@@ -61,6 +61,7 @@ class PatternInputGenerator:
         self.weight_beta = weight_beta
         self.providers = self._build_arg_providers()
         self._op_tables_by_bw: dict[int, dict[str, pd.DataFrame]] = {}
+        self._warned_fallback_ops: set[tuple[str, str]] = set()
 
     def _is_fully_free_node(self, node_idx: int) -> bool:
         return all(
@@ -96,7 +97,23 @@ class PatternInputGenerator:
     def _load_op_table(self, op: str, bw: int) -> pd.DataFrame:
         path = self.data_dir / str(self.domain) / f"{op}.tsv"
         if not path.exists():
-            raise FileNotFoundError(f"Missing data file '{path}'.")
+            fallback_op = get_fallback_op(op)
+            if fallback_op is None:
+                raise FileNotFoundError(
+                    f"No {self.domain} input data for op '{op}'.\nExpected '{path}'."
+                )
+            fallback_path = self.data_dir / str(self.domain) / f"{fallback_op}.tsv"
+            if not fallback_path.exists():
+                raise FileNotFoundError(
+                    f"No {self.domain} input data for op '{op}', "
+                    f"and fallback op '{fallback_op}' also missing.\n"
+                    f"Expected '{path}' or '{fallback_path}'."
+                )
+            warning_key = (op, fallback_op)
+            if warning_key not in self._warned_fallback_ops:
+                print(f"WARNING: using {fallback_op} input data in place of {op}")
+                self._warned_fallback_ops.add(warning_key)
+            path = fallback_path
         with path.open() as f:
             data = EnumData.read_tsv(f)
         frame = cast(pd.DataFrame, data.enumdata[data.enumdata["bw"] == bw].copy())
