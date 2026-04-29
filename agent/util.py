@@ -55,6 +55,7 @@ class SynthesisResult:
     task: SynthesisTask
     solution_iters: list[str]
     eval_summary: str
+    eval_result: EvalResult | None = None
 
     @property
     def solution_text(self) -> str | None:

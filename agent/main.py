@@ -63,19 +63,23 @@ def run_library_learning_loop(
         for task in tasks
     }
 
+    perfect_ops: set[str] = set()
+
     # Round 0 is synthesis-only (single-shot equivalent).
     for round_idx in range(num_rounds + 1):
         sep = "=" * 60
         print(f"\n{sep}\n ROUND {round_idx}\n")
 
-        tasks_to_run: list[SynthesisTask] = []
-        for task in tasks:
-            agent = synth_agents[task.op_name]
-            # Xuanyu's TODO: skip if the solution set is already perfect
-            tasks_to_run.append(task)
+        tasks_to_run = [t for t in tasks if t.op_name not in perfect_ops]
+        for op_name in perfect_ops:
+            print(f"[{op_name.upper()}] Skipping round {round_idx}: already perfect")
         latest_results = asyncio.run(
             run_synthesis_tasks(synth_agents, tasks_to_run, round_idx, library, args)
         )
+
+        for r in latest_results:
+            if r.eval_result is not None and r.eval_result.is_perfect():
+                perfect_ops.add(r.task.op_name)
 
         if args.meet:
             for result in latest_results:

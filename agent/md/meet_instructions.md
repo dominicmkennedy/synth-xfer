@@ -13,6 +13,7 @@ Use tools to fetch all materials; do not assume they are in this message:
 - list_library_functions()/get_library_function(): retrieve available library functions
 - get_existing_solutions(): view the MLIR of all transfer functions already in the solution set
 - run_eval_improve(mlir): evaluate your candidate combined with existing solutions via meet; returns two lines — "Previous" (current solution set) and "Updated" (after adding your candidate)
+	- Make liberal use of run_eval_improve — eval early and eval often. Do not wait until you think your solution is complete; use it to check partial ideas and intermediate candidates as well.
 
 Make liberal use of run_eval_improve — eval early and eval often. Do not wait until you think your solution is complete; use it to check partial ideas and intermediate candidates as well.
 
