@@ -207,15 +207,6 @@ public:
   ConstantRange unionWith(const ConstantRange &CR,
                           PreferredRangeType Type = Smallest) const;
 
-  /// Intersect the two ranges and return the result if it can be represented
-  /// exactly, otherwise return std::nullopt.
-  std::optional<ConstantRange>
-  exactIntersectWith(const ConstantRange &CR) const;
-
-  /// Union the two ranges and return the result if it can be represented
-  /// exactly, otherwise return std::nullopt.
-  std::optional<ConstantRange> exactUnionWith(const ConstantRange &CR) const;
-
   /// Return a new range in the specified integer type, which must
   /// be strictly larger than the current type.  The returned range will
   /// correspond to the possible range of values if the source range had been
@@ -787,24 +778,6 @@ inline ConstantRange ConstantRange::unionWith(const ConstantRange &CR,
   APInt U = CR.Upper.ugt(Upper) ? CR.Upper : Upper;
 
   return ConstantRange(std::move(L), std::move(U));
-}
-
-inline std::optional<ConstantRange>
-ConstantRange::exactIntersectWith(const ConstantRange &CR) const {
-  // TODO: This can be implemented more efficiently.
-  ConstantRange Result = intersectWith(CR);
-  if (Result == inverse().unionWith(CR.inverse()).inverse())
-    return Result;
-  return std::nullopt;
-}
-
-inline std::optional<ConstantRange>
-ConstantRange::exactUnionWith(const ConstantRange &CR) const {
-  // TODO: This can be implemented more efficiently.
-  ConstantRange Result = unionWith(CR);
-  if (Result == inverse().intersectWith(CR.inverse()).inverse())
-    return Result;
-  return std::nullopt;
 }
 
 inline ConstantRange ConstantRange::zeroExtend(uint32_t DstTySize) const {

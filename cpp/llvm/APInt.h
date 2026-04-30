@@ -624,12 +624,6 @@ public:
     return relativeAShr(-RelativeShift);
   }
 
-  /// Rotate left by rotateAmt.
-  APInt rotl(unsigned rotateAmt) const;
-
-  /// Rotate right by rotateAmt.
-  APInt rotr(unsigned rotateAmt) const;
-
   /// Arithmetic right-shift function.
   ///
   /// Arithmetic right-shift this APInt by shiftAmt.
@@ -663,56 +657,14 @@ public:
     return R;
   }
 
-  /// Rotate left by rotateAmt.
-  APInt rotl(const APInt &rotateAmt) const;
-
-  /// Rotate right by rotateAmt.
-  APInt rotr(const APInt &rotateAmt) const;
-
-  /// Unsigned division operation.
-  ///
-  /// Perform an unsigned divide operation on this APInt by RHS. Both this and
-  /// RHS are treated as unsigned quantities for purposes of this division.
-  ///
-  /// \returns a new APInt value containing the division result, rounded towards
-  /// zero.
   APInt udiv(const APInt &RHS) const;
   APInt udiv(uint64_t RHS) const;
-
-  /// Signed division function for APInt.
-  ///
-  /// Signed divide this APInt by APInt RHS.
-  ///
-  /// The result is rounded towards zero.
   APInt sdiv(const APInt &RHS) const;
   APInt sdiv(int64_t RHS) const;
-
-  /// Unsigned remainder operation.
-  ///
-  /// Perform an unsigned remainder operation on this APInt with RHS being the
-  /// divisor. Both this and RHS are treated as unsigned quantities for purposes
-  /// of this operation.
-  ///
-  /// \returns a new APInt value containing the remainder result
   APInt urem(const APInt &RHS) const;
   uint64_t urem(uint64_t RHS) const;
-
-  /// Function for signed remainder operation.
-  ///
-  /// Signed remainder operation on APInt.
-  ///
-  /// Note that this is a true remainder operation and not a modulo operation
-  /// because the sign follows the sign of the dividend which is *this.
   APInt srem(const APInt &RHS) const;
   int64_t srem(int64_t RHS) const;
-
-  /// Dual division/remainder interface.
-  ///
-  /// Sometimes it is convenient to divide two APInt values and obtain both the
-  /// quotient and remainder. This function does both operations in the same
-  /// computation making it a little more efficient. The pair of input arguments
-  /// may overlap with the pair of output arguments. It is safe to call
-  /// udivrem(X, Y, X, Y), for example.
   static void udivrem(const APInt &LHS, const APInt &RHS, APInt &Quotient,
                       APInt &Remainder);
   static void udivrem(const APInt &LHS, uint64_t RHS, APInt &Quotient,
@@ -723,7 +675,6 @@ public:
   static void sdivrem(const APInt &LHS, int64_t RHS, APInt &Quotient,
                       int64_t &Remainder);
 
-  // Operations that return overflow indicators.
   APInt sadd_ov(const APInt &RHS, bool &Overflow) const;
   APInt uadd_ov(const APInt &RHS, bool &Overflow) const;
   APInt ssub_ov(const APInt &RHS, bool &Overflow) const;
@@ -736,13 +687,8 @@ public:
   APInt ushl_ov(const APInt &Amt, bool &Overflow) const;
   APInt ushl_ov(unsigned Amt, bool &Overflow) const;
 
-  /// Signed integer floor division operation.
-  ///
-  /// Rounds towards negative infinity, i.e. 5 / -2 = -3. Iff minimum value
-  /// divided by -1 set Overflow to true.
   APInt sfloordiv_ov(const APInt &RHS, bool &Overflow) const;
 
-  // Operations that saturate
   APInt sadd_sat(const APInt &RHS) const;
   APInt uadd_sat(const APInt &RHS) const;
   APInt ssub_sat(const APInt &RHS) const;
@@ -973,131 +919,48 @@ public:
     }
   }
 
-  /// Toggles a given bit to its opposite value.
-  ///
-  /// Toggle a given bit to its opposite value whose position is given
-  /// as "bitPosition".
-  void flipBit(unsigned bitPosition);
-
   /// Negate this APInt in place.
   void negate() {
     flipAllBits();
     ++(*this);
   }
 
-  /// Insert the bits from a smaller APInt starting at bitPosition.
-  void insertBits(const APInt &SubBits, unsigned bitPosition);
-  void insertBits(uint64_t SubBits, unsigned bitPosition, unsigned numBits);
-
-  /// Return an APInt with the extracted bits [bitPosition,bitPosition+numBits).
-  APInt extractBits(unsigned numBits, unsigned bitPosition) const;
   uint64_t extractBitsAsZExtValue(unsigned numBits, unsigned bitPosition) const;
-
-  /// @}
-  /// \name Value Characterization Functions
-  /// @{
-
-  /// Return the number of bits in the APInt.
   unsigned getBitWidth() const { return BitWidth; }
-
-  /// Get the number of words.
-  ///
-  /// Here one word's bitwidth equals to that of uint64_t.
-  ///
-  /// \returns the number of words to hold the integer value of this APInt.
   unsigned getNumWords() const { return getNumWords(BitWidth); }
-
-  /// Get the number of words.
-  ///
-  /// *NOTE* Here one word's bitwidth equals to that of uint64_t.
-  ///
-  /// \returns the number of words to hold the integer value with a given bit
-  /// width.
   static unsigned getNumWords(unsigned BitWidth) {
     return static_cast<unsigned>(
         (static_cast<uint64_t>(BitWidth) + APINT_BITS_PER_WORD - 1) /
         APINT_BITS_PER_WORD);
   }
-
-  /// Compute the number of active bits in the value
-  ///
-  /// This function returns the number of active bits which is defined as the
-  /// bit width minus the number of leading zeros. This is used in several
-  /// computations to see how "wide" the value is.
   unsigned getActiveBits() const { return BitWidth - countl_zero(); }
-
-  /// Compute the number of active words in the value of this APInt.
-  ///
-  /// This is used in conjunction with getActiveData to extract the raw value of
-  /// the APInt.
   unsigned getActiveWords() const {
     unsigned numActiveBits = getActiveBits();
     return numActiveBits ? whichWord(numActiveBits - 1) + 1 : 1;
   }
-
-  /// Get the minimum bit size for this signed APInt
-  ///
-  /// Computes the minimum bit width for this APInt while considering it to be a
-  /// signed (and probably negative) value. If the value is not negative, this
-  /// function returns the same value as getActiveBits()+1. Otherwise, it
-  /// returns the smallest bit width that will retain the negative value. For
-  /// example, -1 can be written as 0b1 or 0xFFFFFFFFFF. 0b1 is shorter and so
-  /// for -1, this function will always return 1.
   unsigned getSignificantBits() const {
     return BitWidth - getNumSignBits() + 1;
   }
-
-  /// Get zero extended value
-  ///
-  /// This method attempts to return the value of this APInt as a zero extended
-  /// uint64_t. The bitwidth must be <= 64 or the value must fit within a
-  /// uint64_t. Otherwise an assertion will result.
   uint64_t getZExtValue() const {
     if (isSingleWord())
       return U.VAL;
     assert(getActiveBits() <= 64 && "Too many bits for uint64_t");
     return U.pVal[0];
   }
-
-  /// Get zero extended value if possible
-  ///
-  /// This method attempts to return the value of this APInt as a zero extended
-  /// uint64_t. The bitwidth must be <= 64 or the value must fit within a
-  /// uint64_t. Otherwise no value is returned.
   std::optional<uint64_t> tryZExtValue() const {
     return (getActiveBits() <= 64) ? std::optional<uint64_t>(getZExtValue())
                                    : std::nullopt;
   };
-
-  /// Get sign extended value
-  ///
-  /// This method attempts to return the value of this APInt as a sign extended
-  /// int64_t. The bit width must be <= 64 or the value must fit within an
-  /// int64_t. Otherwise an assertion will result.
   int64_t getSExtValue() const {
     if (isSingleWord())
       return static_cast<int64_t>(SignExtend64(U.VAL, BitWidth));
     assert(getSignificantBits() <= 64 && "Too many bits for int64_t");
     return int64_t(U.pVal[0]);
   }
-
-  /// Get sign extended value if possible
-  ///
-  /// This method attempts to return the value of this APInt as a sign extended
-  /// int64_t. The bitwidth must be <= 64 or the value must fit within an
-  /// int64_t. Otherwise no value is returned.
   std::optional<int64_t> trySExtValue() const {
     return (getSignificantBits() <= 64) ? std::optional<int64_t>(getSExtValue())
                                         : std::nullopt;
   };
-
-  /// The APInt version of std::countl_zero.
-  ///
-  /// It counts the number of zeros from the most significant bit to the first
-  /// one bit.
-  ///
-  /// \returns BitWidth if the value is zero, otherwise returns the number of
-  ///   zeros from the most significant bit to the first one bits.
   unsigned countl_zero() const {
     if (isSingleWord()) {
       unsigned unusedBits = APINT_BITS_PER_WORD - BitWidth;
@@ -1105,16 +968,7 @@ public:
     }
     return countLeadingZerosSlowCase();
   }
-
   unsigned countLeadingZeros() const { return countl_zero(); }
-
-  /// Count the number of leading one bits.
-  ///
-  /// This function is an APInt version of std::countl_one. It counts the number
-  /// of ones from the most significant bit to the first zero bit.
-  ///
-  /// \returns 0 if the high order bit is not set, otherwise returns the number
-  /// of 1 bits from the most significant to the least
   unsigned countl_one() const {
     if (isSingleWord()) {
       if (BitWidth == 0)
@@ -1123,22 +977,10 @@ public:
     }
     return countLeadingOnesSlowCase();
   }
-
   unsigned countLeadingOnes() const { return countl_one(); }
-
-  /// Computes the number of leading bits of this APInt that are equal to its
-  /// sign bit.
   unsigned getNumSignBits() const {
     return isNegative() ? countl_one() : countl_zero();
   }
-
-  /// Count the number of trailing zero bits.
-  ///
-  /// This function is an APInt version of std::countr_zero. It counts the
-  /// number of zeros from the least significant bit to the first set bit.
-  ///
-  /// \returns BitWidth if the value is zero, otherwise returns the number of
-  /// zeros from the least significant bit to the first one bit.
   unsigned countr_zero() const {
     if (isSingleWord()) {
       unsigned TrailingZeros = llvm::countr_zero(U.VAL);
@@ -1148,14 +990,6 @@ public:
   }
 
   unsigned countTrailingZeros() const { return countr_zero(); }
-
-  /// Count the number of trailing one bits.
-  ///
-  /// This function is an APInt version of std::countr_one. It counts the number
-  /// of ones from the least significant bit to the first zero bit.
-  ///
-  /// \returns BitWidth if the value is all ones, otherwise returns the number
-  /// of ones from the least significant bit to the first zero bit.
   unsigned countr_one() const {
     if (isSingleWord())
       return llvm::countr_one(U.VAL);
@@ -1176,46 +1010,8 @@ public:
     return countPopulationSlowCase();
   }
 
-  /// @}
-  /// \name Conversion Functions
-  /// @{
-
-  /// \returns the value with the bit representation reversed of this APInt
-  /// Value.
   APInt reverseBits() const;
-
-  /// @}
-  /// \name Mathematics Operations
-  /// @{
-
-  /// \returns the floor log base 2 of this APInt.
   unsigned logBase2() const { return getActiveBits() - 1; }
-
-  /// \returns the ceil log base 2 of this APInt.
-  unsigned ceilLogBase2() const {
-    APInt temp(*this);
-    --temp;
-    return temp.getActiveBits();
-  }
-
-  /// \returns the nearest log base 2 of this APInt. Ties round up.
-  ///
-  /// NOTE: When we have a BitWidth of 1, we define:
-  ///
-  ///   log2(0) = UINT32_MAX
-  ///   log2(1) = 0
-  ///
-  /// to get around any mathematical concerns resulting from
-  /// referencing 2 in a space where 2 does no exist.
-  unsigned nearestLogBase2() const;
-
-  /// \returns the log base 2 of this APInt if its an exact power of two, -1
-  /// otherwise
-  int32_t exactLogBase2() const {
-    if (!isPowerOf2())
-      return -1;
-    return static_cast<int32_t>(logBase2());
-  }
 
   /// Get the absolute value.  If *this is < 0 then return -(*this), otherwise
   /// *this.  Note that the "most negative" signed number (e.g. -128 for 8 bit
@@ -1226,121 +1022,39 @@ public:
     return *this;
   }
 
-  /// @}
-  /// \name Building-block Operations for APInt and APFloat
-  /// @{
-
-  // These building block operations operate on a representation of arbitrary
-  // precision, two's-complement, bignum integer values. They should be
-  // sufficient to implement APInt and APFloat bignum requirements. Inputs are
-  // generally a pointer to the base of an array of integer parts, representing
-  // an unsigned bignum, and a count of how many parts there are.
-
-  /// Sets the least significant part of a bignum to the input value, and zeroes
-  /// out higher parts.
   static void tcSet(WordType *, WordType, unsigned);
-
-  /// Assign one bignum to another.
   static void tcAssign(WordType *, const WordType *, unsigned);
-
-  /// Returns true if a bignum is zero, false otherwise.
   static bool tcIsZero(const WordType *, unsigned);
-
-  /// Extract the given bit of a bignum; returns 0 or 1.  Zero-based.
   static int tcExtractBit(const WordType *, unsigned bit);
-
-  /// Copy the bit vector of width srcBITS from SRC, starting at bit srcLSB, to
-  /// DST, of dstCOUNT parts, such that the bit srcLSB becomes the least
-  /// significant bit of DST.  All high bits above srcBITS in DST are
-  /// zero-filled.
   static void tcExtract(WordType *, unsigned dstCount, const WordType *,
                         unsigned srcBits, unsigned srcLSB);
-
-  /// Set the given bit of a bignum.  Zero-based.
   static void tcSetBit(WordType *, unsigned bit);
-
-  /// Clear the given bit of a bignum.  Zero-based.
   static void tcClearBit(WordType *, unsigned bit);
-
-  /// Returns the bit number of the least or most significant set bit of a
-  /// number.  If the input number has no bits set -1U is returned.
-  static unsigned tcLSB(const WordType *, unsigned n);
   static unsigned tcMSB(const WordType *parts, unsigned n);
-
-  /// Negate a bignum in-place.
   static void tcNegate(WordType *, unsigned);
-
-  /// DST += RHS + CARRY where CARRY is zero or one.  Returns the carry flag.
   static WordType tcAdd(WordType *, const WordType *, WordType carry, unsigned);
-  /// DST += RHS.  Returns the carry flag.
   static WordType tcAddPart(WordType *, WordType, unsigned);
-
-  /// DST -= RHS + CARRY where CARRY is zero or one. Returns the carry flag.
   static WordType tcSubtract(WordType *, const WordType *, WordType carry,
                              unsigned);
-  /// DST -= RHS.  Returns the carry flag.
   static WordType tcSubtractPart(WordType *, WordType, unsigned);
-
-  /// DST += SRC * MULTIPLIER + PART   if add is true
-  /// DST  = SRC * MULTIPLIER + PART   if add is false
-  ///
-  /// Requires 0 <= DSTPARTS <= SRCPARTS + 1.  If DST overlaps SRC they must
-  /// start at the same point, i.e. DST == SRC.
-  ///
-  /// If DSTPARTS == SRC_PARTS + 1 no overflow occurs and zero is returned.
-  /// Otherwise DST is filled with the least significant DSTPARTS parts of the
-  /// result, and if all of the omitted higher parts were zero return zero,
-  /// otherwise overflow occurred and return one.
   static int tcMultiplyPart(WordType *dst, const WordType *src,
                             WordType multiplier, WordType carry,
                             unsigned srcParts, unsigned dstParts, bool add);
-
-  /// DST = LHS * RHS, where DST has the same width as the operands and is
-  /// filled with the least significant parts of the result.  Returns one if
-  /// overflow occurred, otherwise zero.  DST must be disjoint from both
-  /// operands.
   static int tcMultiply(WordType *, const WordType *, const WordType *,
                         unsigned);
-
-  /// DST = LHS * RHS, where DST has width the sum of the widths of the
-  /// operands. No overflow occurs. DST must be disjoint from both operands.
   static void tcFullMultiply(WordType *, const WordType *, const WordType *,
                              unsigned, unsigned);
-
-  /// If RHS is zero LHS and REMAINDER are left unchanged, return one.
-  /// Otherwise set LHS to LHS / RHS with the fractional part discarded, set
-  /// REMAINDER to the remainder, return zero.  i.e.
-  ///
-  ///  OLD_LHS = RHS * LHS + REMAINDER
-  ///
-  /// SCRATCH is a bignum of the same size as the operands and result for use by
-  /// the routine; its contents need not be initialized and are destroyed.  LHS,
-  /// REMAINDER and SCRATCH must be distinct.
   static int tcDivide(WordType *lhs, const WordType *rhs, WordType *remainder,
                       WordType *scratch, unsigned parts);
-
-  /// Shift a bignum left Count bits. Shifted in bits are zero. There are no
-  /// restrictions on Count.
   static void tcShiftLeft(WordType *, unsigned Words, unsigned Count);
-
-  /// Shift a bignum right Count bits.  Shifted in bits are zero.  There are no
-  /// restrictions on Count.
   static void tcShiftRight(WordType *, unsigned Words, unsigned Count);
-
-  /// Comparison (unsigned) of two bignums.
   static int tcCompare(const WordType *, const WordType *, unsigned);
-
-  /// Increment a bignum in-place.  Return the carry flag.
   static WordType tcIncrement(WordType *dst, unsigned parts) {
     return tcAddPart(dst, 1, parts);
   }
-
-  /// Decrement a bignum in-place.  Return the borrow flag.
   static WordType tcDecrement(WordType *dst, unsigned parts) {
     return tcSubtractPart(dst, 1, parts);
   }
-
-  /// Returns whether this instance allocated memory.
   bool needsCleanup() const { return !isSingleWord(); }
 
 private:
@@ -1423,87 +1137,35 @@ private:
                      const WordType *RHS, unsigned rhsWords, WordType *Quotient,
                      WordType *Remainder);
 
-  /// out-of-line slow case for inline constructor
   void initSlowCase(uint64_t val, bool isSigned);
-
-  /// shared code between two array constructors
   void initFromArray(const uint64_t *array, unsigned count);
-
-  /// out-of-line slow case for inline copy constructor
   void initSlowCase(const APInt &that);
-
-  /// out-of-line slow case for shl
   void shlSlowCase(unsigned ShiftAmt);
-
-  /// out-of-line slow case for lshr.
   void lshrSlowCase(unsigned ShiftAmt);
-
-  /// out-of-line slow case for ashr.
   void ashrSlowCase(unsigned ShiftAmt);
-
-  /// out-of-line slow case for operator=
   void assignSlowCase(const APInt &RHS);
-
-  /// out-of-line slow case for operator==
   bool equalSlowCase(const APInt &RHS) const;
-
-  /// out-of-line slow case for countLeadingZeros
   unsigned countLeadingZerosSlowCase() const;
-
-  /// out-of-line slow case for countLeadingOnes.
   unsigned countLeadingOnesSlowCase() const;
-
-  /// out-of-line slow case for countTrailingZeros.
   unsigned countTrailingZerosSlowCase() const;
-
-  /// out-of-line slow case for countTrailingOnes
   unsigned countTrailingOnesSlowCase() const;
-
-  /// out-of-line slow case for countPopulation
   unsigned countPopulationSlowCase() const;
-
-  /// out-of-line slow case for intersects.
   bool intersectsSlowCase(const APInt &RHS) const;
-
-  /// out-of-line slow case for isSubsetOf.
   bool isSubsetOfSlowCase(const APInt &RHS) const;
-
-  /// out-of-line slow case for setBits.
   void setBitsSlowCase(unsigned loBit, unsigned hiBit);
-
-  /// out-of-line slow case for clearBits.
   void clearBitsSlowCase(unsigned LoBit, unsigned HiBit);
-
-  /// out-of-line slow case for flipAllBits.
   void flipAllBitsSlowCase();
-
-  /// out-of-line slow case for operator&=.
   void andAssignSlowCase(const APInt &RHS);
-
-  /// out-of-line slow case for operator|=.
   void orAssignSlowCase(const APInt &RHS);
-
-  /// out-of-line slow case for operator^=.
   void xorAssignSlowCase(const APInt &RHS);
-
-  /// Unsigned comparison. Returns -1, 0, or 1 if this APInt is less than, equal
-  /// to, or greater than RHS.
   int compare(const APInt &RHS) const;
-
-  /// Signed comparison. Returns -1, 0, or 1 if this APInt is less than, equal
-  /// to, or greater than RHS.
   int compareSigned(const APInt &RHS) const;
-
-  /// @}
 };
 
 inline bool operator==(uint64_t V1, const APInt &V2) { return V2 == V1; }
 
 inline bool operator!=(uint64_t V1, const APInt &V2) { return V2 != V1; }
 
-/// Unary bitwise complement operator.
-///
-/// \returns an APInt that is the bitwise complement of \p v.
 inline APInt operator~(APInt v) {
   v.flipAllBits();
   return v;
@@ -1648,52 +1310,10 @@ inline const APInt &umax(const APInt &A, const APInt &B) {
   return A.ugt(B) ? A : B;
 }
 
-/// Converts the given APInt to a double value.
-///
-/// Treats the APInt as an unsigned value for conversion purposes.
-/// Return A unsign-divided by B, rounded by the given rounding mode.
-/// Let q(n) = An^2 + Bn + C, and BW = bit width of the value range
-/// (e.g. 32 for i32).
-/// This function finds the smallest number n, such that
-/// (a) n >= 0 and q(n) = 0, or
-/// (b) n >= 1 and q(n-1) and q(n), when evaluated in the set of all
-///     integers, belong to two different intervals [Rk, Rk+R),
-///     where R = 2^BW, and k is an integer.
-/// The idea here is to find when q(n) "overflows" 2^BW, while at the
-/// same time "allowing" subtraction. In unsigned modulo arithmetic a
-/// subtraction (treated as addition of negated numbers) would always
-/// count as an overflow, but here we want to allow values to decrease
-/// and increase as long as they are within the same interval.
-/// Specifically, adding of two negative numbers should not cause an
-/// overflow (as long as the magnitude does not exceed the bit width).
-/// On the other hand, given a positive number, adding a negative
-/// number to it can give a negative result, which would cause the
-/// value to go from [-2^BW, 0) to [0, 2^BW). In that sense, zero is
-/// treated as a special case of an overflow.
-///
-/// This function returns std::nullopt if after finding k that minimizes the
-/// positive solution to q(n) = kR, both solutions are contained between
-/// two consecutive integers.
-///
-/// There are cases where q(n) > T, and q(n+1) < T (assuming evaluation
-/// in arithmetic modulo 2^BW, and treating the values as signed) by the
-/// virtue of *signed* overflow. This function will *not* find such an n,
-/// however it may find a value of n satisfying the inequalities due to
-/// an *unsigned* overflow (if the values are treated as unsigned).
-/// To find a solution for a signed overflow, treat it as a problem of
-/// finding an unsigned overflow with a range with of BW-1.
-///
-/// The returned value may have a different bit width from the input
-/// coefficients.
-
-/// Compare two values, and if they are different, return the position of the
-/// most significant bit that is different in the values.
 std::optional<unsigned> GetMostSignificantDifferentBit(const APInt &A,
                                                        const APInt &B);
 
 } // namespace APIntOps
-
-#define DEBUG_TYPE "apint"
 
 /// A utility function for allocating memory, checking for allocation failures,
 /// and ensuring the contents are zeroed.
@@ -1995,101 +1615,6 @@ static void tcComplement(APInt::WordType *dst, unsigned parts) {
 inline void APInt::flipAllBitsSlowCase() {
   tcComplement(U.pVal, getNumWords());
   clearUnusedBits();
-}
-
-/// Toggle a given bit to its opposite value whose position is given
-/// as "bitPosition".
-/// Toggles a given bit to its opposite value.
-inline void APInt::flipBit(unsigned bitPosition) {
-  assert(bitPosition < BitWidth && "Out of the bit-width range!");
-  setBitVal(bitPosition, !(*this)[bitPosition]);
-}
-
-inline void APInt::insertBits(const APInt &subBits, unsigned bitPosition) {
-  unsigned subBitWidth = subBits.getBitWidth();
-  assert((subBitWidth + bitPosition) <= BitWidth && "Illegal bit insertion");
-
-  // inserting no bits is a noop.
-  if (subBitWidth == 0)
-    return;
-
-  // Insertion is a direct copy.
-  if (subBitWidth == BitWidth) {
-    *this = subBits;
-    return;
-  }
-
-  // Single word result can be done as a direct bitmask.
-  if (isSingleWord()) {
-    uint64_t mask = WORDTYPE_MAX >> (APINT_BITS_PER_WORD - subBitWidth);
-    U.VAL &= ~(mask << bitPosition);
-    U.VAL |= (subBits.U.VAL << bitPosition);
-    return;
-  }
-
-  unsigned loBit = whichBit(bitPosition);
-  unsigned loWord = whichWord(bitPosition);
-  unsigned hi1Word = whichWord(bitPosition + subBitWidth - 1);
-
-  // Insertion within a single word can be done as a direct bitmask.
-  if (loWord == hi1Word) {
-    uint64_t mask = WORDTYPE_MAX >> (APINT_BITS_PER_WORD - subBitWidth);
-    U.pVal[loWord] &= ~(mask << loBit);
-    U.pVal[loWord] |= (subBits.U.VAL << loBit);
-    return;
-  }
-
-  // Insert on word boundaries.
-  if (loBit == 0) {
-    // Direct copy whole words.
-    unsigned numWholeSubWords = subBitWidth / APINT_BITS_PER_WORD;
-    memcpy(U.pVal + loWord, subBits.getRawData(),
-           numWholeSubWords * APINT_WORD_SIZE);
-
-    // Mask+insert remaining bits.
-    unsigned remainingBits = subBitWidth % APINT_BITS_PER_WORD;
-    if (remainingBits != 0) {
-      uint64_t mask = WORDTYPE_MAX >> (APINT_BITS_PER_WORD - remainingBits);
-      U.pVal[hi1Word] &= ~mask;
-      U.pVal[hi1Word] |= subBits.getWord(subBitWidth - 1);
-    }
-    return;
-  }
-
-  // General case - set/clear individual bits in dst based on src.
-  // TODO - there is scope for optimization here, but at the moment this code
-  // path is barely used so prefer readability over performance.
-  for (unsigned i = 0; i != subBitWidth; ++i)
-    setBitVal(bitPosition + i, subBits[i]);
-}
-
-inline void APInt::insertBits(uint64_t subBits, unsigned bitPosition,
-                              unsigned numBits) {
-  uint64_t maskBits = maskTrailingOnes<uint64_t>(numBits);
-  subBits &= maskBits;
-  if (isSingleWord()) {
-    U.VAL &= ~(maskBits << bitPosition);
-    U.VAL |= subBits << bitPosition;
-    return;
-  }
-
-  unsigned loBit = whichBit(bitPosition);
-  unsigned loWord = whichWord(bitPosition);
-  unsigned hiWord = whichWord(bitPosition + numBits - 1);
-  if (loWord == hiWord) {
-    U.pVal[loWord] &= ~(maskBits << loBit);
-    U.pVal[loWord] |= subBits << loBit;
-    return;
-  }
-
-  static_assert(8 * sizeof(WordType) <= 64,
-                "This code assumes only two words affected");
-  unsigned wordBits = 8 * sizeof(WordType);
-  U.pVal[loWord] &= ~(maskBits << loBit);
-  U.pVal[loWord] |= subBits << loBit;
-
-  U.pVal[hiWord] &= ~(maskBits >> (wordBits - loBit));
-  U.pVal[hiWord] |= subBits >> (wordBits - loBit);
 }
 
 inline uint64_t APInt::extractBitsAsZExtValue(unsigned numBits,
@@ -2412,80 +1937,6 @@ inline void APInt::shlSlowCase(unsigned ShiftAmt) {
   clearUnusedBits();
 }
 
-// Calculate the rotate amount modulo the bit width.
-static unsigned rotateModulo(unsigned BitWidth, const APInt &rotateAmt) {
-  if (BitWidth == 0)
-    return 0;
-  unsigned rotBitWidth = rotateAmt.getBitWidth();
-  APInt rot = rotateAmt;
-  if (rotBitWidth < BitWidth) {
-    // Extend the rotate APInt, so that the urem doesn't divide by 0.
-    // e.g. APInt(1, 32) would give APInt(1, 0).
-    rot = rotateAmt.zext(BitWidth);
-  }
-  rot = rot.urem(APInt(rot.getBitWidth(), BitWidth));
-  return static_cast<unsigned>(rot.getLimitedValue(BitWidth));
-}
-
-inline APInt APInt::rotl(const APInt &rotateAmt) const {
-  return rotl(rotateModulo(BitWidth, rotateAmt));
-}
-
-inline APInt APInt::rotl(unsigned rotateAmt) const {
-  if (BitWidth == 0)
-    return *this;
-  rotateAmt %= BitWidth;
-  if (rotateAmt == 0)
-    return *this;
-  return shl(rotateAmt) | lshr(BitWidth - rotateAmt);
-}
-
-inline APInt APInt::rotr(const APInt &rotateAmt) const {
-  return rotr(rotateModulo(BitWidth, rotateAmt));
-}
-
-inline APInt APInt::rotr(unsigned rotateAmt) const {
-  if (BitWidth == 0)
-    return *this;
-  rotateAmt %= BitWidth;
-  if (rotateAmt == 0)
-    return *this;
-  return lshr(rotateAmt) | shl(BitWidth - rotateAmt);
-}
-
-/// \returns the nearest log base 2 of this APInt. Ties round up.
-///
-/// NOTE: When we have a BitWidth of 1, we define:
-///
-///   log2(0) = UINT32_MAX
-///   log2(1) = 0
-///
-/// to get around any mathematical concerns resulting from
-/// referencing 2 in a space where 2 does no exist.
-inline unsigned APInt::nearestLogBase2() const {
-  // Special case when we have a bitwidth of 1. If VAL is 1, then we
-  // get 0. If VAL is 0, we get WORDTYPE_MAX which gets truncated to
-  // UINT32_MAX.
-  if (BitWidth == 1)
-    return static_cast<unsigned>(U.VAL - 1);
-
-  // Handle the zero case.
-  if (isZero())
-    return UINT32_MAX;
-
-  // The non-zero case is handled by computing:
-  //
-  //   nearestLogBase2(x) = logBase2(x) + x[logBase2(x)-1].
-  //
-  // where x[i] is referring to the value of the ith bit of x.
-  unsigned lg = logBase2();
-  return lg + unsigned((*this)[lg - 1]);
-}
-
-/// Implementation of Knuth's Algorithm D (Division of nonnegative integers)
-/// from "Art of Computer Programming, Volume 2", section 4.3.1, p. 272. The
-/// variables here have the same names as in the algorithm. Comments explain
-/// the algorithm and any deviation from it.
 static void KnuthDiv(uint32_t *u, uint32_t *v, uint32_t *q, uint32_t *r,
                      unsigned m, unsigned n) {
   assert(u && "Must provide dividend");
@@ -2497,23 +1948,6 @@ static void KnuthDiv(uint32_t *u, uint32_t *v, uint32_t *q, uint32_t *r,
   // b denotes the base of the number system. In our case b is 2^32.
   const uint64_t b = uint64_t(1) << 32;
 
-  // The DEBUG macros here tend to be spam in the debug output if you're not
-  // debugging this code. Disable them unless KNUTH_DEBUG is defined.
-
-  // DEBUG_KNUTH removed
-  // DEBUG_KNUTH removed
-  // DEBUG_KNUTH removed
-  // DEBUG_KNUTH removed
-  // DEBUG_KNUTH removed
-  // DEBUG_KNUTH removed
-  // D1. [Normalize.] Set d = b / (v[n-1] + 1) and multiply all the digits of
-  // u and v by d. Note that we have taken Knuth's advice here to use a power
-  // of 2 value for d such that d * v[n-1] >= b/2 (b is the base). A power of
-  // 2 allows us to shift instead of multiply and it is easy to determine the
-  // shift amount from the leading zeros.  We are basically normalizing the u
-  // and v so that its high bits are shifted to the top of v's range without
-  // overflow. Note that this can require an extra word in u so that u must
-  // be of length m+n+1.
   unsigned shift = ::llvm::countl_zero(v[n - 1]);
   uint32_t v_carry = 0;
   uint32_t u_carry = 0;
@@ -2531,28 +1965,11 @@ static void KnuthDiv(uint32_t *u, uint32_t *v, uint32_t *q, uint32_t *r,
   }
   u[m + n] = u_carry;
 
-  // DEBUG_KNUTH removed
-  // DEBUG_KNUTH removed
-  // DEBUG_KNUTH removed
-  // DEBUG_KNUTH removed
-  // DEBUG_KNUTH removed
-
-  // D2. [Initialize j.]  Set j to m. This is the loop counter over the places.
   int j = static_cast<int>(m);
   do {
-    // DEBUG_KNUTH removed
-    // D3. [Calculate q'.].
-    //     Set qp = (u[j+n]*b + u[j+n-1]) / v[n-1]. (qp=qprime=q')
-    //     Set rp = (u[j+n]*b + u[j+n-1]) % v[n-1]. (rp=rprime=r')
-    // Now test if qp == b or qp*v[n-2] > b*rp + u[j+n-2]; if so, decrease
-    // qp by 1, increase rp by v[n-1], and repeat this test if rp < b. The test
-    // on v[n-2] determines at high speed most of the cases in which the trial
-    // value qp is one too large, and it eliminates all cases where qp is two
-    // too large.
     uint64_t dividend =
         Make_64(u[static_cast<unsigned>(j + static_cast<int>(n))],
                 u[static_cast<unsigned>(j + static_cast<int>(n) - 1)]);
-    // DEBUG_KNUTH removed
     uint64_t qp = dividend / v[n - 1];
     uint64_t rp = dividend % v[n - 1];
     if (qp == b ||
@@ -2566,16 +1983,6 @@ static void KnuthDiv(uint32_t *u, uint32_t *v, uint32_t *q, uint32_t *r,
                b * rp + u[static_cast<unsigned>(j + static_cast<int>(n) - 2)]))
         qp--;
     }
-    // DEBUG_KNUTH removed
-
-    // D4. [Multiply and subtract.] Replace (u[j+n]u[j+n-1]...u[j]) with
-    // (u[j+n]u[j+n-1]..u[j]) - qp * (v[n-1]...v[1]v[0]). This computation
-    // consists of a simple multiplication by a one-place number, combined with
-    // a subtraction.
-    // The digits (u[j+n]...u[j]) should be kept positive; if the result of
-    // this step is actually negative, (u[j+n]...u[j]) should be left as the
-    // true value plus b**(n+1), namely as the b's complement of
-    // the true value, and a "borrow" to the left should be remembered.
     int64_t borrow = 0;
     for (unsigned i = 0; i < n; ++i) {
       uint64_t p = qp * uint64_t(v[i]);
@@ -2586,19 +1993,12 @@ static void KnuthDiv(uint32_t *u, uint32_t *v, uint32_t *q, uint32_t *r,
           Lo_32(static_cast<uint64_t>(subres));
       borrow = static_cast<int64_t>(Hi_32(p)) -
                static_cast<int64_t>(Hi_32(static_cast<uint64_t>(subres)));
-      // DEBUG_KNUTH removed
     }
     bool isNeg = u[static_cast<unsigned>(j + static_cast<int>(n))] <
                  static_cast<uint64_t>(borrow);
     u[static_cast<unsigned>(j + static_cast<int>(n))] -=
         Lo_32(static_cast<uint64_t>(borrow));
 
-    // DEBUG_KNUTH removed
-    // DEBUG_KNUTH removed
-    // DEBUG_KNUTH removed
-
-    // D5. [Test remainder.] Set q[j] = qp. If the result of step D4 was
-    // negative, go to step D6; otherwise go on to step D7.
     q[j] = Lo_32(qp);
     if (isNeg) {
       // D6. [Add back]. The probability that this step is necessary is very
@@ -2619,41 +2019,24 @@ static void KnuthDiv(uint32_t *u, uint32_t *v, uint32_t *q, uint32_t *r,
       }
       u[static_cast<unsigned>(j + static_cast<int>(n))] += carry;
     }
-    // DEBUG_KNUTH removed
-    // DEBUG_KNUTH removed
-    // DEBUG_KNUTH removed
-
-    // D7. [Loop on j.]  Decrease j by one. Now if j >= 0, go back to D3.
   } while (--j >= 0);
 
-  // DEBUG_KNUTH removed
-  // DEBUG_KNUTH removed
-  // DEBUG_KNUTH removed
-
-  // D8. [Unnormalize]. Now q[...] is the desired quotient, and the desired
-  // remainder may be obtained by dividing u[...] by d. If r is non-null we
-  // compute the remainder (urem uses this).
   if (r) {
     // The value d is expressed by the "shift" value above since we avoided
     // multiplication by d by using a shift left. So, all we have to do is
     // shift right here.
     if (shift) {
       uint32_t carry = 0;
-      // DEBUG_KNUTH removed
       for (int i = static_cast<int>(n) - 1; i >= 0; i--) {
         r[i] = (u[i] >> shift) | carry;
         carry = u[i] << (32 - shift);
-        // DEBUG_KNUTH removed
       }
     } else {
       for (int i = static_cast<int>(n) - 1; i >= 0; i--) {
         r[i] = u[i];
-        // DEBUG_KNUTH removed
       }
     }
-    // DEBUG_KNUTH removed
   }
-  // DEBUG_KNUTH removed
 }
 
 inline void APInt::divide(const WordType *LHS, unsigned lhsWords,
@@ -3389,19 +2772,6 @@ inline void APInt::tcClearBit(WordType *parts, unsigned bit) {
   parts[whichWord(bit)] &= ~maskBit(bit);
 }
 
-/// Returns the bit number of the least significant set bit of a number.  If the
-/// input number has no bits set UINT_MAX is returned.
-inline unsigned APInt::tcLSB(const WordType *parts, unsigned n) {
-  for (unsigned i = 0; i < n; i++) {
-    if (parts[i] != 0) {
-      unsigned lsb = ::llvm::countr_zero(parts[i]);
-      return lsb + i * APINT_BITS_PER_WORD;
-    }
-  }
-
-  return UINT_MAX;
-}
-
 /// Returns the bit number of the most significant set bit of a number.
 /// If the input number has no bits set UINT_MAX is returned.
 inline unsigned APInt::tcMSB(const WordType *parts, unsigned n) {
@@ -3507,13 +2877,6 @@ inline APInt::WordType APInt::tcSubtract(WordType *dst, const WordType *rhs,
   return c;
 }
 
-/// This function subtracts a single "word" (64-bit word), src, from
-/// the multi-word integer array, dst[], propagating the borrowed 1 value until
-/// no further borrowing is needed or it runs out of "words" in dst.  The result
-/// is 1 if "borrowing" exhausted the digits in dst, or 0 if dst was not
-/// exhausted. In other words, if src > dst then this function returns 1,
-/// otherwise 0.
-/// @returns the borrow out of the subtraction
 inline APInt::WordType APInt::tcSubtractPart(WordType *dst, WordType src,
                                              unsigned parts) {
   for (unsigned i = 0; i < parts; ++i) {
@@ -3533,15 +2896,6 @@ inline void APInt::tcNegate(WordType *dst, unsigned parts) {
   tcIncrement(dst, parts);
 }
 
-/// DST += SRC * MULTIPLIER + CARRY   if add is true
-/// DST  = SRC * MULTIPLIER + CARRY   if add is false
-/// Requires 0 <= DSTPARTS <= SRCPARTS + 1.  If DST overlaps SRC
-/// they must start at the same point, i.e. DST == SRC.
-/// If DSTPARTS == SRCPARTS + 1 no overflow occurs and zero is
-/// returned.  Otherwise DST is filled with the least significant
-/// DSTPARTS parts of the result, and if all of the omitted higher
-/// parts were zero return zero, otherwise overflow occurred and
-/// return one.
 inline int APInt::tcMultiplyPart(WordType *dst, const WordType *src,
                                  WordType multiplier, WordType carry,
                                  unsigned srcParts, unsigned dstParts,
@@ -3660,15 +3014,6 @@ inline void APInt::tcFullMultiply(WordType *dst, const WordType *lhs,
   }
 }
 
-// If RHS is zero LHS and REMAINDER are left unchanged, return one.
-// Otherwise set LHS to LHS / RHS with the fractional part discarded,
-// set REMAINDER to the remainder, return zero.  i.e.
-//
-//   OLD_LHS = RHS * LHS + REMAINDER
-//
-// SCRATCH is a bignum of the same size as the operands and result for
-// use by the routine; its contents need not be initialized and are
-// destroyed.  LHS, REMAINDER and SCRATCH must be distinct.
 inline int APInt::tcDivide(WordType *lhs, const WordType *rhs,
                            WordType *remainder, WordType *srhs,
                            unsigned parts) {

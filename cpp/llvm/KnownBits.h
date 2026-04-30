@@ -73,12 +73,6 @@ public:
     return !Zero.isSignBitSet() && !One.isSignBitSet();
   }
 
-  /// Resets the known state of all bits.
-  void resetAll() {
-    Zero.clearAllBits();
-    One.clearAllBits();
-  }
-
   /// Returns true if value is all zero.
   bool isZero() const { return Zero.isAllOnes(); }
 
@@ -89,12 +83,6 @@ public:
   void setAllZero() {
     Zero.setAllBits();
     One.clearAllBits();
-  }
-
-  /// Make all bits known to be one and discard any previous information.
-  void setAllOnes() {
-    Zero.clearAllBits();
-    One.setAllBits();
   }
 
   /// Make all bits known to be both zero and one. Useful before a loop that
@@ -117,9 +105,6 @@ public:
   bool isStrictlyPositive() const {
     return Zero.isSignBitSet() && !One.isZero();
   }
-
-  /// Returns true if this value is known to be non-positive.
-  bool isNonPositive() const { return getSignedMaxValue().isNonPositive(); }
 
   /// Make this value negative.
   void makeNegative() { One.setSignBit(); }
@@ -182,17 +167,8 @@ public:
     return *this;
   }
 
-  /// Insert the bits from a smaller known bits starting at bitPosition.
-  void insertBits(const KnownBits &SubBits, unsigned BitPosition) {
-    Zero.insertBits(SubBits.Zero, BitPosition);
-    One.insertBits(SubBits.One, BitPosition);
-  }
-
   /// Returns the minimum number of trailing zero bits.
   unsigned countMinTrailingZeros() const { return Zero.countr_one(); }
-
-  /// Returns the minimum number of trailing one bits.
-  unsigned countMinTrailingOnes() const { return One.countr_one(); }
 
   /// Returns the minimum number of leading zero bits.
   unsigned countMinLeadingZeros() const { return Zero.countl_one(); }
@@ -211,20 +187,8 @@ public:
     return 1;
   }
 
-  /// Returns the maximum number of bits needed to represent all possible
-  /// signed values with these known bits. This is the inverse of the minimum
-  /// number of known sign bits. Examples for bitwidth 5:
-  /// 110?? --> 4
-  /// 0000? --> 2
-  unsigned countMaxSignificantBits() const {
-    return getBitWidth() - countMinSignBits() + 1;
-  }
-
   /// Returns the maximum number of trailing zero bits possible.
   unsigned countMaxTrailingZeros() const { return One.countr_zero(); }
-
-  /// Returns the maximum number of trailing one bits possible.
-  unsigned countMaxTrailingOnes() const { return Zero.countr_zero(); }
 
   /// Returns the maximum number of leading zero bits possible.
   unsigned countMaxLeadingZeros() const { return One.countl_zero(); }
@@ -234,18 +198,6 @@ public:
 
   /// Returns the number of bits known to be one.
   unsigned countMinPopulation() const { return One.popcount(); }
-
-  /// Returns the maximum number of bits that could be one.
-  unsigned countMaxPopulation() const {
-    return getBitWidth() - Zero.popcount();
-  }
-
-  /// Returns the maximum number of bits needed to represent all possible
-  /// unsigned values with these known bits. This is the inverse of the
-  /// minimum number of leading zeros.
-  unsigned countMaxActiveBits() const {
-    return getBitWidth() - countMinLeadingZeros();
-  }
 
   /// Create known bits from a known constant.
   static KnownBits makeConstant(const APInt &C) { return KnownBits(~C, C); }
