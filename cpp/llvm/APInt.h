@@ -13,12 +13,6 @@
 
 namespace llvm {
 
-template <typename To, typename From>
-static inline To bit_cast(const From &src) noexcept {
-  static_assert(sizeof(To) == sizeof(From));
-  return std::bit_cast<To>(src);
-}
-
 static inline bool isIntN(unsigned N, uint64_t x) {
   if (N == 0)
     return x == 0 || x == UINT64_MAX;
@@ -93,36 +87,10 @@ inline APInt operator-(APInt);
 class [[nodiscard]] APInt {
 public:
   using WordType = uint64_t;
-
-  /// Byte size of a word.
   static constexpr unsigned APINT_WORD_SIZE = sizeof(WordType);
-
-  /// Bits in a word.
   static constexpr unsigned APINT_BITS_PER_WORD = APINT_WORD_SIZE * CHAR_BIT;
-
-  enum class Rounding {
-    DOWN,
-    TOWARD_ZERO,
-    UP,
-  };
-
   static constexpr WordType WORDTYPE_MAX = ~WordType(0);
 
-  /// \name Constructors
-  /// @{
-
-  /// Create a new APInt of numBits width, initialized as val.
-  ///
-  /// If isSigned is true then val is treated as if it were a signed value
-  /// (i.e. as an int64_t) and the appropriate sign extension to the bit width
-  /// will be done. Otherwise, no sign extension occurs (high order bits beyond
-  /// the range of val are zero filled).
-  ///
-  /// \param numBits the bit width of the constructed APInt
-  /// \param val the initial value of the APInt
-  /// \param isSigned how to treat signedness of val
-  /// \param implicitTrunc allow implicit truncation of non-zero/sign bits of
-  ///                      val beyond the range of numBits
   APInt(unsigned numBits, uint64_t val, bool isSigned = false,
         bool implicitTrunc = false)
       : BitWidth(numBits) {
@@ -153,20 +121,12 @@ public:
     }
   }
 
-  /// Construct an APInt of numBits width, initialized as bigVal[].
-  ///
-  /// Note that bigVal.size() can be smaller or larger than the corresponding
-  /// bit width but any extraneous bits will be dropped.
-  ///
-  /// \param numBits the bit width of the constructed APInt
-  /// \param bigVal a sequence of words to form the initial value of the APInt
   APInt(unsigned numBits, const uint64_t *bigVal, unsigned numWords)
       : BitWidth(numBits) {
     assert(bigVal && "Null pointer detected!");
     initFromArray(bigVal, numWords);
   }
 
-  /// Default constructor that creates an APInt with a 1-bit zero value.
   explicit APInt() { U.VAL = 0; }
 
   /// Copy Constructor.
@@ -248,9 +208,6 @@ public:
     return Res;
   }
 
-  /// Return a value containing V broadcasted over NewLen bits.
-  static APInt getSplat(unsigned NewLen, const APInt &V);
-
   bool isSingleWord() const { return BitWidth <= APINT_BITS_PER_WORD; }
   bool isNegative() const { return (*this)[BitWidth - 1]; }
   bool isNonNegative() const { return !isNegative(); }
@@ -303,8 +260,6 @@ public:
 
   bool isIntN(unsigned N) const { return getActiveBits() <= N; }
 
-  bool isSignedIntN(unsigned N) const { return getSignificantBits() <= N; }
-
   bool isPowerOf2() const {
     if (isSingleWord()) {
       assert(BitWidth && "zero width values not allowed");
@@ -313,27 +268,7 @@ public:
     return countPopulationSlowCase() == 1;
   }
 
-  /// Check if this APInt's negated value is a power of two greater than zero.
-  bool isNegatedPowerOf2() const {
-    assert(BitWidth && "zero width values not allowed");
-    if (isNonNegative())
-      return false;
-    // NegatedPowerOf2 - shifted mask in the top bits.
-    unsigned LO = countl_one();
-    unsigned TZ = countr_zero();
-    return (LO + TZ) == BitWidth;
-  }
-
-  /// Checks if this APInt -interpreted as an address- is aligned to the
-  /// provided value.
-  /// Check if the APInt's value is returned by getSignMask.
-  ///
-  /// \returns true if this is the value returned by getSignMask.
   bool isSignMask() const { return isMinSignedValue(); }
-
-  /// Convert APInt to a boolean value.
-  ///
-  /// This converts the APInt to a boolean value as a test against zero.
   bool getBoolValue() const { return !isZero(); }
 
   /// If this value is smaller than the specified limit, return it, otherwise
@@ -1717,11 +1652,6 @@ inline const APInt &umax(const APInt &A, const APInt &B) {
 ///
 /// Treats the APInt as an unsigned value for conversion purposes.
 /// Return A unsign-divided by B, rounded by the given rounding mode.
-inline APInt RoundingUDiv(const APInt &A, const APInt &B, APInt::Rounding RM);
-
-/// Return A sign-divided by B, rounded by the given rounding mode.
-inline APInt RoundingSDiv(const APInt &A, const APInt &B, APInt::Rounding RM);
-
 /// Let q(n) = An^2 + Bn + C, and BW = bit width of the value range
 /// (e.g. 32 for i32).
 /// This function finds the smallest number n, such that
@@ -2186,14 +2116,6 @@ inline uint64_t APInt::extractBitsAsZExtValue(unsigned numBits,
   return retBits;
 }
 
-inline bool APInt::isSplat(unsigned SplatSizeInBits) const {
-  assert(getBitWidth() % SplatSizeInBits == 0 &&
-         "SplatSizeInBits must divide width!");
-  // We can check that all parts of an integer are equal by making use of a
-  // little trick: rotate and check if it's still the same value.
-  return *this == rotl(SplatSizeInBits);
-}
-
 /// This function returns the high "numBits" bits of this APInt.
 inline APInt APInt::getHiBits(unsigned numBits) const {
   return this->lshr(BitWidth - numBits);
@@ -2204,17 +2126,6 @@ inline APInt APInt::getLoBits(unsigned numBits) const {
   APInt Result(getLowBitsSet(BitWidth, numBits));
   Result &= *this;
   return Result;
-}
-
-/// Return a value containing V broadcasted over NewLen bits.
-inline APInt APInt::getSplat(unsigned NewLen, const APInt &V) {
-  assert(NewLen >= V.getBitWidth() && "Can't splat to smaller bit width!");
-
-  APInt Val = V.zext(NewLen);
-  for (unsigned I = V.getBitWidth(); I < NewLen; I <<= 1)
-    Val |= Val << I;
-
-  return Val;
 }
 
 inline unsigned APInt::countLeadingZerosSlowCase() const {
@@ -3863,54 +3774,6 @@ inline int APInt::tcCompare(const WordType *lhs, const WordType *rhs,
   }
 
   return 0;
-}
-
-APInt llvm::APIntOps::RoundingUDiv(const APInt &A, const APInt &B,
-                                   APInt::Rounding RM) {
-  // Currently udivrem always rounds down.
-  switch (RM) {
-  case APInt::Rounding::DOWN:
-  case APInt::Rounding::TOWARD_ZERO:
-    return A.udiv(B);
-  case APInt::Rounding::UP: {
-    APInt Quo, Rem;
-    APInt::udivrem(A, B, Quo, Rem);
-    if (Rem.isZero())
-      return Quo;
-    return Quo + 1;
-  }
-  }
-  std::abort();
-}
-
-APInt llvm::APIntOps::RoundingSDiv(const APInt &A, const APInt &B,
-                                   APInt::Rounding RM) {
-  switch (RM) {
-  case APInt::Rounding::DOWN:
-  case APInt::Rounding::UP: {
-    APInt Quo, Rem;
-    APInt::sdivrem(A, B, Quo, Rem);
-    if (Rem.isZero())
-      return Quo;
-    // This algorithm deals with arbitrary rounding mode used by sdivrem.
-    // We want to check whether the non-integer part of the mathematical value
-    // is negative or not. If the non-integer part is negative, we need to round
-    // down from Quo; otherwise, if it's positive or 0, we return Quo, as it's
-    // already rounded down.
-    if (RM == APInt::Rounding::DOWN) {
-      if (Rem.isNegative() != B.isNegative())
-        return Quo - 1;
-      return Quo;
-    }
-    if (Rem.isNegative() != B.isNegative())
-      return Quo;
-    return Quo + 1;
-  }
-  // Currently sdiv rounds towards zero.
-  case APInt::Rounding::TOWARD_ZERO:
-    return A.sdiv(B);
-  }
-  std::abort();
 }
 
 inline std::optional<unsigned>

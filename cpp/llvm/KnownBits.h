@@ -164,33 +164,12 @@ public:
     return KnownBits(Zero.trunc(BitWidth), One.trunc(BitWidth));
   }
 
-  /// Return known bits for an "any" extension of the value we're tracking,
-  /// where we don't know anything about the extended bits.
-  KnownBits anyext(unsigned BitWidth) const {
-    return KnownBits(Zero.zext(BitWidth), One.zext(BitWidth));
-  }
-
   /// Return known bits for a zero extension of the value we're tracking.
   KnownBits zext(unsigned BitWidth) const {
     unsigned OldBitWidth = getBitWidth();
     APInt NewZero = Zero.zext(BitWidth);
     NewZero.setBitsFrom(OldBitWidth);
     return KnownBits(NewZero, One.zext(BitWidth));
-  }
-
-  /// Return known bits for a sign extension of the value we're tracking.
-  KnownBits sext(unsigned BitWidth) const {
-    return KnownBits(Zero.sext(BitWidth), One.sext(BitWidth));
-  }
-
-  /// Return known bits for an "any" extension or truncation of the value we're
-  /// tracking.
-  KnownBits anyextOrTrunc(unsigned BitWidth) const {
-    if (BitWidth > getBitWidth())
-      return anyext(BitWidth);
-    if (BitWidth < getBitWidth())
-      return trunc(BitWidth);
-    return *this;
   }
 
   /// Return known bits for a zero extension or truncation of the value we're
@@ -203,29 +182,11 @@ public:
     return *this;
   }
 
-  /// Return known bits for a sign extension or truncation of the value we're
-  /// tracking.
-  KnownBits sextOrTrunc(unsigned BitWidth) const {
-    if (BitWidth > getBitWidth())
-      return sext(BitWidth);
-    if (BitWidth < getBitWidth())
-      return trunc(BitWidth);
-    return *this;
-  }
-
-  /// Return known bits for a in-register sign extension of the value we're
-  /// tracking.
-  KnownBits sextInReg(unsigned SrcBitWidth) const;
-
   /// Insert the bits from a smaller known bits starting at bitPosition.
   void insertBits(const KnownBits &SubBits, unsigned BitPosition) {
     Zero.insertBits(SubBits.Zero, BitPosition);
     One.insertBits(SubBits.One, BitPosition);
   }
-
-  /// Return KnownBits based on this, but updated given that the underlying
-  /// value is known to be greater than or equal to Val.
-  KnownBits makeGE(const APInt &Val) const;
 
   /// Returns the minimum number of trailing zero bits.
   unsigned countMinTrailingZeros() const { return Zero.countr_one(); }
@@ -577,35 +538,6 @@ inline KnownBits KnownBits::computeForSubBorrow(const KnownBits &LHS,
   return computeForAddCarryImpl(LHS, RHS,
                                 /*CarryZero=*/Borrow.One.getBoolValue(),
                                 /*CarryOne=*/Borrow.Zero.getBoolValue());
-}
-
-inline KnownBits KnownBits::sextInReg(unsigned SrcBitWidth) const {
-  unsigned BitWidth = getBitWidth();
-  assert(0 < SrcBitWidth && SrcBitWidth <= BitWidth &&
-         "Illegal sext-in-register");
-
-  if (SrcBitWidth == BitWidth)
-    return *this;
-
-  unsigned ExtBits = BitWidth - SrcBitWidth;
-  KnownBits Result;
-  Result.One = One << ExtBits;
-  Result.Zero = Zero << ExtBits;
-  Result.One.ashrInPlace(ExtBits);
-  Result.Zero.ashrInPlace(ExtBits);
-  return Result;
-}
-
-inline KnownBits KnownBits::makeGE(const APInt &Val) const {
-  // Count the number of leading bit positions where our underlying value is
-  // known to be less than or equal to Val.
-  unsigned N = (Zero | Val).countl_one();
-
-  // For each of those bit positions, if Val has a 1 in that bit then our
-  // underlying value must also have a 1.
-  APInt MaskedVal(Val);
-  MaskedVal.clearLowBits(getBitWidth() - N);
-  return KnownBits(Zero, One | MaskedVal);
 }
 
 static unsigned getMaxShiftAmount(const APInt &MaxValue, unsigned BitWidth) {
