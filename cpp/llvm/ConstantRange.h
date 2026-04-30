@@ -20,81 +20,44 @@ struct KnownBits;
 class [[nodiscard]] ConstantRange {
   APInt Lower, Upper;
 
-  /// Create empty constant range with same bitwidth.
   ConstantRange getEmpty() const { return ConstantRange(getBitWidth(), false); }
-
-  /// Create full constant range with same bitwidth.
   ConstantRange getFull() const { return ConstantRange(getBitWidth(), true); }
 
 public:
-  /// Initialize a full or empty set for the specified bit width.
   explicit ConstantRange(uint32_t BitWidth, bool isFullSet);
-
-  /// Initialize a range to hold the single specified value.
   ConstantRange(APInt Value);
-
-  /// Initialize a range of values explicitly. This will assert out if
-  /// Lower==Upper and Lower != Min or Max value for its type. It will also
-  /// assert out if the two APInt's are not the same bit width.
   ConstantRange(APInt Lower, APInt Upper);
 
-  /// Create empty constant range with the given bit width.
   static ConstantRange getEmpty(uint32_t BitWidth) {
     return ConstantRange(BitWidth, false);
   }
 
-  /// Create full constant range with the given bit width.
   static ConstantRange getFull(uint32_t BitWidth) {
     return ConstantRange(BitWidth, true);
   }
 
-  /// Create non-empty constant range with the given bounds. If Lower and
-  /// Upper are the same, a full range is returned.
   static ConstantRange getNonEmpty(APInt Lower, APInt Upper) {
     if (Lower == Upper)
       return getFull(Lower.getBitWidth());
     return ConstantRange(std::move(Lower), std::move(Upper));
   }
 
-  /// Initialize a range based on a known bits constraint. The IsSigned flag
-  /// indicates whether the constant range should not wrap in the signed or
-  /// unsigned domain.
   static ConstantRange fromKnownBits(const KnownBits &Known, bool IsSigned);
 
-  /// Split the ConstantRange into positive and negative components, ignoring
-  /// zero values.
   std::pair<ConstantRange, ConstantRange> splitPosNeg() const;
 
-  /// Initialize a range containing all values X that satisfy `(X & Mask)
-  /// != C`. Note that the range returned may contain values where `(X & Mask)
-  /// == C` holds, making it less precise, but still conservative.
-  /// Return the lower value for this range.
   const APInt &getLower() const { return Lower; }
-
-  /// Return the upper value for this range.
   const APInt &getUpper() const { return Upper; }
-
-  /// Get the bit width of this ConstantRange.
   uint32_t getBitWidth() const { return Lower.getBitWidth(); }
+  bool isFullSet() const { return Lower == Upper && Lower.isMaxValue(); }
 
-  /// Return true if this set contains all of the elements possible
-  /// for this data-type.
-  bool isFullSet() const {
-    return Lower == Upper && Lower.isMaxValue();
-  }
-
-  /// Return true if this set contains no members.
-  bool isEmptySet() const {
-    return Lower == Upper && Lower.isMinValue();
-  }
+  bool isEmptySet() const { return Lower == Upper && Lower.isMinValue(); }
 
   /// Return true if this set wraps around the unsigned domain. Special cases:
   ///  * Empty set: Not wrapped.
   ///  * Full set: Not wrapped.
   ///  * [X, 0) == [X, Max]: Not wrapped.
-  bool isWrappedSet() const {
-    return Lower.ugt(Upper) && !Upper.isZero();
-  }
+  bool isWrappedSet() const { return Lower.ugt(Upper) && !Upper.isZero(); }
 
   /// Return true if the exclusive upper bound wraps around the unsigned
   /// domain. Special cases:
@@ -158,256 +121,87 @@ public:
     return nullptr;
   }
 
-  /// Return true if this set contains exactly one member.
   bool isSingleElement() const { return getSingleElement() != nullptr; }
-
-  /// Compare set size of this range with the range CR.
   bool isSizeStrictlySmallerThan(const ConstantRange &CR) const;
-
-  /// Compare set size of this range with Value.
   bool isSizeLargerThan(uint64_t MaxSize) const;
-
-  /// Return true if all values in this range are negative.
   bool isAllNegative() const;
-
-  /// Return true if all values in this range are non-negative.
   bool isAllNonNegative() const;
-
-  /// Return true if all values in this range are positive.
   bool isAllPositive() const;
-
-  /// Return the largest unsigned value contained in the ConstantRange.
   APInt getUnsignedMax() const {
     if (isFullSet() || isUpperWrapped())
       return APInt::getMaxValue(getBitWidth());
     return getUpper() - 1;
   }
 
-  /// Return the smallest unsigned value contained in the ConstantRange.
   APInt getUnsignedMin() const {
     if (isFullSet() || isWrappedSet())
       return APInt::getMinValue(getBitWidth());
     return getLower();
   }
 
-  /// Return the largest signed value contained in the ConstantRange.
   APInt getSignedMax() const {
     if (isFullSet() || isUpperSignWrapped())
       return APInt::getSignedMaxValue(getBitWidth());
     return getUpper() - 1;
   }
 
-  /// Return the smallest signed value contained in the ConstantRange.
   APInt getSignedMin() const {
     if (isFullSet() || isSignWrappedSet())
       return APInt::getSignedMinValue(getBitWidth());
     return getLower();
   }
 
-  /// Return true if this range is equal to another range.
   bool operator==(const ConstantRange &CR) const {
     return Lower == CR.Lower && Upper == CR.Upper;
   }
   bool operator!=(const ConstantRange &CR) const { return !operator==(CR); }
-
-  /// Compute the maximal number of active bits needed to represent every value
-  /// in this range.
   unsigned getActiveBits() const;
-
-  /// Compute the maximal number of bits needed to represent every value
-  /// in this signed range.
   unsigned getMinSignedBits() const;
-
-  /// Subtract the specified constant from the endpoints of this constant range.
   ConstantRange subtract(const APInt &CI) const;
-
-  /// Subtract the specified range from this range (aka relative complement of
-  /// the sets).
   ConstantRange difference(const ConstantRange &CR) const;
-
-  /// If represented precisely, the result of some range operations may consist
-  /// of multiple disjoint ranges. As only a single range may be returned, any
-  /// range covering these disjoint ranges constitutes a valid result, but some
-  /// may be more useful than others depending on context. The preferred range
-  /// type specifies whether a range that is non-wrapping in the unsigned or
-  /// signed domain, or has the smallest size, is preferred. If a signedness is
-  /// preferred but all ranges are non-wrapping or all wrapping, then the
-  /// smallest set size is preferred. If there are multiple smallest sets, any
-  /// one of them may be returned.
   enum PreferredRangeType { Smallest, Unsigned, Signed };
-
-  /// Return the range that results from the intersection of this range with
-  /// another range. If the intersection is disjoint, such that two results
-  /// are possible, the preferred range is determined by the PreferredRangeType.
   ConstantRange intersectWith(const ConstantRange &CR,
                               PreferredRangeType Type = Smallest) const;
-
-  /// Return the range that results from the union of this range
-  /// with another range.  The resultant range is guaranteed to include the
-  /// elements of both sets, but may contain more.  For example, [3, 9) union
-  /// [12,15) is [3, 15), which includes 9, 10, and 11, which were not included
-  /// in either set before.
   ConstantRange unionWith(const ConstantRange &CR,
                           PreferredRangeType Type = Smallest) const;
-
-  /// Return a new range in the specified integer type, which must
-  /// be strictly larger than the current type.  The returned range will
-  /// correspond to the possible range of values if the source range had been
-  /// zero extended to BitWidth.
   ConstantRange zeroExtend(uint32_t BitWidth) const;
-
-  /// Return a new range in the specified integer type, which must
-  /// be strictly larger than the current type.  The returned range will
-  /// correspond to the possible range of values if the source range had been
-  /// sign extended to BitWidth.
   ConstantRange signExtend(uint32_t BitWidth) const;
-
-  /// Return a new range in the specified integer type, which must be
-  /// strictly smaller than the current type.  The returned range will
-  /// correspond to the possible range of values if the source range had been
-  /// truncated to the specified type with wrap type \p NoWrapKind.
-  /// Note that the result of trunc nuw is exact.
   ConstantRange truncate(uint32_t BitWidth, unsigned NoWrapKind = 0) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from an addition of a value in this range and a value in \p Other.
   ConstantRange add(const ConstantRange &Other) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from an addition with wrap type \p NoWrapKind of a value in this
-  /// range and a value in \p Other.
-  /// If the result range is disjoint, the preferred range is determined by the
-  /// \p PreferredRangeType.
   ConstantRange addWithNoWrap(const ConstantRange &Other, unsigned NoWrapKind,
                               PreferredRangeType RangeType = Smallest) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from a subtraction of a value in this range and a value in \p Other.
   ConstantRange sub(const ConstantRange &Other) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from an subtraction with wrap type \p NoWrapKind of a value in this
-  /// range and a value in \p Other.
-  /// If the result range is disjoint, the preferred range is determined by the
-  /// \p PreferredRangeType.
   ConstantRange subWithNoWrap(const ConstantRange &Other, unsigned NoWrapKind,
                               PreferredRangeType RangeType = Smallest) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from a multiplication of a value in this range and a value in \p Other,
-  /// treating both this and \p Other as unsigned ranges.
   ConstantRange multiply(const ConstantRange &Other) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from a multiplication with wrap type \p NoWrapKind of a value in this
-  /// range and a value in \p Other.
-  /// If the result range is disjoint, the preferred range is determined by the
-  /// \p PreferredRangeType.
   ConstantRange
   multiplyWithNoWrap(const ConstantRange &Other, unsigned NoWrapKind,
                      PreferredRangeType RangeType = Smallest) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from an unsigned division of a value in this range and a value in
-  /// \p Other.
   ConstantRange udiv(const ConstantRange &Other) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from a signed division of a value in this range and a value in
-  /// \p Other. Division by zero and division of SignedMin by -1 are considered
-  /// undefined behavior, in line with IR, and do not contribute towards the
-  /// result.
   ConstantRange sdiv(const ConstantRange &Other) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from an unsigned remainder operation of a value in this range and a
-  /// value in \p Other.
   ConstantRange urem(const ConstantRange &Other) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from a signed remainder operation of a value in this range and a
-  /// value in \p Other.
   ConstantRange srem(const ConstantRange &Other) const;
-
-  /// Return a new range representing the possible values resulting from
-  /// a binary-xor of a value in this range by an all-one value,
-  /// aka bitwise complement operation.
   ConstantRange binaryNot() const;
-
-  /// Return a new range representing the possible values resulting
-  /// from a binary-and of a value in this range by a value in \p Other.
   ConstantRange binaryAnd(const ConstantRange &Other) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from a binary-or of a value in this range by a value in \p Other.
   ConstantRange binaryOr(const ConstantRange &Other) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from a binary-xor of a value in this range by a value in \p Other.
   ConstantRange binaryXor(const ConstantRange &Other) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from a left shift of a value in this range by a value in \p Other.
-  /// TODO: This isn't fully implemented yet.
   ConstantRange shl(const ConstantRange &Other) const;
-
-  /// Return a new range representing the possible values resulting
-  /// from a left shift with wrap type \p NoWrapKind of a value in this
-  /// range and a value in \p Other.
-  /// If the result range is disjoint, the preferred range is determined by the
-  /// \p PreferredRangeType.
   ConstantRange shlWithNoWrap(const ConstantRange &Other, unsigned NoWrapKind,
                               PreferredRangeType RangeType = Smallest) const;
-
-  /// Return a new range representing the possible values resulting from a
-  /// logical right shift of a value in this range and a value in \p Other.
   ConstantRange lshr(const ConstantRange &Other) const;
-
-  /// Return a new range representing the possible values resulting from a
-  /// arithmetic right shift of a value in this range and a value in \p Other.
   ConstantRange ashr(const ConstantRange &Other) const;
-
-  /// Perform an unsigned saturating addition of two constant ranges.
   ConstantRange uadd_sat(const ConstantRange &Other) const;
-
-  /// Perform a signed saturating addition of two constant ranges.
   ConstantRange sadd_sat(const ConstantRange &Other) const;
-
-  /// Perform an unsigned saturating subtraction of two constant ranges.
   ConstantRange usub_sat(const ConstantRange &Other) const;
-
-  /// Perform a signed saturating subtraction of two constant ranges.
   ConstantRange ssub_sat(const ConstantRange &Other) const;
-
-  /// Perform an unsigned saturating multiplication of two constant ranges.
   ConstantRange umul_sat(const ConstantRange &Other) const;
-
-  /// Perform a signed saturating multiplication of two constant ranges.
   ConstantRange smul_sat(const ConstantRange &Other) const;
-
-  /// Perform an unsigned saturating left shift of this constant range by a
-  /// value in \p Other.
   ConstantRange ushl_sat(const ConstantRange &Other) const;
-
-  /// Perform a signed saturating left shift of this constant range by a
-  /// value in \p Other.
   ConstantRange sshl_sat(const ConstantRange &Other) const;
-
-  /// Return a new range that is the logical not of the current set.
   ConstantRange inverse() const;
-
-  /// Calculate absolute value range. If the original range contains signed
-  /// min, then the resulting range will contain signed min if and only if
-  /// \p IntMinIsPoison is false.
   ConstantRange abs(bool IntMinIsPoison = false) const;
-
-  /// Return known bits for values in this range.
   KnownBits toKnownBits() const;
 };
-
-/// Parse out a conservative ConstantRange from !range metadata.
-///
-/// E.g. if RangeMD is !{i32 0, i32 10, i32 15, i32 20} then return [0, 20).
 
 inline ConstantRange::ConstantRange(uint32_t BitWidth, bool Full)
     : Lower(Full ? APInt::getMaxValue(BitWidth) : APInt::getMinValue(BitWidth)),
@@ -431,13 +225,9 @@ inline ConstantRange ConstantRange::fromKnownBits(const KnownBits &Known,
   if (Known.isUnknown())
     return getFull(Known.getBitWidth());
 
-  // For unsigned ranges, or signed ranges with known sign bit, create a simple
-  // range between the smallest and largest possible value.
   if (!IsSigned || Known.isNegative() || Known.isNonNegative())
     return ConstantRange(Known.getMinValue(), Known.getMaxValue() + 1);
 
-  // If we don't know the sign bit, pick the lower bound as a negative number
-  // and the upper bound as a non-negative one.
   APInt Lower = Known.getMinValue(), Upper = Known.getMaxValue();
   Lower.setSignBit();
   Upper.clearSignBit();
@@ -445,12 +235,9 @@ inline ConstantRange ConstantRange::fromKnownBits(const KnownBits &Known,
 }
 
 inline KnownBits ConstantRange::toKnownBits() const {
-  // TODO: We could return conflicting known bits here, but consumers are
-  // likely not prepared for that.
   if (isEmptySet())
     return KnownBits(getBitWidth());
 
-  // We can only retain the top bits that are the same between min and max.
   APInt Min = getUnsignedMin();
   APInt Max = getUnsignedMax();
   KnownBits Known = KnownBits::makeConstant(Min);
@@ -804,12 +591,7 @@ inline ConstantRange ConstantRange::truncate(uint32_t DstTySize,
   APInt LowerDiv(Lower), UpperDiv(Upper);
   ConstantRange Union(DstTySize, /*isFullSet=*/false);
 
-  // Analyze wrapped sets in their two parts: [0, Upper) \/ [Lower, MaxValue]
-  // We use the non-wrapped set code to analyze the [Lower, MaxValue) part, and
-  // then we do the union with [MaxValue, Upper)
   if (isUpperWrapped()) {
-    // If Upper is greater than MaxValue(DstTy), it covers the whole truncated
-    // range.
     if (Upper.getActiveBits() > DstTySize)
       return getFull(DstTySize);
 
@@ -887,8 +669,6 @@ inline ConstantRange ConstantRange::add(const ConstantRange &Other) const {
 inline ConstantRange
 ConstantRange::addWithNoWrap(const ConstantRange &Other, unsigned NoWrapKind,
                              PreferredRangeType RangeType) const {
-  // Calculate the range for "X + Y" which is guaranteed not to wrap(overflow).
-  // (X is from this, and Y is from Other)
   if (isEmptySet() || Other.isEmptySet())
     return getEmpty();
   if (isFullSet() && Other.isFullSet())
@@ -896,11 +676,6 @@ ConstantRange::addWithNoWrap(const ConstantRange &Other, unsigned NoWrapKind,
 
   using OBO = OverflowingBinaryOperator;
   ConstantRange Result = add(Other);
-
-  // If an overflow happens for every value pair in these two constant ranges,
-  // we must return Empty set. In this case, we get that for free, because we
-  // get lucky that intersection of add() with uadd_sat()/sadd_sat() results
-  // in an empty set.
 
   if (NoWrapKind & OBO::NoSignedWrap)
     Result = Result.intersectWith(sadd_sat(Other), RangeType);
@@ -942,11 +717,6 @@ ConstantRange::subWithNoWrap(const ConstantRange &Other, unsigned NoWrapKind,
   using OBO = OverflowingBinaryOperator;
   ConstantRange Result = sub(Other);
 
-  // If an overflow happens for every value pair in these two constant ranges,
-  // we must return Empty set. In signed case, we get that for free, because we
-  // get lucky that intersection of sub() with ssub_sat() results in an
-  // empty set. But for unsigned we must perform the overflow check manually.
-
   if (NoWrapKind & OBO::NoSignedWrap)
     Result = Result.intersectWith(ssub_sat(Other), RangeType);
 
@@ -960,11 +730,6 @@ ConstantRange::subWithNoWrap(const ConstantRange &Other, unsigned NoWrapKind,
 }
 
 inline ConstantRange ConstantRange::multiply(const ConstantRange &Other) const {
-  // TODO: If either operand is a single element and the multiply is known to
-  // be non-wrapping, round the result min and max value to the appropriate
-  // multiple of that element. If wrapping is possible, at least adjust the
-  // range according to the greatest power-of-two factor of the single element.
-
   if (isEmptySet() || Other.isEmptySet())
     return getEmpty();
 
@@ -982,13 +747,6 @@ inline ConstantRange ConstantRange::multiply(const ConstantRange &Other) const {
       return ConstantRange(APInt::getZero(getBitWidth())).sub(*this);
   }
 
-  // Multiplication is signedness-independent. However different ranges can be
-  // obtained depending on how the input ranges are treated. These different
-  // ranges are all conservatively correct, but one might be better than the
-  // other. We calculate two ranges; one treating the inputs as unsigned
-  // and the other signed, then return the smallest of these ranges.
-
-  // Unsigned range first.
   APInt this_min = getUnsignedMin().zext(getBitWidth() * 2);
   APInt this_max = getUnsignedMax().zext(getBitWidth() * 2);
   APInt Other_min = Other.getUnsignedMin().zext(getBitWidth() * 2);
@@ -998,19 +756,9 @@ inline ConstantRange ConstantRange::multiply(const ConstantRange &Other) const {
       ConstantRange(this_min * Other_min, this_max * Other_max + 1);
   ConstantRange UR = Result_zext.truncate(getBitWidth());
 
-  // If the unsigned range doesn't wrap, and isn't negative then it's a range
-  // from one positive number to another which is as good as we can generate.
-  // In this case, skip the extra work of generating signed ranges which aren't
-  // going to be better than this range.
   if (!UR.isUpperWrapped() &&
       (UR.getUpper().isNonNegative() || UR.getUpper().isMinSignedValue()))
     return UR;
-
-  // Now the signed range. Because we could be dealing with negative numbers
-  // here, the lower bound is the smallest of the cartesian product of the
-  // lower and upper ranges; for example:
-  //   [-1,4) * [-2,3) = min(-1*-2, -1*2, 3*-2, 3*2) = -6.
-  // Similarly for the upper bound, swapping min for max.
 
   this_min = getSignedMin().sext(getBitWidth() * 2);
   this_max = getSignedMax().sext(getBitWidth() * 2);
@@ -1081,9 +829,6 @@ inline ConstantRange ConstantRange::sdiv(const ConstantRange &RHS) const {
   APInt Zero = APInt::getZero(getBitWidth());
   APInt SignedMin = APInt::getSignedMinValue(getBitWidth());
 
-  // We split up the LHS and RHS into positive and negative components
-  // and then also compute the positive and negative components of the result
-  // separately by combining division results with the appropriate signs.
   auto [PosL, NegL] = splitPosNeg();
   auto [PosR, NegR] = RHS.splitPosNeg();
 
@@ -1094,12 +839,6 @@ inline ConstantRange ConstantRange::sdiv(const ConstantRange &RHS) const {
                            (PosL.Upper - 1).sdiv(PosR.Lower) + 1);
 
   if (!NegL.isEmptySet() && !NegR.isEmptySet()) {
-    // neg / neg = pos.
-    //
-    // We need to deal with one tricky case here: SignedMin / -1 is UB on the
-    // IR level, so we'll want to exclude this case when calculating bounds.
-    // (For APInts the operation is well-defined and yields SignedMin.) We
-    // handle this by dropping either SignedMin from the LHS or -1 from the RHS.
     APInt Lo = (NegL.Upper - 1).sdiv(NegR.Lower);
     if (NegL.Lower.isMinSignedValue() && NegR.Upper.isZero()) {
       // Remove -1 from the LHS. Skip if it's the only element, as this would
@@ -1236,30 +975,6 @@ inline ConstantRange ConstantRange::binaryNot() const {
   return ConstantRange(APInt::getAllOnes(getBitWidth())).sub(*this);
 }
 
-/// Estimate the 'bit-masked AND' operation's lower bound.
-///
-/// E.g., given two ranges as follows (single quotes are separators and
-/// have no meaning here),
-///
-///   LHS = [10'00101'1,  ; LLo
-///          10'10000'0]  ; LHi
-///   RHS = [10'11111'0,  ; RLo
-///          10'11111'1]  ; RHi
-///
-/// we know that the higher 2 bits of the result is always 10; and we also
-/// notice that RHS[1:6] are always 1, so the result[1:6] cannot be less than
-/// LHS[1:6] (i.e., 00101). Thus, the lower bound is 10'00101'0.
-///
-/// The algorithm is as follows,
-/// 1. we first calculate a mask to find the higher common bits by
-///       Mask = ~((LLo ^ LHi) | (RLo ^ RHi) | (LLo ^ RLo));
-///       Mask = clear all non-leading-ones bits in Mask;
-///    in the example, the Mask is set to 11'00000'0;
-/// 2. calculate a new mask by setting all common leading bits to 1 in RHS, and
-///    keeping the longest leading ones (i.e., 11'11111'0 in the example);
-/// 3. return (LLo & new mask) as the lower bound;
-/// 4. repeat the step 2 and 3 with LHS and RHS swapped, and update the lower
-///    bound with the larger one.
 static APInt estimateBitMaskedAndLowerBound(const ConstantRange &LHS,
                                             const ConstantRange &RHS) {
   auto BitWidth = LHS.getBitWidth();
@@ -1521,33 +1236,9 @@ inline ConstantRange ConstantRange::ashr(const ConstantRange &Other) const {
   if (isEmptySet() || Other.isEmptySet())
     return getEmpty();
 
-  // May straddle zero, so handle both positive and negative cases.
-  // 'PosMax' is the upper bound of the result of the ashr
-  // operation, when Upper of the LHS of ashr is a non-negative.
-  // number. Since ashr of a non-negative number will result in a
-  // smaller number, the Upper value of LHS is shifted right with
-  // the minimum value of 'Other' instead of the maximum value.
   APInt PosMax = getSignedMax().ashr(Other.getUnsignedMin()) + 1;
-
-  // 'PosMin' is the lower bound of the result of the ashr
-  // operation, when Lower of the LHS is a non-negative number.
-  // Since ashr of a non-negative number will result in a smaller
-  // number, the Lower value of LHS is shifted right with the
-  // maximum value of 'Other'.
   APInt PosMin = getSignedMin().ashr(Other.getUnsignedMax());
-
-  // 'NegMax' is the upper bound of the result of the ashr
-  // operation, when Upper of the LHS of ashr is a negative number.
-  // Since 'ashr' of a negative number will result in a bigger
-  // number, the Upper value of LHS is shifted right with the
-  // maximum value of 'Other'.
   APInt NegMax = getSignedMax().ashr(Other.getUnsignedMax()) + 1;
-
-  // 'NegMin' is the lower bound of the result of the ashr
-  // operation, when Lower of the LHS of ashr is a negative number.
-  // Since 'ashr' of a negative number will result in a bigger
-  // number, the Lower value of LHS is shifted right with the
-  // minimum value of 'Other'.
   APInt NegMin = getSignedMin().ashr(Other.getUnsignedMin());
 
   APInt max, min;
@@ -1615,12 +1306,6 @@ inline ConstantRange ConstantRange::umul_sat(const ConstantRange &Other) const {
 inline ConstantRange ConstantRange::smul_sat(const ConstantRange &Other) const {
   if (isEmptySet() || Other.isEmptySet())
     return getEmpty();
-
-  // Because we could be dealing with negative numbers here, the lower bound is
-  // the smallest of the cartesian product of the lower and upper ranges;
-  // for example:
-  //   [-1,4) * [-2,3) = min(-1*-2, -1*2, 3*-2, 3*2) = -6.
-  // Similarly for the upper bound, swapping min for max.
 
   APInt Min = getSignedMin();
   APInt Max = getSignedMax();
