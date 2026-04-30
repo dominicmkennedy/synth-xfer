@@ -79,42 +79,69 @@ public:
 
   /// Return true if this set contains all of the elements possible
   /// for this data-type.
-  bool isFullSet() const;
+  bool isFullSet() const {
+    return Lower == Upper && Lower.isMaxValue();
+  }
 
   /// Return true if this set contains no members.
-  bool isEmptySet() const;
+  bool isEmptySet() const {
+    return Lower == Upper && Lower.isMinValue();
+  }
 
   /// Return true if this set wraps around the unsigned domain. Special cases:
   ///  * Empty set: Not wrapped.
   ///  * Full set: Not wrapped.
   ///  * [X, 0) == [X, Max]: Not wrapped.
-  bool isWrappedSet() const;
+  bool isWrappedSet() const {
+    return Lower.ugt(Upper) && !Upper.isZero();
+  }
 
   /// Return true if the exclusive upper bound wraps around the unsigned
   /// domain. Special cases:
   ///  * Empty set: Not wrapped.
   ///  * Full set: Not wrapped.
   ///  * [X, 0): Wrapped.
-  bool isUpperWrapped() const;
+  bool isUpperWrapped() const { return Lower.ugt(Upper); }
 
   /// Return true if this set wraps around the signed domain. Special cases:
   ///  * Empty set: Not wrapped.
   ///  * Full set: Not wrapped.
   ///  * [X, SignedMin) == [X, SignedMax]: Not wrapped.
-  bool isSignWrappedSet() const;
+  bool isSignWrappedSet() const {
+    return Lower.sgt(Upper) && !Upper.isMinSignedValue();
+  }
 
   /// Return true if the (exclusive) upper bound wraps around the signed
   /// domain. Special cases:
   ///  * Empty set: Not wrapped.
   ///  * Full set: Not wrapped.
   ///  * [X, SignedMin): Wrapped.
-  bool isUpperSignWrapped() const;
+  bool isUpperSignWrapped() const { return Lower.sgt(Upper); }
 
   /// Return true if the specified value is in the set.
-  bool contains(const APInt &Val) const;
+  bool contains(const APInt &V) const {
+    if (Lower == Upper)
+      return isFullSet();
+    if (!isUpperWrapped())
+      return Lower.ule(V) && V.ult(Upper);
+    return Lower.ule(V) || V.ult(Upper);
+  }
 
   /// Return true if the other range is a subset of this one.
-  bool contains(const ConstantRange &CR) const;
+  bool contains(const ConstantRange &Other) const {
+    if (isFullSet() || Other.isEmptySet())
+      return true;
+    if (isEmptySet() || Other.isFullSet())
+      return false;
+    if (!isUpperWrapped()) {
+      if (Other.isUpperWrapped())
+        return false;
+      return Lower.ule(Other.getLower()) && Other.getUpper().ule(Upper);
+    }
+    if (!Other.isUpperWrapped())
+      return Other.getUpper().ule(Upper) || Lower.ule(Other.getLower());
+    return Other.getUpper().ule(Upper) && Lower.ule(Other.getLower());
+  }
 
   /// If this set contains a single element, return it, otherwise return null.
   const APInt *getSingleElement() const {
@@ -150,16 +177,32 @@ public:
   bool isAllPositive() const;
 
   /// Return the largest unsigned value contained in the ConstantRange.
-  APInt getUnsignedMax() const;
+  APInt getUnsignedMax() const {
+    if (isFullSet() || isUpperWrapped())
+      return APInt::getMaxValue(getBitWidth());
+    return getUpper() - 1;
+  }
 
   /// Return the smallest unsigned value contained in the ConstantRange.
-  APInt getUnsignedMin() const;
+  APInt getUnsignedMin() const {
+    if (isFullSet() || isWrappedSet())
+      return APInt::getMinValue(getBitWidth());
+    return getLower();
+  }
 
   /// Return the largest signed value contained in the ConstantRange.
-  APInt getSignedMax() const;
+  APInt getSignedMax() const {
+    if (isFullSet() || isUpperSignWrapped())
+      return APInt::getSignedMaxValue(getBitWidth());
+    return getUpper() - 1;
+  }
 
   /// Return the smallest signed value contained in the ConstantRange.
-  APInt getSignedMin() const;
+  APInt getSignedMin() const {
+    if (isFullSet() || isSignWrappedSet())
+      return APInt::getSignedMinValue(getBitWidth());
+    return getLower();
+  }
 
   /// Return true if this range is equal to another range.
   bool operator==(const ConstantRange &CR) const {
@@ -431,28 +474,6 @@ ConstantRange::splitPosNeg() const {
   return {intersectWith(PosFilter), intersectWith(NegFilter)};
 }
 
-inline bool ConstantRange::isFullSet() const {
-  return Lower == Upper && Lower.isMaxValue();
-}
-
-inline bool ConstantRange::isEmptySet() const {
-  return Lower == Upper && Lower.isMinValue();
-}
-
-inline bool ConstantRange::isWrappedSet() const {
-  return Lower.ugt(Upper) && !Upper.isZero();
-}
-
-inline bool ConstantRange::isUpperWrapped() const { return Lower.ugt(Upper); }
-
-inline bool ConstantRange::isSignWrappedSet() const {
-  return Lower.sgt(Upper) && !Upper.isMinSignedValue();
-}
-
-inline bool ConstantRange::isUpperSignWrapped() const {
-  return Lower.sgt(Upper);
-}
-
 inline bool
 ConstantRange::isSizeStrictlySmallerThan(const ConstantRange &Other) const {
   assert(getBitWidth() == Other.getBitWidth());
@@ -495,58 +516,6 @@ inline bool ConstantRange::isAllPositive() const {
     return false;
 
   return !isSignWrappedSet() && Lower.isStrictlyPositive();
-}
-
-inline APInt ConstantRange::getUnsignedMax() const {
-  if (isFullSet() || isUpperWrapped())
-    return APInt::getMaxValue(getBitWidth());
-  return getUpper() - 1;
-}
-
-inline APInt ConstantRange::getUnsignedMin() const {
-  if (isFullSet() || isWrappedSet())
-    return APInt::getMinValue(getBitWidth());
-  return getLower();
-}
-
-inline APInt ConstantRange::getSignedMax() const {
-  if (isFullSet() || isUpperSignWrapped())
-    return APInt::getSignedMaxValue(getBitWidth());
-  return getUpper() - 1;
-}
-
-inline APInt ConstantRange::getSignedMin() const {
-  if (isFullSet() || isSignWrappedSet())
-    return APInt::getSignedMinValue(getBitWidth());
-  return getLower();
-}
-
-inline bool ConstantRange::contains(const APInt &V) const {
-  if (Lower == Upper)
-    return isFullSet();
-
-  if (!isUpperWrapped())
-    return Lower.ule(V) && V.ult(Upper);
-  return Lower.ule(V) || V.ult(Upper);
-}
-
-inline bool ConstantRange::contains(const ConstantRange &Other) const {
-  if (isFullSet() || Other.isEmptySet())
-    return true;
-  if (isEmptySet() || Other.isFullSet())
-    return false;
-
-  if (!isUpperWrapped()) {
-    if (Other.isUpperWrapped())
-      return false;
-
-    return Lower.ule(Other.getLower()) && Other.getUpper().ule(Upper);
-  }
-
-  if (!Other.isUpperWrapped())
-    return Other.getUpper().ule(Upper) || Lower.ule(Other.getLower());
-
-  return Other.getUpper().ule(Upper) && Lower.ule(Other.getLower());
 }
 
 inline unsigned ConstantRange::getActiveBits() const {

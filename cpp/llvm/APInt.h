@@ -64,15 +64,6 @@ static inline uint32_t Lo_32(uint64_t x) { return static_cast<uint32_t>(x); }
 static inline uint32_t Hi_32(uint64_t x) {
   return static_cast<uint32_t>(x >> 32);
 }
-template <typename T> static inline T reverseBits(T v) {
-  T out = 0;
-  for (unsigned i = 0; i < sizeof(T) * CHAR_BIT; ++i) {
-    out <<= 1;
-    out |= (v & 1);
-    v >>= 1;
-  }
-  return out;
-}
 static inline uint64_t SignExtend64(uint64_t x, unsigned B) {
   if (B == 0 || B >= 64)
     return x;
@@ -277,7 +268,6 @@ public:
     return ugt(Limit) ? Limit : getZExtValue();
   }
 
-  bool isSplat(unsigned SplatSizeInBits) const;
   APInt getHiBits(unsigned numBits) const;
   APInt getLoBits(unsigned numBits) const;
 
@@ -525,7 +515,11 @@ public:
   /// Shifts *this left by shiftAmt and assigns the result to *this.
   ///
   /// \returns *this after shifting left by ShiftAmt
-  APInt &operator<<=(const APInt &ShiftAmt);
+  APInt &operator<<=(const APInt &ShiftAmt) {
+    // It's undefined behavior in C to shift by BitWidth or greater.
+    *this <<= static_cast<unsigned>(ShiftAmt.getLimitedValue(BitWidth));
+    return *this;
+  }
 
   /// @}
   /// \name Binary Operators
@@ -634,7 +628,9 @@ public:
   }
 
   /// Arithmetic right-shift this APInt by shiftAmt in place.
-  void ashrInPlace(const APInt &shiftAmt);
+  void ashrInPlace(const APInt &shiftAmt) {
+    ashrInPlace(static_cast<unsigned>(shiftAmt.getLimitedValue(BitWidth)));
+  }
 
   /// Logical right-shift function.
   ///
@@ -646,7 +642,9 @@ public:
   }
 
   /// Logical right-shift this APInt by ShiftAmt in place.
-  void lshrInPlace(const APInt &ShiftAmt);
+  void lshrInPlace(const APInt &ShiftAmt) {
+    lshrInPlace(static_cast<unsigned>(ShiftAmt.getLimitedValue(BitWidth)));
+  }
 
   /// Left-shift function.
   ///
@@ -1010,7 +1008,6 @@ public:
     return countPopulationSlowCase();
   }
 
-  APInt reverseBits() const;
   unsigned logBase2() const { return getActiveBits() - 1; }
 
   /// Get the absolute value.  If *this is < 0 then return -(*this), otherwise
@@ -1024,14 +1021,7 @@ public:
 
   static void tcSet(WordType *, WordType, unsigned);
   static void tcAssign(WordType *, const WordType *, unsigned);
-  static bool tcIsZero(const WordType *, unsigned);
-  static int tcExtractBit(const WordType *, unsigned bit);
-  static void tcExtract(WordType *, unsigned dstCount, const WordType *,
-                        unsigned srcBits, unsigned srcLSB);
-  static void tcSetBit(WordType *, unsigned bit);
-  static void tcClearBit(WordType *, unsigned bit);
   static unsigned tcMSB(const WordType *parts, unsigned n);
-  static void tcNegate(WordType *, unsigned);
   static WordType tcAdd(WordType *, const WordType *, WordType carry, unsigned);
   static WordType tcAddPart(WordType *, WordType, unsigned);
   static WordType tcSubtract(WordType *, const WordType *, WordType carry,
@@ -1042,8 +1032,6 @@ public:
                             unsigned srcParts, unsigned dstParts, bool add);
   static int tcMultiply(WordType *, const WordType *, const WordType *,
                         unsigned);
-  static void tcFullMultiply(WordType *, const WordType *, const WordType *,
-                             unsigned, unsigned);
   static int tcDivide(WordType *lhs, const WordType *rhs, WordType *remainder,
                       WordType *scratch, unsigned parts);
   static void tcShiftLeft(WordType *, unsigned Words, unsigned Count);
@@ -1738,39 +1726,6 @@ inline bool APInt::isSubsetOfSlowCase(const APInt &RHS) const {
   return true;
 }
 
-inline APInt APInt::reverseBits() const {
-  switch (BitWidth) {
-  case 64:
-    return APInt(BitWidth, llvm::reverseBits<uint64_t>(U.VAL));
-  case 32:
-    return APInt(BitWidth,
-                 llvm::reverseBits<uint32_t>(static_cast<uint32_t>(U.VAL)));
-  case 16:
-    return APInt(BitWidth,
-                 llvm::reverseBits<uint16_t>(static_cast<uint16_t>(U.VAL)));
-  case 8:
-    return APInt(BitWidth,
-                 llvm::reverseBits<uint8_t>(static_cast<uint8_t>(U.VAL)));
-  case 0:
-    return *this;
-  default:
-    break;
-  }
-
-  APInt Val(*this);
-  APInt Reversed(BitWidth, 0);
-  unsigned S = BitWidth;
-
-  for (; Val != 0; Val.lshrInPlace(1)) {
-    Reversed <<= 1;
-    Reversed |= Val[0];
-    --S;
-  }
-
-  Reversed <<= S;
-  return Reversed;
-}
-
 inline APInt APInt::trunc(unsigned width) const {
   assert(width <= BitWidth && "Invalid APInt Truncate request");
 
@@ -1864,10 +1819,6 @@ inline APInt APInt::sextOrTrunc(unsigned width) const {
 
 /// Arithmetic right-shift this APInt by shiftAmt.
 /// Arithmetic right-shift function.
-inline void APInt::ashrInPlace(const APInt &shiftAmt) {
-  ashrInPlace(static_cast<unsigned>(shiftAmt.getLimitedValue(BitWidth)));
-}
-
 /// Arithmetic right-shift this APInt by shiftAmt.
 /// Arithmetic right-shift function.
 inline void APInt::ashrSlowCase(unsigned ShiftAmt) {
@@ -1914,10 +1865,6 @@ inline void APInt::ashrSlowCase(unsigned ShiftAmt) {
 
 /// Logical right-shift this APInt by shiftAmt.
 /// Logical right-shift function.
-inline void APInt::lshrInPlace(const APInt &shiftAmt) {
-  lshrInPlace(static_cast<unsigned>(shiftAmt.getLimitedValue(BitWidth)));
-}
-
 /// Logical right-shift this APInt by shiftAmt.
 /// Logical right-shift function.
 inline void APInt::lshrSlowCase(unsigned ShiftAmt) {
@@ -1926,12 +1873,6 @@ inline void APInt::lshrSlowCase(unsigned ShiftAmt) {
 
 /// Left-shift this APInt by shiftAmt.
 /// Left-shift function.
-inline APInt &APInt::operator<<=(const APInt &shiftAmt) {
-  // It's undefined behavior in C to shift by BitWidth or greater.
-  *this <<= static_cast<unsigned>(shiftAmt.getLimitedValue(BitWidth));
-  return *this;
-}
-
 inline void APInt::shlSlowCase(unsigned ShiftAmt) {
   tcShiftLeft(U.pVal, getNumWords(), ShiftAmt);
   clearUnusedBits();
@@ -2748,30 +2689,6 @@ inline void APInt::tcAssign(WordType *dst, const WordType *src,
     dst[i] = src[i];
 }
 
-/// Returns true if a bignum is zero, false otherwise.
-inline bool APInt::tcIsZero(const WordType *src, unsigned parts) {
-  for (unsigned i = 0; i < parts; i++)
-    if (src[i])
-      return false;
-
-  return true;
-}
-
-/// Extract the given bit of a bignum; returns 0 or 1.
-inline int APInt::tcExtractBit(const WordType *parts, unsigned bit) {
-  return (parts[whichWord(bit)] & maskBit(bit)) != 0;
-}
-
-/// Set the given bit of a bignum.
-inline void APInt::tcSetBit(WordType *parts, unsigned bit) {
-  parts[whichWord(bit)] |= maskBit(bit);
-}
-
-/// Clears the given bit of a bignum.
-inline void APInt::tcClearBit(WordType *parts, unsigned bit) {
-  parts[whichWord(bit)] &= ~maskBit(bit);
-}
-
 /// Returns the bit number of the most significant set bit of a number.
 /// If the input number has no bits set UINT_MAX is returned.
 inline unsigned APInt::tcMSB(const WordType *parts, unsigned n) {
@@ -2787,40 +2704,6 @@ inline unsigned APInt::tcMSB(const WordType *parts, unsigned n) {
   } while (n);
 
   return UINT_MAX;
-}
-
-/// Copy the bit vector of width srcBITS from SRC, starting at bit srcLSB, to
-/// DST, of dstCOUNT parts, such that the bit srcLSB becomes the least
-/// significant bit of DST.  All high bits above srcBITS in DST are zero-filled.
-/// */
-inline void APInt::tcExtract(WordType *dst, unsigned dstCount,
-                             const WordType *src, unsigned srcBits,
-                             unsigned srcLSB) {
-  unsigned dstParts = (srcBits + APINT_BITS_PER_WORD - 1) / APINT_BITS_PER_WORD;
-  assert(dstParts <= dstCount);
-
-  unsigned firstSrcPart = srcLSB / APINT_BITS_PER_WORD;
-  tcAssign(dst, src + firstSrcPart, dstParts);
-
-  unsigned shift = srcLSB % APINT_BITS_PER_WORD;
-  tcShiftRight(dst, dstParts, shift);
-
-  // We now have (dstParts * APINT_BITS_PER_WORD - shift) bits from SRC
-  // in DST.  If this is less that srcBits, append the rest, else
-  // clear the high bits.
-  unsigned n = dstParts * APINT_BITS_PER_WORD - shift;
-  if (n < srcBits) {
-    WordType mask = lowBitMask(srcBits - n);
-    dst[dstParts - 1] |=
-        ((src[firstSrcPart + dstParts] & mask) << n % APINT_BITS_PER_WORD);
-  } else if (n > srcBits) {
-    if (srcBits % APINT_BITS_PER_WORD)
-      dst[dstParts - 1] &= lowBitMask(srcBits % APINT_BITS_PER_WORD);
-  }
-
-  // Clear high parts.
-  while (dstParts < dstCount)
-    dst[dstParts++] = 0;
 }
 
 //// DST += RHS + C where C is zero or one.  Returns the carry flag.
@@ -2888,12 +2771,6 @@ inline APInt::WordType APInt::tcSubtractPart(WordType *dst, WordType src,
   }
 
   return 1;
-}
-
-/// Negate a bignum in-place.
-inline void APInt::tcNegate(WordType *dst, unsigned parts) {
-  tcComplement(dst, parts);
-  tcIncrement(dst, parts);
 }
 
 inline int APInt::tcMultiplyPart(WordType *dst, const WordType *src,
@@ -2994,24 +2871,6 @@ inline int APInt::tcMultiply(WordType *dst, const WordType *lhs,
   }
 
   return overflow;
-}
-
-/// DST = LHS * RHS, where DST has width the sum of the widths of the
-/// operands. No overflow occurs. DST must be disjoint from both operands.
-inline void APInt::tcFullMultiply(WordType *dst, const WordType *lhs,
-                                  const WordType *rhs, unsigned lhsParts,
-                                  unsigned rhsParts) {
-  // Put the narrower number on the LHS for less loops below.
-  if (lhsParts > rhsParts)
-    return tcFullMultiply(dst, rhs, lhs, rhsParts, lhsParts);
-
-  assert(dst != lhs && dst != rhs);
-
-  for (unsigned i = 0; i < lhsParts; i++) {
-    // Don't accumulate on the first iteration so we don't need to initalize
-    // dst to 0.
-    tcMultiplyPart(&dst[i], rhs, lhs[i], 0, rhsParts, rhsParts + 1, i != 0);
-  }
 }
 
 inline int APInt::tcDivide(WordType *lhs, const WordType *rhs,

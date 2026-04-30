@@ -68,11 +68,6 @@ public:
   /// Returns true if we don't know any bits.
   bool isUnknown() const { return Zero.isZero() && One.isZero(); }
 
-  /// Returns true if we don't know the sign bit.
-  bool isSignUnknown() const {
-    return !Zero.isSignBitSet() && !One.isSignBitSet();
-  }
-
   /// Returns true if value is all zero.
   bool isZero() const { return Zero.isAllOnes(); }
 
@@ -196,9 +191,6 @@ public:
   /// Returns the maximum number of leading one bits possible.
   unsigned countMaxLeadingOnes() const { return Zero.countl_zero(); }
 
-  /// Returns the number of bits known to be one.
-  unsigned countMinPopulation() const { return One.popcount(); }
-
   /// Create known bits from a known constant.
   static KnownBits makeConstant(const APInt &C) { return KnownBits(~C, C); }
 
@@ -288,13 +280,32 @@ public:
                         bool ShAmtNonZero = false, bool Exact = false);
 
   /// Update known bits based on ANDing with RHS.
-  KnownBits &operator&=(const KnownBits &RHS);
+  KnownBits &operator&=(const KnownBits &RHS) {
+    // Result bit is 0 if either operand bit is 0.
+    Zero |= RHS.Zero;
+    // Result bit is 1 if both operand bits are 1.
+    One &= RHS.One;
+    return *this;
+  }
 
   /// Update known bits based on ORing with RHS.
-  KnownBits &operator|=(const KnownBits &RHS);
+  KnownBits &operator|=(const KnownBits &RHS) {
+    // Result bit is 0 if both operand bits are 0.
+    Zero &= RHS.Zero;
+    // Result bit is 1 if either operand bit is 1.
+    One |= RHS.One;
+    return *this;
+  }
 
   /// Update known bits based on XORing with RHS.
-  KnownBits &operator^=(const KnownBits &RHS);
+  KnownBits &operator^=(const KnownBits &RHS) {
+    // Result bit is 0 if both operand bits are 0 or both are 1.
+    APInt Z = (Zero & RHS.Zero) | (One & RHS.One);
+    // Result bit is 1 if one operand bit is 0 and the other is 1.
+    One = (Zero & RHS.One) | (One & RHS.Zero);
+    Zero = std::move(Z);
+    return *this;
+  }
 
   /// Shift known bits left by ShAmt. Shift in bits are unknown.
   KnownBits &operator<<=(unsigned ShAmt) {
@@ -948,31 +959,6 @@ inline KnownBits KnownBits::srem(const KnownBits &LHS, const KnownBits &RHS) {
     Known.Zero.setHighBits(
         std::max(LHS.countMinLeadingZeros(), RHS.countMinSignBits()));
   return Known;
-}
-
-inline KnownBits &KnownBits::operator&=(const KnownBits &RHS) {
-  // Result bit is 0 if either operand bit is 0.
-  Zero |= RHS.Zero;
-  // Result bit is 1 if both operand bits are 1.
-  One &= RHS.One;
-  return *this;
-}
-
-inline KnownBits &KnownBits::operator|=(const KnownBits &RHS) {
-  // Result bit is 0 if both operand bits are 0.
-  Zero &= RHS.Zero;
-  // Result bit is 1 if either operand bit is 1.
-  One |= RHS.One;
-  return *this;
-}
-
-inline KnownBits &KnownBits::operator^=(const KnownBits &RHS) {
-  // Result bit is 0 if both operand bits are 0 or both are 1.
-  APInt Z = (Zero & RHS.Zero) | (One & RHS.One);
-  // Result bit is 1 if one operand bit is 0 and the other is 1.
-  One = (Zero & RHS.One) | (One & RHS.Zero);
-  Zero = std::move(Z);
-  return *this;
 }
 
 } // end namespace llvm
