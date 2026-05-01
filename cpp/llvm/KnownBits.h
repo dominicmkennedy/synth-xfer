@@ -1,8 +1,14 @@
+// Note: this code was taken from llvm 22.1.0 files:
+// llvm-project/llvm/include/llvm/Support/KnownBits.h
+// llvm-project/llvm/lib/Support/KnownBits.cpp
+// And combinded into a standalone header with codex
+
 #ifndef LLVM_KNOWNBITS_STANDALONE_H
 #define LLVM_KNOWNBITS_STANDALONE_H
 
-#include "APInt.h"
 #include <optional>
+
+#include "APInt.h"
 
 namespace llvm {
 namespace knownbits_detail {

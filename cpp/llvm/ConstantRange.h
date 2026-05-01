@@ -1,3 +1,8 @@
+// Note: this code was taken from llvm 22.1.0 files:
+// llvm-project/llvm/include/llvm/IR/ConstantRange.h
+// llvm-project/llvm/lib/IR/ConstantRange.cpp
+// And combinded into a standalone header with codex
+
 #ifndef LLVM_CONSTANTRANGE_STANDALONE_H
 #define LLVM_CONSTANTRANGE_STANDALONE_H
 

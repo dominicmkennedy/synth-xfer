@@ -1,3 +1,8 @@
+// Note: this code was taken from llvm 22.1.0 files:
+// llvm-project/llvm/include/llvm/ADT/APInt.h
+// llvm-project/llvm/lib/Support/APInt.cpp
+// And combinded into a standalone header with codex
+
 #ifndef LLVM_APINT_STANDALONE_H
 #define LLVM_APINT_STANDALONE_H
 
