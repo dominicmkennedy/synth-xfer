@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "../llvm/pattern.h"
 #include "domain.hpp"
 #include "results.hpp"
 
@@ -65,6 +66,11 @@ public:
   using ResultD = Dom<ResBw>;
   using ArgsT = Args<Dom, BWs...>;
   using XferFn = detail::xfer_fn_t<num_args, ResultD::arity>;
+  static constexpr LLVMDomain PatternDomain =
+      ResultD::name == "KnownBits"     ? LLVMDomain::KnownBits
+      : ResultD::name == "UConstRange" ? LLVMDomain::UConstRange
+                                       : LLVMDomain::SConstRange;
+  using PatternTy = LLVMPattern<PatternDomain, num_args>;
 
   struct ExactRow {
     ArgsT args;
@@ -77,14 +83,14 @@ public:
     double weight;
   };
 
-  EvalPattern(XferFn sequential, XferFn composite)
-      : sequential_xfer_(std::move(sequential)),
-        composite_xfer_(std::move(composite)) {}
+  EvalPattern(XferFn composite, std::string pattern)
+      : composite_xfer_(std::move(composite)),
+        pattern_(PatternTy::parse(pattern)) {}
 
   [[nodiscard]] std::pair<double, double>
   eval_pattern_exact(const std::vector<ExactRow> &rows) const {
     long double total_weight = 0.0L;
-    long double sequential_correct_weight = 0.0L;
+    long double llvm_seq_correct_weight = 0.0L;
     long double composite_correct_weight = 0.0L;
 
     for (const auto &row : rows) {
@@ -92,14 +98,13 @@ public:
           1.0L / static_cast<long double>(row.weight);
       total_weight += inv_weight;
 
-      const auto [sequential_result, composite_result] = eval_both(row.args);
+      const auto composite_result = run_fn_ptr(composite_xfer_, row.args);
+      const auto llvm_seq_result = run_llvm_pattern(pattern_, row.args);
 
-      if (sequential_result == row.best) {
-        sequential_correct_weight += inv_weight;
-      }
-      if (composite_result == row.best) {
+      if (llvm_seq_result == row.best)
+        llvm_seq_correct_weight += inv_weight;
+      if (composite_result == row.best)
         composite_correct_weight += inv_weight;
-      }
     }
 
     if (total_weight == 0.0L) {
@@ -107,7 +112,7 @@ public:
     }
 
     return {
-        static_cast<double>(100.0L * sequential_correct_weight / total_weight),
+        static_cast<double>(100.0L * llvm_seq_correct_weight / total_weight),
         static_cast<double>(100.0L * composite_correct_weight / total_weight),
     };
   }
@@ -115,7 +120,7 @@ public:
   [[nodiscard]] std::pair<double, double>
   eval_pattern_norm(const std::vector<NormRow> &rows) const {
     long double total_weight = 0.0L;
-    long double sequential_norm_weight = 0.0L;
+    long double llvm_seq_norm_weight = 0.0L;
     long double composite_norm_weight = 0.0L;
 
     for (const auto &row : rows) {
@@ -123,10 +128,11 @@ public:
           1.0L / static_cast<long double>(row.weight);
       total_weight += inv_weight;
 
-      const auto [sequential_result, composite_result] = eval_both(row.args);
+      const auto composite_result = run_fn_ptr(composite_xfer_, row.args);
+      const auto llvm_seq_result = run_llvm_pattern(pattern_, row.args);
 
-      sequential_norm_weight +=
-          static_cast<long double>(sequential_result.norm()) * inv_weight;
+      llvm_seq_norm_weight +=
+          static_cast<long double>(llvm_seq_result.norm()) * inv_weight;
 
       composite_norm_weight +=
           static_cast<long double>(composite_result.norm()) * inv_weight;
@@ -137,28 +143,33 @@ public:
     }
 
     return {
-        static_cast<double>(sequential_norm_weight / total_weight),
+        static_cast<double>(llvm_seq_norm_weight / total_weight),
         static_cast<double>(composite_norm_weight / total_weight),
     };
   }
 
 private:
-  [[nodiscard]] static ResultD eval_one(const XferFn &fn, const ArgsT &args) {
+  [[nodiscard]] static ResultD run_fn_ptr(const XferFn &fn, const ArgsT &args) {
     return [&]<std::size_t... Is>(std::index_sequence<Is...>) -> ResultD {
       return ResultD(
           unpack<Dom, ResBw>(fn(pack<Dom, BWs>(std::get<Is>(args).v)...)));
     }(std::make_index_sequence<num_args>{});
   }
 
-  [[nodiscard]] std::pair<ResultD, ResultD> eval_both(const ArgsT &args) const {
-    return {
-        eval_one(sequential_xfer_, args),
-        eval_one(composite_xfer_, args),
-    };
+  [[nodiscard]] static ResultD run_llvm_pattern(const PatternTy &pattern,
+                                                const ArgsT &args) {
+    const std::array<std::array<std::uint64_t, 2>, num_args> packed_args =
+        [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+          return std::array<std::array<std::uint64_t, 2>, num_args>{
+              pack<Dom, BWs>(std::get<Is>(args).v)...};
+        }(std::make_index_sequence<num_args>{});
+
+    const auto out_parts = pattern(packed_args, ResBw);
+    return ResultD({APInt<ResBw>(out_parts[0]), APInt<ResBw>(out_parts[1])});
   }
 
-  XferFn sequential_xfer_;
   XferFn composite_xfer_;
+  PatternTy pattern_;
 };
 
 template <template <std::size_t> class Dom, std::size_t ResBw,

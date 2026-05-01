@@ -21,7 +21,6 @@ from synth_xfer._util.tsv import EnumData
 from synth_xfer._util.xfer_data import (
     enumdata_to_eval_inputs,
     enumdata_to_run_inputs,
-    namespace_module,
     resolve_xfer_name,
 )
 
@@ -220,16 +219,17 @@ def _resolve_operation(
 
 
 def _resolve_metadata_op(op: str) -> Path:
-    if op.startswith("pattern_"):
-        return Path("mlir") / "Patterns" / f"{op.removeprefix('pattern_')}.mlir"
-    return Path("mlir") / "Operations" / f"{op}.mlir"
+    if m := re.search(r"\d+", op):
+        return Path("mlir") / "Patterns" / f"{int(m.group()):03d}.mlir"
+    else:
+        return Path("mlir") / "Operations" / f"{op}.mlir"
 
 
 def get_fallback_op(op: str) -> str | None:
     return _OP_FALLBACKS.get(op)
 
 
-def _load_pattern(pattern_path: Path) -> PatternDag:
+def load_pattern(pattern_path: Path) -> PatternDag:
     pattern_mod = parse_mlir_mod(pattern_path)
     fns = get_fns(pattern_mod)
     concrete_op = fns.get("concrete_op")
@@ -304,7 +304,7 @@ def analyze_pattern(
     ):
         raise NotImplementedError(f"analze not implemented for domain '{domain}'.")
 
-    dag = _load_pattern(pattern_path)
+    dag = load_pattern(pattern_path)
     edges: list[tuple[str, bool]] = []
 
     for i, node in enumerate(dag.nodes):
@@ -343,7 +343,7 @@ def _get_pattern_solutions(
 def construct_pattern_solution(
     pattern_path: Path, xfer_dir: Path, d: AbstractDomain
 ) -> FuncOp:
-    dag = _load_pattern(pattern_path)
+    dag = load_pattern(pattern_path)
     xfers = _get_pattern_solutions(dag, xfer_dir, d)
 
     first_xfer = xfers[dag.nodes[0].operation]
@@ -379,21 +379,15 @@ def construct_pattern_solution(
 
 
 def eval_pattern(
-    sequential_xfer: Path,
+    pattern_str: str,
     composite_xfer: Path,
     xfer_name: str | None,
-    input_path: Path,
+    data: EnumData,
     exact_bw: int,
     norm_bw: int,
 ) -> tuple[float, float, float, float]:
-    raw_seq_mod = parse_mlir_mod(sequential_xfer)
-    seq_mod = namespace_module(raw_seq_mod, "seq")
-    seq_xfer_name = "seq_solution"
     comp_mod = parse_mlir_mod(composite_xfer)
     comp_xfer_name = resolve_xfer_name(get_fns(comp_mod), xfer_name)
-
-    with input_path.open("r") as f:
-        data = EnumData.read_tsv(f)
 
     if exact_bw not in [x[0] for x in data.metadata.mbw + data.metadata.hbw]:
         raise ValueError(f"Exact BW {exact_bw} not in Enum TSV")
@@ -416,7 +410,6 @@ def eval_pattern(
     lowerer = LowerToLLVM(sorted({exact_bw, norm_bw}))
     lowerer.add_fn(helpers.meet_func)
     lowerer.add_fn(helpers.get_top_func)
-    lowerer.add_mod(seq_mod, [seq_xfer_name])
     lowerer.add_mod(comp_mod, [comp_xfer_name])
 
     with Jit() as jit:
@@ -424,14 +417,14 @@ def eval_pattern(
         seq_exact, comp_exact = eval_pattern_exact(
             exact_to_eval,
             exact_weights,
-            jit.get_fn_ptr(f"{seq_xfer_name}_{exact_bw}_shim"),
+            pattern_str,
             jit.get_fn_ptr(f"{comp_xfer_name}_{exact_bw}_shim"),
         )
 
         seq_norm, comp_norm = eval_pattern_norm(
             norm_to_eval,
             norm_weights,
-            jit.get_fn_ptr(f"{seq_xfer_name}_{norm_bw}_shim"),
+            pattern_str,
             jit.get_fn_ptr(f"{comp_xfer_name}_{norm_bw}_shim"),
         )
 

@@ -9,7 +9,7 @@ import pandas as pd
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.max_precise import RowProcessor, RowTask
-from synth_xfer._util.pattern import PatternDag, _load_pattern, get_fallback_op
+from synth_xfer._util.pattern import PatternDag, get_fallback_op, load_pattern
 from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.tsv import EnumData, EnumMetaData
 
@@ -256,7 +256,7 @@ def generate_pattern_inputs(
     max_failures: int,
     solver_kind: SolverKind,
 ) -> tuple[EnumData, dict[int, int]]:
-    dag = _load_pattern(path)
+    dag = load_pattern(path)
     generator = PatternInputGenerator(
         dag=dag,
         domain=domain,

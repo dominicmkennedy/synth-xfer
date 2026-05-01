@@ -204,6 +204,11 @@ set(SYNTH_XFER_SOURCES
   cpp/bindings/bindings_common.hpp
   cpp/bindings/bindings_helpers.cpp
   ${SYNTH_XFER_GENERATED_DOMAIN_BINDING_SOURCES}
+
+  cpp/llvm/APInt.h
+  cpp/llvm/KnownBits.h
+  cpp/llvm/ConstantRange.h
+  cpp/llvm/pattern.h
 )
 
 pybind11_add_module(_eval_engine NO_EXTRAS ${SYNTH_XFER_SOURCES})

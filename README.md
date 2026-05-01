@@ -263,7 +263,7 @@ The `pattern` executable provides four subcommands:
 | `pattern analyze`         | Determine SSA reuse and if the composite and sequential transformers coincide |
 | `pattern make-sequential` | Make a sequential transformer out of the synthesized mlir operations          |
 | `pattern generate-input`  | Generate abstract inputs for patterns, mined LLVM's seen abstract inputs      |
-| `pattern eval`            | Evaluate a composite and sequential transformer                               |
+| `pattern eval`            | Evaluate a composite transformer compared to LLVM's sequential version        |
 
 ### `pattern analyze`
 
@@ -324,19 +324,17 @@ pattern generate-input             \
 
 ### `pattern eval`
 
-| CLI flag                  | Description                                                            |
-|---------------------------|------------------------------------------------------------------------|
-| `--sequential-xfer <Path>`| Sequential MLIR transformer, typically from `pattern make-sequential`. |
-| `--composite-xfer <Path>` | Composite MLIR transformer to compare against.                         |
-| `--xfer-name <str>`       | Optional function name inside the composite MLIR file.                 |
-| `-i, --input <Path>`      | Enum TSV input data, typically from `pattern generate-input`.          |
-| `--exact-bw <int>`        | Bitwidth used for exact pattern eval.                                  |
-| `--norm-bw <int>`         | Bitwidth used for norm pattern eval.                                   |
+| CLI flag                  | Description                                                   |
+|---------------------------|---------------------------------------------------------------|
+| `--composite-xfer <Path>` | Composite MLIR transformer to compare against.                |
+| `--xfer-name <str>`       | Optional function name inside the composite MLIR file.        |
+| `-i, --input <Path>`      | Enum TSV input data, typically from `pattern generate-input`. |
+| `--exact-bw <int>`        | Bitwidth used for exact pattern eval.                         |
+| `--norm-bw <int>`         | Bitwidth used for norm pattern eval.                          |
 
 Example:
 ```bash
 pattern eval                             \
-  --sequential-xfer pattern_008_seq.mlir \
   --composite-xfer composite_008.mlir    \
   -i pattern_008_enum_data.tsv           \
 ```

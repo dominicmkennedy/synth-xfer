@@ -22,6 +22,17 @@ namespace py = pybind11;
 using DomainHelpers::ArgsVec;
 using DomainHelpers::ToEval;
 
+template <std::size_t BW> class KnownBits;
+template <std::size_t BW> class UConstRange;
+template <std::size_t BW> class SConstRange;
+
+template <template <std::size_t> class Dom>
+struct supports_llvm_pattern_domain : std::false_type {};
+
+template <> struct supports_llvm_pattern_domain<KnownBits> : std::true_type {};
+template <> struct supports_llvm_pattern_domain<UConstRange> : std::true_type {};
+template <> struct supports_llvm_pattern_domain<SConstRange> : std::true_type {};
+
 void register_rng(py::module_ &m);
 void register_results_class(py::module_ &m);
 
@@ -60,7 +71,7 @@ using EvalThunk = Results (*)(py::handle, const std::vector<std::uintptr_t> &,
                               unsigned int);
 using EvalPatternThunk = std::pair<double, double> (*)(py::handle,
                                                        const std::vector<double> &,
-                                                       std::uintptr_t,
+                                                       const std::string &,
                                                        std::uintptr_t);
 using RunThunk = py::object (*)(py::handle, std::uintptr_t);
 using LenThunk = std::size_t (*)(py::handle);
@@ -290,28 +301,28 @@ void register_eval_pattern_domain(py::module_ &m) {
   bind_eval_pattern_func(
       m, exact_fn_name,
       +[](py::handle to_eval, const std::vector<double> &weights,
-          std::uintptr_t sequential_addr,
+          const std::string &pattern,
           std::uintptr_t composite_addr) -> std::pair<double, double> {
         const EvalVec &v = py::cast<const EvalVec &>(to_eval);
         auto exact_rows = make_exact_pattern_rows<EvalPatternT>(v, weights);
         py::gil_scoped_release release;
         return EvalPatternT{
-            reinterpret_cast<typename EvalPatternT::XferFn>(sequential_addr),
-            reinterpret_cast<typename EvalPatternT::XferFn>(composite_addr)}
+            reinterpret_cast<typename EvalPatternT::XferFn>(composite_addr),
+            pattern}
             .eval_pattern_exact(exact_rows);
       });
 
   bind_eval_pattern_func(
       m, norm_fn_name,
       +[](py::handle to_run, const std::vector<double> &weights,
-          std::uintptr_t sequential_addr,
+          const std::string &pattern,
           std::uintptr_t composite_addr) -> std::pair<double, double> {
         const RunVec &v = py::cast<const RunVec &>(to_run);
         auto norm_rows = make_norm_pattern_rows<EvalPatternT>(v, weights);
         py::gil_scoped_release release;
         return EvalPatternT{
-            reinterpret_cast<typename EvalPatternT::XferFn>(sequential_addr),
-            reinterpret_cast<typename EvalPatternT::XferFn>(composite_addr)}
+            reinterpret_cast<typename EvalPatternT::XferFn>(composite_addr),
+            pattern}
             .eval_pattern_norm(norm_rows);
       });
 }
@@ -394,7 +405,9 @@ void register_uniform_arity(py::module_ &m) {
 
     register_enum_domain<Dom, BW, (static_cast<void>(Is), BW)...>(m);
     register_eval_domain<Dom, BW, (static_cast<void>(Is), BW)...>(m);
-    register_eval_pattern_domain<Dom, BW, (static_cast<void>(Is), BW)...>(m);
+    if constexpr (supports_llvm_pattern_domain<Dom>::value) {
+      register_eval_pattern_domain<Dom, BW, (static_cast<void>(Is), BW)...>(m);
+    }
     register_run_domain<Dom, BW, (static_cast<void>(Is), BW)...>(m);
   }(std::make_index_sequence<N>{});
 }
