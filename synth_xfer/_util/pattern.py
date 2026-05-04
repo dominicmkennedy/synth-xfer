@@ -17,7 +17,7 @@ from synth_xfer._util.parse_mlir import (
     inline_mod,
     parse_mlir_mod,
 )
-from synth_xfer._util.tsv import EnumData
+from synth_xfer._util.tsv import EnumData, resolve_dataset_op_path
 from synth_xfer._util.xfer_data import (
     enumdata_to_eval_inputs,
     enumdata_to_run_inputs,
@@ -218,13 +218,6 @@ def _resolve_operation(
     return op_name
 
 
-def _resolve_metadata_op(op: str) -> Path:
-    if m := re.search(r"\d+", op):
-        return Path("mlir") / "Patterns" / f"{int(m.group()):03d}.mlir"
-    else:
-        return Path("mlir") / "Operations" / f"{op}.mlir"
-
-
 def get_fallback_op(op: str) -> str | None:
     return _OP_FALLBACKS.get(op)
 
@@ -405,7 +398,7 @@ def eval_pattern(
     )
 
     helpers = get_helper_funcs(
-        _resolve_metadata_op(data.metadata.op), data.metadata.domain
+        resolve_dataset_op_path(data.metadata.op), data.metadata.domain
     )
     lowerer = LowerToLLVM(sorted({exact_bw, norm_bw}))
     lowerer.add_fn(helpers.meet_func)

@@ -193,7 +193,7 @@ def build_enum_data(
 
     metadata = EnumMetaData(
         domain=domain,
-        op=op_path.stem,
+        op=str(op_path),
         arity=arity,
         seed=resolved_seed,
         lbw=lbw,

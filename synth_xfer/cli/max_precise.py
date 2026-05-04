@@ -16,7 +16,7 @@ from synth_xfer._util.max_precise import (
     compute_max_precise,
 )
 from synth_xfer._util.smt_solver import SolverKind
-from synth_xfer._util.tsv import EnumData
+from synth_xfer._util.tsv import EnumData, resolve_dataset_op_path
 
 
 def _get_args() -> Namespace:
@@ -74,12 +74,6 @@ def _get_args() -> Namespace:
     return args
 
 
-def _resolve_metadata_op(op: str) -> Path:
-    if op.startswith("pattern_"):
-        return Path("mlir") / "Patterns" / f"{op.removeprefix('pattern_')}.mlir"
-    return Path("mlir") / "Operations" / f"{op}.mlir"
-
-
 def _comment_row(row: pd.Series, columns: list[str]) -> str:
     return "# " + "\t".join(str(row[column]) for column in columns)
 
@@ -89,7 +83,7 @@ def _fill_hbw_rows(
     timeout: int,
     solver_kind: SolverKind,
 ) -> tuple[EnumData, list[str]]:
-    op_path = _resolve_metadata_op(data.metadata.op)
+    op_path = resolve_dataset_op_path(data.metadata.op)
     hbw_bws = {bw for bw, _, _ in data.metadata.hbw}
     arg_cols = [f"arg_{i}" for i in range(data.metadata.arity)]
     tasks = [
