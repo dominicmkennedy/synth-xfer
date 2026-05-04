@@ -1,6 +1,7 @@
 // Note: this code was taken from llvm 22.1.0 files:
 // llvm-project/llvm/include/llvm/Support/KnownBits.h
 // llvm-project/llvm/lib/Support/KnownBits.cpp
+// and `computeKnownBitsMul` was taken from ValueTracking.cpp
 // And combinded into a standalone header with codex
 
 #ifndef LLVM_KNOWNBITS_STANDALONE_H
@@ -162,6 +163,7 @@ public:
                         bool ShAmtNonZero = false, bool Exact = false);
   static KnownBits ashr(const KnownBits &LHS, const KnownBits &RHS,
                         bool ShAmtNonZero = false, bool Exact = false);
+  static std::optional<bool> sgt(const KnownBits &LHS, const KnownBits &RHS);
   KnownBits &operator&=(const KnownBits &RHS) {
     Zero |= RHS.Zero;
     One &= RHS.One;
@@ -766,6 +768,69 @@ inline KnownBits KnownBits::srem(const KnownBits &LHS, const KnownBits &RHS) {
     Known.Zero.setHighBits(
         std::max(LHS.countMinLeadingZeros(), RHS.countMinSignBits()));
   return Known;
+}
+
+inline std::optional<bool> KnownBits::sgt(const KnownBits &LHS,
+                                          const KnownBits &RHS) {
+  // LHS >s RHS -> false if smax(LHS) <= smax(RHS)
+  if (LHS.getSignedMaxValue().sle(RHS.getSignedMinValue()))
+    return std::optional<bool>(false);
+  // LHS >s RHS -> true if smin(LHS) > smax(RHS)
+  if (LHS.getSignedMinValue().sgt(RHS.getSignedMaxValue()))
+    return std::optional<bool>(true);
+  return std::nullopt;
+}
+
+// Taken and modified from ValueTracking.cpp
+inline void computeKnownBitsMul(bool NSW, bool NUW, KnownBits &Known,
+                                KnownBits &Known2) {
+  bool isKnownNegative = false;
+  bool isKnownNonNegative = false;
+  // If the multiplication is known not to overflow, compute the sign bit.
+  if (NSW) {
+    bool isKnownNonNegativeOp1 = Known.isNonNegative();
+    bool isKnownNonNegativeOp0 = Known2.isNonNegative();
+    bool isKnownNegativeOp1 = Known.isNegative();
+    bool isKnownNegativeOp0 = Known2.isNegative();
+    // The product of two numbers with the same sign is non-negative.
+    isKnownNonNegative = (isKnownNegativeOp1 && isKnownNegativeOp0) ||
+                         (isKnownNonNegativeOp1 && isKnownNonNegativeOp0);
+    if (!isKnownNonNegative && NUW) {
+      // mul nuw nsw with a factor > 1 is non-negative.
+      KnownBits One = KnownBits::makeConstant(APInt(Known.getBitWidth(), 1));
+      isKnownNonNegative = KnownBits::sgt(Known, One).value_or(false) ||
+                           KnownBits::sgt(Known2, One).value_or(false);
+    }
+
+    // The product of a negative number and a non-negative number is either
+    // negative or zero.
+    if (!isKnownNonNegative)
+      isKnownNegative =
+          (isKnownNegativeOp1 && isKnownNonNegativeOp0 && Known2.isNonZero()) ||
+          (isKnownNegativeOp0 && isKnownNonNegativeOp1 && Known.isNonZero());
+  }
+
+  Known = KnownBits::mul(Known, Known2, false);
+
+  // Only make use of no-wrap flags if we failed to compute the sign bit
+  // directly.  This matters if the multiplication always overflows, in
+  // which case we prefer to follow the result of the direct computation,
+  // though as the program is invoking undefined behaviour we can choose
+  // whatever we like here.
+  if (isKnownNonNegative && !Known.isNegative())
+    Known.makeNonNegative();
+  else if (isKnownNegative && !Known.isNonNegative())
+    Known.makeNegative();
+}
+
+inline KnownBits kb_mul_wrapper(const KnownBits &lhs, const KnownBits &rhs,
+                                bool nsw, bool nuw) {
+
+  KnownBits lhs_copy = lhs;
+  KnownBits rhs_copy = rhs;
+  llvm::computeKnownBitsMul(nsw, nuw, lhs_copy, rhs_copy);
+
+  return lhs_copy;
 }
 
 } // end namespace llvm

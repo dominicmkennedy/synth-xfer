@@ -43,9 +43,9 @@ inline const std::unordered_map<std::string_view, KBXfer> kb_xfer_table = {
     {"Lshr", KB_OP(KnownBits::lshr(l, r))},
     {"Mods", KB_OP(KnownBits::srem(l, r))},
     {"Modu", KB_OP(KnownBits::urem(l, r))},
-    {"MulNswNuw", KB_OP(KnownBits::mul(l, r))}, // Using flagless fallback
-    {"MulNsw", KB_OP(KnownBits::mul(l, r))},    // Using flagless fallback
-    {"MulNuw", KB_OP(KnownBits::mul(l, r))},    // Using flagless fallback
+    {"MulNswNuw", KB_OP(llvm::kb_mul_wrapper(l, r, true, true))},
+    {"MulNsw", KB_OP(llvm::kb_mul_wrapper(l, r, true, false))},
+    {"MulNuw", KB_OP(llvm::kb_mul_wrapper(l, r, false, true))},
     {"Mul", KB_OP(KnownBits::mul(l, r))},
     {"OrDisjoint", KB_OP(KnownBits(l) |= r)}, // Using flagless fallback
     {"Or", KB_OP(KnownBits(l) |= r)},
