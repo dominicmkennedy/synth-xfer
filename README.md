@@ -46,6 +46,7 @@ these executables depend on paths in the repo the should be run from the project
 | `enum`          | Samples an abstract input space and enumerates the optimal output for a concrete operation                |
 | `max-precise`   | Computes the most precise abstract result for a concrete operation and abstract inputs                    |
 | `pattern`       | Analyzes pattern completeness and generates pattern input datasets                                        |
+| `format-mlir`   | Format transfer dialect MLIR code.                                                                        |
 
 ## Example Synthesis Runs
 

@@ -26,7 +26,7 @@ def test_jit_with_kb_and():
 
     lowerer = LowerToLLVM([4, 8])
     helpers = get_helper_funcs(conc_and_f, AbstractDomain.KnownBits)
-    xfer_mlir = parse_mlir_func(DATA_DIR / "kb_and.mlir")
+    xfer_mlir = parse_mlir_func(DATA_DIR / "ideal_xfers" / "kb_and.mlir")
     lowerer.add_fn(xfer_mlir, shim=True)
     lowerer.add_fn(helpers.crt_func, shim=True)
 
@@ -63,7 +63,7 @@ def test_jit_with_ucr_add():
 
     lowerer = LowerToLLVM([4, 8])
     helpers = get_helper_funcs(conc_add_f, AbstractDomain.UConstRange)
-    xfer_mlir = parse_mlir_func(DATA_DIR / "cr_add.mlir")
+    xfer_mlir = parse_mlir_func(DATA_DIR / "ideal_xfers" / "ucr_add.mlir")
     lowerer.add_fn(xfer_mlir, shim=True)
     lowerer.add_fn(helpers.crt_func, shim=True)
 

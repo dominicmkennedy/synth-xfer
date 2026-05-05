@@ -9,10 +9,10 @@ DATA_DIR = PROJ_DIR / "tests" / "data"
 
 
 def test_xfer_lowering():
-    kb_and_mlir = parse_mlir_func(DATA_DIR / "kb_and.mlir")
-    kb_or_mlir = parse_mlir_func(DATA_DIR / "kb_or.mlir")
-    kb_xor_mlir = parse_mlir_func(DATA_DIR / "kb_xor.mlir")
-    cr_add_mlir = parse_mlir_func(DATA_DIR / "cr_add.mlir")
+    kb_and_mlir = parse_mlir_func(DATA_DIR / "ideal_xfers" / "kb_and.mlir")
+    kb_or_mlir = parse_mlir_func(DATA_DIR / "ideal_xfers" / "kb_or.mlir")
+    kb_xor_mlir = parse_mlir_func(DATA_DIR / "ideal_xfers" / "kb_xor.mlir")
+    cr_add_mlir = parse_mlir_func(DATA_DIR / "ideal_xfers" / "ucr_add.mlir")
 
     lowerer = LowerToLLVM([4, 8, 64])
     lowerer.add_fn(kb_and_mlir, shim=True)
