@@ -132,6 +132,7 @@ def _parse_counter_example(
 
 
 def _format_concrete(x: int, domain: AbstractDomain, bw: int) -> str:
+    x = x & ((1 << bw) - 1)
     if domain == AbstractDomain.KnownBits:
         return bin(x)[2:].zfill(bw)
     if domain == AbstractDomain.UConstRange:
@@ -174,7 +175,7 @@ def _bv_ref_to_abst_str(domain: AbstractDomain, bw: int, abst_bv: tuple[int, int
     return abst_val_str
 
 
-def _print_counterexample(
+def format_counterexample(
     op_name: str,
     model: Model,
     bw: int,
@@ -183,10 +184,11 @@ def _print_counterexample(
     xfer_name: str,
     helper_funcs: HelperFuncs,
     no_exec: bool,
-):
+) -> str:
     func_arity = len(helper_funcs.crt_func.args)
     conc_args, abst_args = _parse_counter_example(model, domain, bw, func_arity)
     conc_args_str = [_format_concrete(x, domain, bw) for x in conc_args]
+    out_lines: list[str] = []
     if no_exec:
         abst_output = None
         conc_output = None
@@ -202,7 +204,7 @@ def _print_counterexample(
             )[0][0]
         except ImportError as e:
             abst_output = None
-            print(f"Warning: Could not execute due {e}")
+            out_lines.append(f"Warning: Could not execute due {e}")
         conc_output = run_concrete_fn(helper_funcs, bw, [tuple(conc_args)])[0]
         conc_output = (
             _format_concrete(conc_output, domain, bw)
@@ -210,19 +212,19 @@ def _print_counterexample(
             else conc_output
         )
 
-    print(f"Concrete Execution: {op_name}(", end="")
-    print(", ".join(conc_args_str), end="")
+    conc_line = f"Concrete Execution: {op_name}(" + ", ".join(conc_args_str) + ")"
     if conc_output:
-        print(f") -> {conc_output}")
-    else:
-        print(")")
-    print(f"Abstract Execution: {op_name}(", end="")
-    print(", ".join(map(str, abst_args)), end="")
+        conc_line += f" -> {conc_output}"
+    out_lines.append(conc_line)
+
+    abst_line = f"Abstract Execution: {op_name}(" + ", ".join(map(str, abst_args)) + ")"
     if abst_output:
-        print(f") -> {abst_output}")
-        print(f"ERROR: {conc_output} not in {abst_output}")
-    else:
-        print(")")
+        abst_line += f" -> {abst_output}"
+    out_lines.append(abst_line)
+    if abst_output:
+        out_lines.append(f"ERROR: {conc_output} not in {abst_output}")
+
+    return "\n".join(out_lines)
 
 
 def main() -> None:
@@ -264,15 +266,17 @@ def main() -> None:
             print("Counterexample:")
 
             assert model is not None
-            _print_counterexample(
-                str(args.op.stem),
-                model,
-                bw,
-                domain,
-                mlir_mod,
-                xfer_name,
-                helper_funcs,
-                args.no_exec,
+            print(
+                format_counterexample(
+                    str(args.op.stem),
+                    model,
+                    bw,
+                    domain,
+                    mlir_mod,
+                    xfer_name,
+                    helper_funcs,
+                    args.no_exec,
+                )
             )
 
             if not args.continue_unsound:
