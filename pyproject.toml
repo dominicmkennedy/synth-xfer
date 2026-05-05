@@ -21,7 +21,7 @@ dependencies = [
   "PyYAML>=6.0.3",
   "setproctitle==1.3.7",
   "xdsl>=0.48.3",
-  "xdsl-smt @ https://github.com/dominicmkennedy/xdsl-smt/archive/9196b62.tar.gz",
+  "xdsl-smt @ https://github.com/dominicmkennedy/xdsl-smt/archive/dbdbc06.tar.gz",
   "z3-solver==4.15.1.0",
 ]
 
@@ -43,6 +43,7 @@ simplifier = "synth_xfer.cli.simplifier:main"
 enum = "synth_xfer.cli.enum:main"
 max-precise = "synth_xfer.cli.max_precise:main"
 pattern = "synth_xfer.cli.pattern:main"
+format-mlir = "synth_xfer.cli.format_mlir:main"
 
 [tool.scikit-build]
 minimum-version = "0.11"
