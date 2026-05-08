@@ -13,6 +13,7 @@ from xdsl_smt.dialects.transfer import (
     MakeOp,
 )
 
+from synth_xfer._util.domain import AbstractDomain
 from synth_xfer.egraph_rewriter.datatypes import (
     BV,
     cmp_predicate_to_fn,
@@ -106,9 +107,15 @@ def build_meet_expr(all_ret_exprs: list[tuple[Expr, ...]]) -> tuple[Expr, ...]:
     return tuple(meet_exprs)
 
 
-def simplify_term(expr: Expr, *, timeout: int = 5) -> tuple[Expr, int, int]:
+def simplify_term(
+    expr: Expr,
+    *,
+    domain: AbstractDomain,
+    num_args: int,
+    timeout: int = 5,
+) -> tuple[Expr, int, int]:
     egraph = EGraph()
-    rules = gen_ruleset()
+    rules = gen_ruleset(domain, num_args)
     expr_to_simplify = egraph.let("expr_to_simplify", expr)
     _, previous_cost = egraph.extract(expr_to_simplify, include_cost=True)
     _ = egraph.run(timeout, ruleset=rules)

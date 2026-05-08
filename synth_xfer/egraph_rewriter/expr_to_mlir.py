@@ -11,6 +11,7 @@ from egglog.declarations import (
     MethodRef,
     TypedExprDecl,
 )
+from xdsl.dialects.arith import AndIOp, OrIOp, XOrIOp
 from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.ir.core import SSAValue
 from xdsl_smt.dialects.transfer import (
@@ -27,48 +28,56 @@ from xdsl_smt.dialects.transfer import (
 
 from synth_xfer.egraph_rewriter.datatypes import cmp_predicate_to_fn, mlir_op_to_egraph_op
 
+ARITH_BINARY_OPS = (AndIOp, OrIOp, XOrIOp)
+DispatchKey = tuple[str, str]
 
-def _build_op_maps() -> tuple[Mapping[str, type], Mapping[str, type]]:
+
+def _ref_key(ref: Any) -> DispatchKey:
+    method_name = getattr(ref, "method_name", None)
+    if not isinstance(method_name, str):
+        raise ValueError(f"Cannot resolve method name from {ref}")
+    ident = getattr(ref, "ident", None)
+    class_name = getattr(ident, "name", None) if ident is not None else None
+    if not isinstance(class_name, str):
+        raise ValueError(f"Cannot resolve class name from {ref}")
+    return class_name, method_name
+
+
+def _build_op_maps() -> tuple[Mapping[DispatchKey, type], Mapping[DispatchKey, type]]:
     """
     Build unary/binary maps directly from the mlir->egraph mapping so we stay
-    consistent when either side changes.
+    consistent when either side changes. Keys are (class_name, method_name) so
+    that, e.g., BV.Or and Bool.Or do not collide.
     """
-    unary: Dict[str, type] = {}
-    binary: Dict[str, type] = {}
+    unary: Dict[DispatchKey, type] = {}
+    binary: Dict[DispatchKey, type] = {}
     for op_cls, func in mlir_op_to_egraph_op.items():
         ref: Any = getattr(func, "__egg_ref__", None)
         if ref is None:
             raise ValueError(f"Missing __egg_ref__ on {func}")
-        name = (
-            ref.method_name if hasattr(ref, "method_name") else getattr(ref, "name", None)
-        )
-        if not isinstance(name, str):
-            raise ValueError(f"Cannot resolve function name for {func}")
+        key = _ref_key(ref)
         if op_cls is SelectOp:
             continue
+        if op_cls in ARITH_BINARY_OPS:
+            binary[key] = op_cls
+            continue
         if issubclass(op_cls, BinOp):
-            binary[name] = op_cls
+            binary[key] = op_cls
             continue
         if issubclass(op_cls, UnaryOp):
-            unary[name] = op_cls
+            unary[key] = op_cls
             continue
-        raise ValueError(f"Cannot classify op {op_cls} for egraph function '{name}'.")
+        raise ValueError(f"Cannot classify op {op_cls} for egraph function '{key}'.")
     return unary, binary
 
 
 UNARY_OPS, BINARY_OPS = _build_op_maps()
-CMP_NAME_TO_PRED: Dict[str, int] = {}
+CMP_NAME_TO_PRED: Dict[DispatchKey, int] = {}
 for pred, fn in cmp_predicate_to_fn.items():
     ref = getattr(fn, "__egg_ref__", None)
     if ref is None:
         continue
-    if hasattr(ref, "method_name"):
-        name = ref.method_name
-    else:
-        name = getattr(ref, "name", None)
-    if not isinstance(name, str):
-        raise ValueError(f"Cannot resolve function name for predicate {pred}")
-    CMP_NAME_TO_PRED[name] = pred
+    CMP_NAME_TO_PRED[_ref_key(ref)] = pred
 
 
 class ExprToMLIR:
@@ -77,8 +86,8 @@ class ExprToMLIR:
     transfer dialect.
     """
 
-    unary_ops: Mapping[str, type] = UNARY_OPS
-    binary_ops: Mapping[str, type] = BINARY_OPS
+    unary_ops: Mapping[DispatchKey, type] = UNARY_OPS
+    binary_ops: Mapping[DispatchKey, type] = BINARY_OPS
 
     def __init__(
         self,
@@ -255,31 +264,28 @@ class ExprToMLIR:
 
         operands = [self._convert_decl(arg) for arg in call.args]
 
-        method_name = (
-            callable.method_name
-            if isinstance(callable, (ClassMethodRef, MethodRef))
-            else None
-        )
-        if method_name is None:
+        if not isinstance(callable, (ClassMethodRef, MethodRef)):
             raise ValueError(f"Unsupported callable in expression: {callable}")
+        key = _ref_key(callable)
+        method_name = key[1]
 
         if method_name == "ite":
             assert len(operands) == 3
             op = SelectOp(operands[0], operands[1], operands[2])
-        elif method_name in CMP_NAME_TO_PRED:
+        elif key in CMP_NAME_TO_PRED:
             assert len(operands) == 2
-            pred = CMP_NAME_TO_PRED[method_name]
+            pred = CMP_NAME_TO_PRED[key]
             op = CmpOp(operands[0], operands[1], pred)
-        elif method_name in self.unary_ops:
+        elif key in self.unary_ops:
             assert len(operands) == 1
-            op_cls = self.unary_ops[method_name]
+            op_cls = self.unary_ops[key]
             op = op_cls(operands[0])
-        elif method_name in self.binary_ops:
+        elif key in self.binary_ops:
             assert len(operands) == 2
-            op_cls = self.binary_ops[method_name]
+            op_cls = self.binary_ops[key]
             op = op_cls(operands[0], operands[1])
         else:
-            raise ValueError(f"Unsupported BV operation '{method_name}'")
+            raise ValueError(f"Unsupported operation {key}")
 
         self.block.add_op(op)
         return op.result

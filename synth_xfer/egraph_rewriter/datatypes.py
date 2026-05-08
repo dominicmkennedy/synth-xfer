@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Callable
 
 from egglog import Expr, StringLike, birewrite, i64Like, method, rewrite, ruleset, vars_
+from xdsl.dialects.arith import AndIOp, OrIOp, XOrIOp
 from xdsl.ir import Operation
+
+from synth_xfer._util.domain import AbstractDomain
 from xdsl_smt.dialects.transfer import (
     AddOp,
     AndOp,
@@ -129,64 +132,82 @@ class BV(Expr):
     def countr_zero(cls, op: BV) -> BV: ...
 
     @classmethod
-    def ite(cls, cond: BV, lhs: BV, rhs: BV) -> BV: ...
+    def ite(cls, cond: Bool, lhs: BV, rhs: BV) -> BV: ...
 
     @classmethod
     def get_bitwidth(cls, op: BV) -> BV: ...
 
     @classmethod
-    def eq(cls, lhs: BV, rhs: BV) -> BV: ...
-
-    @classmethod
-    def ne(cls, lhs: BV, rhs: BV) -> BV: ...
-
-    @classmethod
-    def slt(cls, lhs: BV, rhs: BV) -> BV: ...
-
-    @classmethod
-    def sle(cls, lhs: BV, rhs: BV) -> BV: ...
-
-    @classmethod
-    def sgt(cls, lhs: BV, rhs: BV) -> BV: ...
-
-    @classmethod
-    def sge(cls, lhs: BV, rhs: BV) -> BV: ...
-
-    @classmethod
-    def ult(cls, lhs: BV, rhs: BV) -> BV: ...
-
-    @classmethod
-    def ule(cls, lhs: BV, rhs: BV) -> BV: ...
-
-    @classmethod
-    def ugt(cls, lhs: BV, rhs: BV) -> BV: ...
-
-    @classmethod
-    def uge(cls, lhs: BV, rhs: BV) -> BV: ...
-
-    @classmethod
     def pop_count(cls, op: BV) -> BV: ...
 
 
-cmp_predicate_to_fn: dict[int, Callable[..., BV]] = {
-    0: BV.eq,  # eq
-    1: BV.ne,  # ne
-    2: BV.slt,
-    3: BV.sle,
-    4: BV.sgt,
-    5: BV.sge,
-    6: BV.ult,
-    7: BV.ule,
-    8: BV.ugt,
-    9: BV.uge,
+class Bool(Expr):
+    @method(cost=0)
+    @classmethod
+    def var(cls, name: StringLike) -> Bool: ...
+
+    @classmethod
+    def And(cls, lhs: Bool, rhs: Bool) -> Bool: ...
+
+    @classmethod
+    def Or(cls, lhs: Bool, rhs: Bool) -> Bool: ...
+
+    @classmethod
+    def Xor(cls, lhs: Bool, rhs: Bool) -> Bool: ...
+
+    @classmethod
+    def eq(cls, lhs: BV, rhs: BV) -> Bool: ...
+
+    @classmethod
+    def ne(cls, lhs: BV, rhs: BV) -> Bool: ...
+
+    @classmethod
+    def slt(cls, lhs: BV, rhs: BV) -> Bool: ...
+
+    @classmethod
+    def sle(cls, lhs: BV, rhs: BV) -> Bool: ...
+
+    @classmethod
+    def sgt(cls, lhs: BV, rhs: BV) -> Bool: ...
+
+    @classmethod
+    def sge(cls, lhs: BV, rhs: BV) -> Bool: ...
+
+    @classmethod
+    def ult(cls, lhs: BV, rhs: BV) -> Bool: ...
+
+    @classmethod
+    def ule(cls, lhs: BV, rhs: BV) -> Bool: ...
+
+    @classmethod
+    def ugt(cls, lhs: BV, rhs: BV) -> Bool: ...
+
+    @classmethod
+    def uge(cls, lhs: BV, rhs: BV) -> Bool: ...
+
+
+cmp_predicate_to_fn: dict[int, Callable[..., Bool]] = {
+    0: Bool.eq,  # eq
+    1: Bool.ne,  # ne
+    2: Bool.slt,
+    3: Bool.sle,
+    4: Bool.sgt,
+    5: Bool.sge,
+    6: Bool.ult,
+    7: Bool.ule,
+    8: Bool.ugt,
+    9: Bool.uge,
 }
 
-mlir_op_to_egraph_op: dict[type[Operation], Callable[..., BV]] = {
+mlir_op_to_egraph_op: dict[type[Operation], Callable[..., Expr]] = {
     AddOp: BV.__add__,
     SubOp: BV.__sub__,
     AndOp: BV.__and__,
     OrOp: BV.Or,
     XorOp: BV.__xor__,
+    AndIOp: Bool.And,
+    OrIOp: Bool.Or,
+    XOrIOp: Bool.Xor,
     NegOp: BV.Neg,
     MulOp: BV.__mul__,
     UDivOp: BV.udiv,
@@ -216,18 +237,27 @@ mlir_op_to_egraph_op: dict[type[Operation], Callable[..., BV]] = {
 }
 
 
-def gen_ruleset():
+def _knownbits_rules(num_args: int):
+    rules = []
+    for i in range(num_args):
+        kz = BV.var(f"arg{i}_0")  # knownZeros
+        ko = BV.var(f"arg{i}_1")  # knownOnes
+        # KnownBits invariant: a bit cannot be both known-zero and known-one.
+        rules.append(rewrite(kz & ko).to(BV(0)))
+        # Disjoint bitsets: addition equals bitwise-or.
+        rules.append(birewrite(kz + ko).to(BV.Or(kz, ko)))
+    return rules
+
+
+def gen_ruleset(domain: AbstractDomain, num_args: int):
     x, y, z = vars_("x y z", BV)
+
+    domain_rules = []
+    if domain == AbstractDomain.KnownBits:
+        domain_rules = _knownbits_rules(num_args)
+
     return ruleset(
-        # For KnownBits Domain
-        rewrite(BV.var("arg0_0") & BV.var("arg0_1")).to(BV(0)),
-        rewrite(BV.var("arg1_0") & BV.var("arg1_1")).to(BV(0)),
-        birewrite(BV.var("arg0_0") + BV.var("arg0_1")).to(
-            BV.Or(BV.var("arg0_0"), BV.var("arg0_1"))
-        ),
-        birewrite(BV.var("arg1_0") + BV.var("arg1_1")).to(
-            BV.Or(BV.var("arg1_0"), BV.var("arg1_1"))
-        ),
+        *domain_rules,
         # Bitvector Algebra - Idempotent laws
         rewrite(x & x).to(x),
         rewrite(BV.Or(x, x)).to(x),
