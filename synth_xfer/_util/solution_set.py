@@ -198,7 +198,7 @@ class SolutionSet:
                     if not self.optimize:
                         return candidate
                     rwt_func = rewrite_single_function(
-                        dce(candidate.body), quiet=True, timeout=5
+                        dce(candidate.body), quiet=True, max_iterations=5
                     )
                     # Todo: support rewriting condition functions later
                     # rwt_cond = rewrite_single_function(candidate.cond) if candidate.cond is not None else None

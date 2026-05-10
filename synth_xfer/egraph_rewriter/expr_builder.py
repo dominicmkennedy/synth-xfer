@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from egglog import EGraph, Expr
 from egglog.declarations import CallDecl, TypedExprDecl
-from xdsl.dialects.func import FuncOp
+from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.ir import Operation
 from xdsl.ir.core import SSAValue
 from xdsl_smt.dialects.transfer import (
@@ -18,6 +18,7 @@ from synth_xfer.egraph_rewriter.datatypes import (
     BV,
     cmp_predicate_to_fn,
     gen_ruleset,
+    make_absvalue,
     mlir_op_to_egraph_op,
 )
 
@@ -26,7 +27,7 @@ class ExprBuilder:
     func: FuncOp
     op_to_expr: dict[Operation, Expr]
     arg_index: dict[SSAValue, int]
-    ret_exprs: tuple[Expr, ...]
+    ret_expr: Expr
     cmp_predicates: dict[CallDecl, int]
 
     def __init__(self, _func: FuncOp):
@@ -45,17 +46,30 @@ class ExprBuilder:
             self.arg_index[arg] = i
 
         for op in block.ops:
+            if isinstance(op, ReturnOp):
+                if len(op.operands) != 1:
+                    raise ValueError(
+                        f"Expected exactly one return operand, got {len(op.operands)}"
+                    )
+                producer = op.operands[0].owner
+                if not isinstance(producer, Operation) or producer not in self.op_to_expr:
+                    raise ValueError(
+                        f"ReturnOp's operand is produced by an unsupported source: "
+                        f"{type(producer).__name__}"
+                    )
+                self.ret_expr = self.op_to_expr[producer]
+                return
+
             if isinstance(op, GetOp):
                 arg_name = self.create_arg_name(op.operands[0], op.index.value.data)
                 self.op_to_expr[op] = BV.var(arg_name)
 
             if isinstance(op, MakeOp):
-                ret_exprs: list[Expr] = []
+                field_exprs: list[Expr] = []
                 for operand in op.operands:
                     assert isinstance(operand.owner, Operation)
-                    ret_exprs.append(self.op_to_expr[operand.owner])
-                self.ret_exprs = tuple(ret_exprs)
-                return
+                    field_exprs.append(self.op_to_expr[operand.owner])
+                self.op_to_expr[op] = make_absvalue(*field_exprs)
 
             if isinstance(op, Constant):
                 const_value = op.value.value.data
@@ -92,32 +106,18 @@ class ExprBuilder:
                 self.op_to_expr[op] = egraph_op(*expr_operands)
 
 
-def build_meet_expr(all_ret_exprs: list[tuple[Expr, ...]]) -> tuple[Expr, ...]:
-    num_rets = len(all_ret_exprs[0])
-    meet_exprs: list[BV] = []
-    for i in range(num_rets):
-        first_expr = all_ret_exprs[0][i]
-        assert isinstance(first_expr, BV)
-        meet_expr = first_expr
-        for exprs in all_ret_exprs[1:]:
-            next_expr = exprs[i]
-            assert isinstance(next_expr, BV)
-            meet_expr = BV.Or(meet_expr, next_expr)
-        meet_exprs.append(meet_expr)
-    return tuple(meet_exprs)
-
-
 def simplify_term(
     expr: Expr,
     *,
     domain: AbstractDomain,
     num_args: int,
-    timeout: int = 5,
+    max_iterations: int,
 ) -> tuple[Expr, int, int]:
     egraph = EGraph()
     rules = gen_ruleset(domain, num_args)
     expr_to_simplify = egraph.let("expr_to_simplify", expr)
     _, previous_cost = egraph.extract(expr_to_simplify, include_cost=True)
-    _ = egraph.run(timeout, ruleset=rules)
+    # _ = egraph.run(max_iterations, ruleset=rules)
+    _ = egraph.run(1, ruleset=rules)
     new_expr, new_cost = egraph.extract(expr_to_simplify, include_cost=True)
     return new_expr, previous_cost, new_cost

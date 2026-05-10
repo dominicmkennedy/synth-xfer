@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Sequence, Tuple
+from typing import Any, Dict, Mapping, Tuple
 
 from egglog import Expr
 from egglog.declarations import (
@@ -116,16 +116,31 @@ class ExprToMLIR:
         # now that each comparison predicate maps to its own BV function.
         self.cmp_predicates: Mapping[CallDecl, int] = cmp_predicates or {}
 
-    def convert(self, ret_exprs: Sequence[Expr]) -> FuncOp:
-        self._verify_return_arity(ret_exprs)
-        results: list[SSAValue] = []
-        for expr in ret_exprs:
-            typed_expr = getattr(expr, "__egg_typed_expr__", None)
-            if not isinstance(typed_expr, TypedExprDecl):
-                raise TypeError(
-                    "Expected expression to have a TypedExprDecl at '__egg_typed_expr__'"
-                )
-            results.append(self._convert_decl(typed_expr))
+    def convert(self, joint: Expr) -> FuncOp:
+        typed_expr = getattr(joint, "__egg_typed_expr__", None)
+        if not isinstance(typed_expr, TypedExprDecl):
+            raise TypeError(
+                "Expected joint expression to have a TypedExprDecl at '__egg_typed_expr__'"
+            )
+        call = typed_expr.expr
+        if not isinstance(call, CallDecl):
+            raise TypeError(
+                f"Expected joint expression to be an AbsValue.makeN call, got {type(call)}"
+            )
+        callable_ = call.callable
+        if (
+            not isinstance(callable_, ClassMethodRef)
+            or callable_.ident.name != "AbsValue"
+        ):
+            raise ValueError(f"Expected top-level AbsValue.makeN, got {callable_}")
+
+        expected_arity = self._expected_arity()
+        if len(call.args) != expected_arity:
+            raise ValueError(
+                f"Return arity mismatch: expected {expected_arity}, got {len(call.args)}."
+            )
+
+        results = [self._convert_decl(arg) for arg in call.args]
 
         make_op = MakeOp(results)
         self.block.add_op(make_op)
@@ -198,19 +213,13 @@ class ExprToMLIR:
 
         raise ValueError("Failed to synthesize a constant witness value.")
 
-    def _verify_return_arity(self, ret_exprs: Sequence[Expr]) -> None:
+    def _expected_arity(self) -> int:
         outputs = self.original_func.function_type.outputs.data
         if not outputs or not isinstance(outputs[0], AbstractValueType):
             raise ValueError("Expected function to return an AbstractValueType.")
-
         if len(outputs) != 1:
             raise ValueError("Only single-result functions are supported.")
-
-        expected = len(outputs[0].get_fields())
-        if expected != len(ret_exprs):
-            raise ValueError(
-                f"Return arity mismatch: expected {expected}, got {len(ret_exprs)}."
-            )
+        return len(outputs[0].get_fields())
 
     def _create_constant(self, value: int) -> SSAValue:
         witness = self._get_const_witness()

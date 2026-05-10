@@ -5,8 +5,6 @@ from typing import Callable
 from egglog import Expr, StringLike, birewrite, i64Like, method, rewrite, ruleset, vars_
 from xdsl.dialects.arith import AndIOp, OrIOp, XOrIOp
 from xdsl.ir import Operation
-
-from synth_xfer._util.domain import AbstractDomain
 from xdsl_smt.dialects.transfer import (
     AddOp,
     AndOp,
@@ -40,6 +38,8 @@ from xdsl_smt.dialects.transfer import (
     URemOp,
     XorOp,
 )
+
+from synth_xfer._util.domain import AbstractDomain
 
 
 class BV(Expr):
@@ -184,6 +184,27 @@ class Bool(Expr):
 
     @classmethod
     def uge(cls, lhs: BV, rhs: BV) -> Bool: ...
+
+
+class AbsValue(Expr):
+    """Joint representation of a transfer.abs_value tuple, one constructor per arity."""
+
+    @classmethod
+    def make1(cls, x0: BV) -> AbsValue: ...
+
+    @classmethod
+    def make2(cls, x0: BV, x1: BV) -> AbsValue: ...
+
+
+def make_absvalue(*fields: Expr) -> AbsValue:
+    # The underlying AbsValue.makeN constructors are typed (BV, ...) -> AbsValue;
+    # egglog enforces field types at saturation time. Python signature is loose
+    # here because op_to_expr stores Expr (BV in practice for MakeOp operands).
+    if len(fields) == 1:
+        return AbsValue.make1(fields[0])  # type: ignore[arg-type]
+    if len(fields) == 2:
+        return AbsValue.make2(fields[0], fields[1])  # type: ignore[arg-type]
+    raise ValueError(f"Unsupported AbsValue arity: {len(fields)}")
 
 
 cmp_predicate_to_fn: dict[int, Callable[..., Bool]] = {
