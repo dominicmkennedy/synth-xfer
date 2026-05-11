@@ -21,8 +21,8 @@ def rewrite_single_function_to_exprs(
     *,
     domain: AbstractDomain,
     quiet: bool = True,
-    max_iterations: int = 5,
-    step_time_limit_seconds: float = 1.0,
+    max_iterations: int,
+    step_time_limit_seconds: float,
 ) -> tuple[egglog.Expr, dict]:
     """
     Rewrite a single transfer function as one joint AbsValue expression.
@@ -63,8 +63,8 @@ def rewrite_single_function(
     *,
     domain: AbstractDomain,
     quiet: bool = True,
-    max_iterations: int = 5,
-    step_time_limit_seconds: float = 1.0,
+    max_iterations: int,
+    step_time_limit_seconds: float,
 ) -> FuncOp:
     joint, cmp_predicates = rewrite_single_function_to_exprs(
         func,
@@ -81,8 +81,8 @@ def rewrite_solutions(
     *,
     domain: AbstractDomain,
     quiet: bool = True,
-    max_iterations: int = 5,
-    step_time_limit_seconds: float = 1.0,
+    max_iterations: int,
+    step_time_limit_seconds: float,
 ) -> list[FuncOp]:
     """
     Rewrite every transfer function in the module.

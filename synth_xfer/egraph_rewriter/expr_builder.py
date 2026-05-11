@@ -7,9 +7,10 @@ from egglog.declarations import CallDecl, TypedExprDecl
 from xdsl.dialects.arith import ConstantOp as ArithConstantOp
 from xdsl.dialects.builtin import IntegerAttr, IntegerType
 from xdsl.dialects.func import FuncOp, ReturnOp
-from xdsl.ir import Operation
+from xdsl.ir import Block, Operation
 from xdsl.ir.core import SSAValue
 from xdsl_smt.dialects.transfer import (
+    AbstractValueType,
     CmpOp as TransferCmpOp,
     Constant,
     GetAllOnesOp,
@@ -56,7 +57,24 @@ class ExprBuilder:
                     raise ValueError(
                         f"Expected exactly one return operand, got {len(op.operands)}"
                     )
-                producer = op.operands[0].owner
+                ret_value = op.operands[0]
+                producer = ret_value.owner
+                if isinstance(producer, Block):
+                    # Returning a block argument directly (pure passthrough).
+                    # Synthesize an AbsValue from its fields so the joint expr
+                    # has the AbsValue.makeN shape ExprToMLIR expects.
+                    if not isinstance(ret_value.type, AbstractValueType):
+                        raise ValueError(
+                            "ReturnOp returning a non-AbstractValueType block "
+                            f"argument is unsupported: type={ret_value.type}"
+                        )
+                    arg_idx = self.arg_index[ret_value]
+                    n_fields = len(ret_value.type.get_fields())
+                    field_exprs: list[Expr] = [
+                        BV.var(f"arg{arg_idx}_{i}") for i in range(n_fields)
+                    ]
+                    self.ret_expr = make_absvalue(*field_exprs)
+                    return
                 if not isinstance(producer, Operation) or producer not in self.op_to_expr:
                     raise ValueError(
                         f"ReturnOp's operand is produced by an unsupported source: "
@@ -131,7 +149,7 @@ def simplify_term(
     domain: AbstractDomain,
     num_args: int,
     max_iterations: int,
-    step_time_limit_seconds: float = 1.0,
+    step_time_limit_seconds: float,
 ) -> tuple[Expr, int, int]:
     """
     Simplify ``expr`` via egglog saturation.
