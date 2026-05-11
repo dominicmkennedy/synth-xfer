@@ -7,6 +7,7 @@ from xdsl.dialects.builtin import ModuleOp
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 
 from synth_xfer._util.dce import dce
+from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.log import get_logger, write_log_file
 from synth_xfer._util.parse_mlir import HelperFuncs
@@ -42,11 +43,14 @@ class SolutionSet:
     list of name of base functions
     list of base functions
     """
+    domain: AbstractDomain
     optimize: bool
 
     def __init__(
         self,
         initial_solutions: list[XferFunc],
+        *,
+        domain: AbstractDomain,
         is_perfect: bool = False,
         optimize: bool = True,
     ):
@@ -55,6 +59,7 @@ class SolutionSet:
         self.solutions_size = len(initial_solutions)
         self.precise_set = []
         self.is_perfect = is_perfect
+        self.domain = domain
         self.optimize = optimize
 
     def eval_improve(
@@ -198,7 +203,11 @@ class SolutionSet:
                     if not self.optimize:
                         return candidate
                     rwt_func = rewrite_single_function(
-                        dce(candidate.body), quiet=True, max_iterations=5
+                        dce(candidate.body),
+                        domain=self.domain,
+                        quiet=True,
+                        max_iterations=5,
+                        step_time_limit_seconds=1.0,
                     )
                     # Todo: support rewriting condition functions later
                     # rwt_cond = rewrite_single_function(candidate.cond) if candidate.cond is not None else None

@@ -131,7 +131,7 @@ def run(
     low_and_med_bw = set(lbw) | set(t[0] for t in mbw)
 
     eval_fn = _eval_helper(to_eval, all_bws, helper_funcs, low_and_med_bw)
-    solution_set = SolutionSet([], optimize=optimize)
+    solution_set = SolutionSet([], domain=domain, optimize=optimize)
 
     start_time = perf_counter()
     init_cmp_res = solution_set.eval_improve([], eval_fn)[0]
