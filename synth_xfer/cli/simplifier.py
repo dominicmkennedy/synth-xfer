@@ -39,6 +39,19 @@ def _get_args() -> Namespace:
         help="write the rewritten module to this file instead of stdout",
     )
     p.add_argument(
+        "--max-iterations",
+        type=int,
+        default=6,
+        help="hard upper bound on egraph saturation passes per function",
+    )
+    p.add_argument(
+        "--step-time-limit",
+        type=float,
+        default=1.0,
+        help="per-iteration wall-clock cap in seconds; after any iteration "
+        "exceeds this budget no further iterations are started",
+    )
+    p.add_argument(
         "-q",
         "--quiet",
         action=BooleanOptionalAction,
@@ -61,12 +74,22 @@ def main() -> None:
     parsed = parse_mlir(args.transfer_functions)
     if isinstance(parsed, FuncOp):
         rewritten_funcs = [
-            rewrite_single_function(parsed, domain=args.domain, quiet=args.quiet)
+            rewrite_single_function(
+                parsed,
+                domain=args.domain,
+                quiet=args.quiet,
+                max_iterations=args.max_iterations,
+                step_time_limit_seconds=args.step_time_limit,
+            )
         ]
     elif isinstance(parsed, ModuleOp):
         xfer_funcs = list(get_fns(parsed).values())
         rewritten_funcs = rewrite_solutions(
-            xfer_funcs, domain=args.domain, quiet=args.quiet
+            xfer_funcs,
+            domain=args.domain,
+            quiet=args.quiet,
+            max_iterations=args.max_iterations,
+            step_time_limit_seconds=args.step_time_limit,
         )
     else:
         raise ValueError(

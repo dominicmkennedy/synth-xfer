@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import time
+
 from egglog import EGraph, Expr
 from egglog.declarations import CallDecl, TypedExprDecl
+from xdsl.dialects.arith import ConstantOp as ArithConstantOp
+from xdsl.dialects.builtin import IntegerAttr, IntegerType
 from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.ir import Operation
 from xdsl.ir.core import SSAValue
@@ -16,6 +20,7 @@ from xdsl_smt.dialects.transfer import (
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer.egraph_rewriter.datatypes import (
     BV,
+    Bool,
     cmp_predicate_to_fn,
     gen_ruleset,
     make_absvalue,
@@ -75,6 +80,20 @@ class ExprBuilder:
                 const_value = op.value.value.data
                 self.op_to_expr[op] = BV(const_value)
 
+            if isinstance(op, ArithConstantOp):
+                result_type = op.results[0].type
+                if (
+                    isinstance(result_type, IntegerType)
+                    and result_type.width.data == 1
+                    and isinstance(op.value, IntegerAttr)
+                ):
+                    self.op_to_expr[op] = (
+                        Bool.true() if op.value.value.data != 0 else Bool.false()
+                    )
+                # non-i1 arith.constant is currently unsupported and intentionally
+                # left out of op_to_expr; downstream consumers will raise a clear
+                # KeyError if they reference it.
+
             if isinstance(op, GetAllOnesOp):
                 self.op_to_expr[op] = BV(-1)
 
@@ -112,12 +131,40 @@ def simplify_term(
     domain: AbstractDomain,
     num_args: int,
     max_iterations: int,
+    step_time_limit_seconds: float = 1.0,
 ) -> tuple[Expr, int, int]:
+    """
+    Simplify ``expr`` via egglog saturation.
+
+    Args:
+        max_iterations: Hard upper bound on the number of saturation passes.
+        step_time_limit_seconds: Maximum wall-clock seconds for a single
+            iteration. Egglog cannot be interrupted mid-iteration, so the check
+            happens after each ``egraph.run(1)`` returns: if that iteration
+            exceeded the budget, no further iterations are started (the egraph
+            has grown enough that the next iteration is expected to be at least
+            as slow).
+    """
     egraph = EGraph()
     rules = gen_ruleset(domain, num_args)
     expr_to_simplify = egraph.let("expr_to_simplify", expr)
     _, previous_cost = egraph.extract(expr_to_simplify, include_cost=True)
-    # _ = egraph.run(max_iterations, ruleset=rules)
-    _ = egraph.run(1, ruleset=rules)
+
+    start = time.monotonic()
+    for i in range(max_iterations):
+        iter_start = time.monotonic()
+        report = egraph.run(1, ruleset=rules)
+        now = time.monotonic()
+        iter_dt = now - iter_start
+        elapsed = now - start
+        print(
+            f"Iteration {i + 1}: {iter_dt:.3f}s "
+            f"(elapsed {elapsed:.3f}s, updated={report.updated})"
+        )
+        if not report.updated:
+            break  # saturated -- further iterations would do nothing
+        if iter_dt >= step_time_limit_seconds:
+            break
+
     new_expr, new_cost = egraph.extract(expr_to_simplify, include_cost=True)
     return new_expr, previous_cost, new_cost

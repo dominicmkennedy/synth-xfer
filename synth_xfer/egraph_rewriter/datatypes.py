@@ -146,6 +146,14 @@ class Bool(Expr):
     @classmethod
     def var(cls, name: StringLike) -> Bool: ...
 
+    @method(cost=0)
+    @classmethod
+    def true(cls) -> Bool: ...
+
+    @method(cost=0)
+    @classmethod
+    def false(cls) -> Bool: ...
+
     @classmethod
     def And(cls, lhs: Bool, rhs: Bool) -> Bool: ...
 
@@ -272,6 +280,7 @@ def _knownbits_rules(num_args: int):
 
 def gen_ruleset(domain: AbstractDomain, num_args: int):
     x, y, z = vars_("x y z", BV)
+    b, c, d = vars_("b c d", Bool)
 
     domain_rules = []
     if domain == AbstractDomain.KnownBits:
@@ -540,5 +549,41 @@ def gen_ruleset(domain: AbstractDomain, num_args: int):
         ),  # OR with masks
         # Constant folding
         rewrite(BV(1) + BV(-1)).to(BV(0)),
+        # Boolean algebra (arith.andi / arith.ori / arith.xori)
+        # Idempotent
+        rewrite(Bool.And(b, b)).to(b),
+        rewrite(Bool.Or(b, b)).to(b),
+        # Commutativity
+        rewrite(Bool.And(b, c)).to(Bool.And(c, b)),
+        rewrite(Bool.Or(b, c)).to(Bool.Or(c, b)),
+        rewrite(Bool.Xor(b, c)).to(Bool.Xor(c, b)),
+        # Associativity
+        birewrite(Bool.And(Bool.And(b, c), d)).to(Bool.And(b, Bool.And(c, d))),
+        birewrite(Bool.Or(Bool.Or(b, c), d)).to(Bool.Or(b, Bool.Or(c, d))),
+        birewrite(Bool.Xor(Bool.Xor(b, c), d)).to(Bool.Xor(b, Bool.Xor(c, d))),
+        # Absorption
+        rewrite(Bool.And(b, Bool.Or(b, c))).to(b),
+        rewrite(Bool.Or(b, Bool.And(b, c))).to(b),
+        # Distributivity
+        birewrite(Bool.And(b, Bool.Or(c, d))).to(Bool.Or(Bool.And(b, c), Bool.And(b, d))),
+        birewrite(Bool.Or(b, Bool.And(c, d))).to(Bool.And(Bool.Or(b, c), Bool.Or(b, d))),
+        # Comparison predicates (transfer.cmp) -- only the symmetric ones
+        rewrite(Bool.eq(x, y)).to(Bool.eq(y, x)),
+        rewrite(Bool.ne(x, y)).to(Bool.ne(y, x)),
+        # Select (transfer.select)
+        rewrite(BV.ite(b, x, x)).to(x),  # both branches identical
+        rewrite(BV.ite(Bool.true(), x, y)).to(x),  # guard known true
+        rewrite(BV.ite(Bool.false(), x, y)).to(y),  # guard known false
+        # Comparison reflexivity -- produce Bool.true / Bool.false
+        rewrite(Bool.eq(x, x)).to(Bool.true()),
+        rewrite(Bool.sle(x, x)).to(Bool.true()),
+        rewrite(Bool.sge(x, x)).to(Bool.true()),
+        rewrite(Bool.ule(x, x)).to(Bool.true()),
+        rewrite(Bool.uge(x, x)).to(Bool.true()),
+        rewrite(Bool.ne(x, x)).to(Bool.false()),
+        rewrite(Bool.slt(x, x)).to(Bool.false()),
+        rewrite(Bool.sgt(x, x)).to(Bool.false()),
+        rewrite(Bool.ult(x, x)).to(Bool.false()),
+        rewrite(Bool.ugt(x, x)).to(Bool.false()),
         name="my_ruleset",
     )

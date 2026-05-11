@@ -11,7 +11,8 @@ from egglog.declarations import (
     MethodRef,
     TypedExprDecl,
 )
-from xdsl.dialects.arith import AndIOp, OrIOp, XOrIOp
+from xdsl.dialects.arith import AndIOp, ConstantOp as ArithConstantOp, OrIOp, XOrIOp
+from xdsl.dialects.builtin import IntegerAttr, IntegerType
 from xdsl.dialects.func import FuncOp, ReturnOp
 from xdsl.ir.core import SSAValue
 from xdsl_smt.dialects.transfer import (
@@ -231,6 +232,12 @@ class ExprToMLIR:
         self.block.add_op(const_op)
         return const_op.result
 
+    def _create_bool_constant(self, value: bool) -> SSAValue:
+        i1 = IntegerType(1)
+        const_op = ArithConstantOp(IntegerAttr(int(value), i1), i1)
+        self.block.add_op(const_op)
+        return const_op.result
+
     def _convert_decl(self, decl: TypedExprDecl) -> SSAValue:
         node = decl.expr
         if node in self.expr_cache:
@@ -270,6 +277,13 @@ class ExprToMLIR:
                     f"Literal for Constant must be int, got {type(lit.value)}"
                 )
             return self._create_constant(lit.value)
+
+        if (
+            isinstance(callable, ClassMethodRef)
+            and callable.ident.name == "Bool"
+            and callable.method_name in ("true", "false")
+        ):
+            return self._create_bool_constant(callable.method_name == "true")
 
         operands = [self._convert_decl(arg) for arg in call.args]
 
