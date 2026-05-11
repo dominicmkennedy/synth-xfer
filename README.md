@@ -342,11 +342,23 @@ pattern eval                             \
 
 ## Important CLI Options for `simplifier`
 
-| CLI flag         | Description                                                                                                      |
-|------------------|------------------------------------------------------------------------------------------------------------------|
-| `<input_path>`   | Path to a transformer `.mlir` file. Accepts a single function or a module (defaults to the `solution` function). |
-| `--rewrite-meet` | Rewrite the meet of all rewritten functions instead of individual functions.                                     |
-| `--quiet`        | Suppress or enable console output from the optimizer (default: quiet).                                           |
+The simplifier runs an [egglog](https://github.com/egraphs-good/egglog) e-graph saturation and re-emits the rewritten MLIR.
+
+| CLI flag                | Description                                                                                                                                                            |
+|-------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `<input_path>`          | Path to a transformer `.mlir` file. Accepts a single `func.func` or a `builtin.module` of functions.                                                                   |
+| `--domain <Name>`       | (required) Abstract domain whose axioms (if any) apply during rewriting. Choices: `KnownBits`, `UConstRange`, `SConstRange`, `Mod3`, `Mod5`, `Mod7`, `Mod11`, `Mod13`.  |
+| `-o, --output <Path>`   | Write the rewritten module to this file. If omitted, the module is printed to stdout.                                                                                  |
+| `--max-iterations <int>`| Hard upper bound on egraph saturation passes per function (default: `6`).                                                                                              |
+| `--step-time-limit <s>` | Per-iteration wall-clock cap in seconds (default: `1.0`). After any single iteration exceeds this budget, no further iterations are started — the egraph has grown enough that the next iteration is expected to be at least as slow. Egglog cannot be interrupted mid-iteration, so the check happens after each pass returns. |
+| `-q, --quiet`           | Suppress per-iteration logging (default: quiet). Use `--no-quiet` for verbose output.                                                                                  |
+
+Example:
+```bash
+simplifier tests/data/ideal_xfers/kb_and.mlir \
+           --domain KnownBits                           \
+           -o rewritten.mlir
+```
 
 ## Important CLI Options for `max-precise`
 
