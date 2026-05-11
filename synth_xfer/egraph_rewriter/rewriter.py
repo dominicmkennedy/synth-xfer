@@ -104,7 +104,8 @@ def rewrite_solutions(
     if skipped:
         print(
             f"Skipping {len(skipped)} function(s) containing func.call "
-            "(only plain functions are supported):"
+            "(only plain functions are supported); they will be passed "
+            "through unchanged:"
         )
         for func in skipped:
             print(f"  - {func.sym_name.data}")
@@ -112,7 +113,7 @@ def rewrite_solutions(
     for func in plain_funcs:
         print(f"  - {func.sym_name.data}")
 
-    rewritten: list[FuncOp] = []
+    rewritten_by_id: dict[int, FuncOp] = {}
     for func in plain_funcs:
         joint, cmp_predicates = rewrite_single_function_to_exprs(
             func,
@@ -121,6 +122,8 @@ def rewrite_solutions(
             max_iterations=max_iterations,
             step_time_limit_seconds=step_time_limit_seconds,
         )
-        rewritten_func = ExprToMLIR(func, cmp_predicates=cmp_predicates).convert(joint)
-        rewritten.append(rewritten_func)
-    return rewritten
+        rewritten_by_id[id(func)] = ExprToMLIR(
+            func, cmp_predicates=cmp_predicates
+        ).convert(joint)
+
+    return [rewritten_by_id.get(id(func), func.clone()) for func in xfer_funcs]
