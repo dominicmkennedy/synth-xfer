@@ -131,29 +131,8 @@ class ExprToMLIR:
             raise TypeError(
                 "Expected joint expression to have a TypedExprDecl at '__egg_typed_expr__'"
             )
-        call = typed_expr.expr
-        if not isinstance(call, CallDecl):
-            raise TypeError(
-                f"Expected joint expression to be an AbsValue.makeN call, got {type(call)}"
-            )
-        callable_ = call.callable
-        if (
-            not isinstance(callable_, ClassMethodRef)
-            or callable_.ident.name != "AbsValue"
-        ):
-            raise ValueError(f"Expected top-level AbsValue.makeN, got {callable_}")
-
-        expected_arity = self._expected_arity()
-        if len(call.args) != expected_arity:
-            raise ValueError(
-                f"Return arity mismatch: expected {expected_arity}, got {len(call.args)}."
-            )
-
-        results = [self._convert_decl(arg) for arg in call.args]
-
-        make_op = MakeOp(results)
-        self.block.add_op(make_op)
-        self.block.add_op(ReturnOp(make_op.result))
+        result = self._convert_decl(typed_expr)
+        self.block.add_op(ReturnOp(result))
         return self.func
 
     def _derive_scalar_type(self):
@@ -222,14 +201,6 @@ class ExprToMLIR:
 
         raise ValueError("Failed to synthesize a constant witness value.")
 
-    def _expected_arity(self) -> int:
-        outputs = self.original_func.function_type.outputs.data
-        if not outputs or not isinstance(outputs[0], AbstractValueType):
-            raise ValueError("Expected function to return an AbstractValueType.")
-        if len(outputs) != 1:
-            raise ValueError("Only single-result functions are supported.")
-        return len(outputs[0].get_fields())
-
     def _create_constant(self, value: int) -> SSAValue:
         witness = self._get_const_witness()
         if value == -1:
@@ -292,6 +263,16 @@ class ExprToMLIR:
             and callable.method_name in ("true", "false")
         ):
             return self._create_bool_constant(callable.method_name == "true")
+
+        if (
+            isinstance(callable, ClassMethodRef)
+            and callable.ident.name == "AbsValue"
+            and callable.method_name.startswith("make")
+        ):
+            operands = [self._convert_decl(arg) for arg in call.args]
+            make_op = MakeOp(operands)
+            self.block.add_op(make_op)
+            return make_op.result
 
         operands = [self._convert_decl(arg) for arg in call.args]
 
