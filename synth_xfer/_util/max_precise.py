@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from functools import lru_cache
 from io import StringIO
 from pathlib import Path
 import re
@@ -451,3 +452,91 @@ def compute_max_precise(
     query = PreparedQuery.from_module(ctx, smt_mod, bw, timeout, solver_kind)
     computer = _get_max_precise_computer(domain, query, bw)
     return computer.compute()
+
+
+@dataclass
+class AbsOpConstraintQueryBuilder:
+    """Builds an SMT query that constant-folds abs_op_constraint over a fully
+    concrete tuple of abstract argument values. The query is SAT iff the
+    constraint holds for those values (it has no free variables)."""
+
+    bitwidth: int
+    abstract_arg_values: list[tuple[int, int]]
+    abs_op_constraint: DefineFunOp
+    _const_false: ConstantBoolOp = field(init=False, repr=False)
+
+    def _to_pair_value(self, val_list: list[ConstantOp]) -> tuple[list[PairOp], OpResult]:
+        last_val = self._const_false.result
+        result: list[PairOp] = []
+        for val in val_list[::-1]:
+            result.append(PairOp(val.res, last_val))
+            last_val = result[-1].res
+        return result, result[-1].res
+
+    def build(self) -> ModuleOp:
+        self._const_false = ConstantBoolOp(False)
+        ops: list[Operation] = [self._const_false]
+
+        abstract_inputs: list[OpResult] = []
+        for abst_bv in self.abstract_arg_values:
+            constant_ops = [
+                ConstantOp.from_int_value(x % (2**self.bitwidth), self.bitwidth)
+                for x in abst_bv
+            ]
+            pair_ops, pair_value = self._to_pair_value(constant_ops)
+            ops += constant_ops + pair_ops
+            abstract_inputs.append(pair_value)
+
+        const_i1 = ConstantOp.from_int_value(1, 1)
+        pair_op = PairOp(const_i1.res, self._const_false.result)
+        pair_res_op = PairOp(pair_op.res, self._const_false.result)
+        call_op = CallOp(
+            self.abs_op_constraint.ret,
+            abstract_inputs + [self._const_false.result],
+        )
+        eq_op = EqOp(pair_res_op.res, call_op.res[0])
+        assert_op = AssertOp(eq_op.res)
+
+        return ModuleOp(ops + [const_i1, pair_op, pair_res_op, call_op, eq_op, assert_op])
+
+
+@lru_cache(maxsize=None)
+def check_abs_op_constraint(
+    op_path: Path,
+    domain: AbstractDomain,
+    bw: int,
+    args: tuple[str, ...],
+    timeout: int,
+    solver_kind: SolverKind,
+) -> bool:
+    """Return True if `args` satisfy the pattern's abs_op_constraint (or the
+    pattern has none). Used as a rejection-sampling filter, so anything
+    uncertain (malformed args, bottom, solver timeout) returns False."""
+    hlprs = get_helper_funcs(op_path, domain)
+    if hlprs.abs_op_constraint_func is None:
+        return True
+
+    try:
+        parsed_args = [_get_abst_val(arg, domain, bw) for arg in args]
+    except ValueError:
+        return False
+    if any(arg is None for arg in parsed_args):
+        return False
+    abst_arg_values = [arg for arg in parsed_args if arg is not None]
+
+    ctx = _get_ctx()
+    lower_to_smt_module(m := ModuleOp([hlprs.abs_op_constraint_func.clone()]), bw, ctx)
+    abs_op_constraint = next(iter(m.ops))
+    assert isinstance(abs_op_constraint, DefineFunOp)
+
+    smt_mod = AbsOpConstraintQueryBuilder(
+        bitwidth=bw,
+        abstract_arg_values=abst_arg_values,
+        abs_op_constraint=abs_op_constraint,
+    ).build()
+
+    query = PreparedQuery.from_module(ctx, smt_mod, bw, timeout, solver_kind)
+    try:
+        return query.is_sat()
+    except TimeoutError:
+        return False

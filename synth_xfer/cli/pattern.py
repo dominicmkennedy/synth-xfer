@@ -108,6 +108,12 @@ def _gen_args(p: ArgumentParser):
         default=1000,
         help="Maximum consecutive duplicate/timeout rejections before failing",
     )
+    p.add_argument(
+        "--enforce-abs-op-constraint",
+        action="store_true",
+        help="Reject sampled inputs that do not satisfy the pattern's "
+        "abs_op_constraint (rejection sampling). No-op if the pattern has none.",
+    )
 
 
 def _eval_args(p: ArgumentParser):
@@ -199,6 +205,7 @@ def main() -> None:
             timeout=args.timeout,
             max_failures=args.max_failures,
             solver_kind=args.solver,
+            enforce_abs_op_constraint=args.enforce_abs_op_constraint,
         )
         generated_inputs.write_tsv(args.output)
         for bw, timeout in timeouts.items():
