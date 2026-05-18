@@ -128,8 +128,7 @@ def _eval_args(p: ArgumentParser):
         required=True,
         help="path to enum TSV (use `pattern generate-input` to make this)",
     )
-    p.add_argument("--exact-bw", type=int, default=8, help="BW to use for exact eval")
-    p.add_argument("--norm-bw", type=int, default=64, help="BW to use for norm eval")
+    p.add_argument("--bw", type=int, default=8, help="BW to use for eval")
 
 
 def main() -> None:
@@ -226,19 +225,52 @@ def main() -> None:
 
         pattern_path = Path(data.metadata.op)
         dag = load_pattern(pattern_path)
-        seq_exact, comp_exact, seq_norm, comp_norm = eval_pattern(
+        (
+            seq_sound,
+            comp_sound,
+            seq_exact,
+            comp_exact,
+            seq_dist,
+            comp_dist,
+            seq_norm,
+            comp_norm,
+        ) = eval_pattern(
             dag.expression,
             args.composite_xfer,
             args.xfer_name,
             data,
-            args.exact_bw,
-            args.norm_bw,
+            args.bw,
         )
 
-        print("Type       | Exact % | Norm Score")
-        print("-----------|---------|-------------")
-        print(f"LLVM Seq   | {seq_exact:6.2f}% | {seq_norm:.5f}")
-        print(f"Composite  | {comp_exact:6.2f}% | {comp_norm:.5f}")
+        # Dist is only meaningful when `best` is the true optimal, i.e. for
+        # exhaustively-enumerated (mbw) bitwidths. hbw samples concretizations
+        # and computes no ideal, so omit the column there.
+        hbw_bws = {b for b, _, _ in data.metadata.hbw}
+        if args.bw not in hbw_bws:
+
+            def _dist_cell(sound: float, dist: float) -> str:
+                # Dist is a clean imprecision measure only for a fully sound
+                # result; for an unsound one it conflates imprecision with
+                # unsoundness, so don't report a number.
+                if sound >= 100.0 - 1e-9:
+                    return f"{dist:.5f}"
+                return "unsound"
+
+            print(f"Type       | Sound % | Exact % |  Norm   |   Dist  (bw={args.bw})")
+            print("-----------|---------|---------|---------|---------")
+            print(
+                f"LLVM Seq   | {seq_sound:6.2f}% | {seq_exact:6.2f}% | {seq_norm:7.5f} | {_dist_cell(seq_sound, seq_dist):>7}"
+            )
+            print(
+                f"Composite  | {comp_sound:6.2f}% | {comp_exact:6.2f}% | {comp_norm:7.5f} | {_dist_cell(comp_sound, comp_dist):>7}"
+            )
+        else:
+            print(f"Type       | Sound % | Exact % |  Norm    (bw={args.bw})")
+            print("-----------|---------|---------|---------")
+            print(f"LLVM Seq   | {seq_sound:6.2f}% | {seq_exact:6.2f}% | {seq_norm:7.5f}")
+            print(
+                f"Composite  | {comp_sound:6.2f}% | {comp_exact:6.2f}% | {comp_norm:7.5f}"
+            )
 
 
 if __name__ == "__main__":
