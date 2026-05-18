@@ -12,7 +12,7 @@ module {
     %ssa_1_con_0_z = func.call @shift_lt_bw(%0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
     %2 = "transfer.or"(%0, %1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
     %ssa_3_con_0_z = func.call @shift_lt_bw(%2, %arg0) : (!transfer.integer, !transfer.integer) -> i1
-    %and_0 = arith.andi %ssa_2_con_0_z, %ssa_4_con_0_z : i1
+    %and_0 = arith.andi %ssa_1_con_0_z, %ssa_3_con_0_z : i1
     return %and_0 : i1
   }
   func.func @shift_lt_bw(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {

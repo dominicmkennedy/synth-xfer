@@ -8,7 +8,12 @@ from typing import cast
 import pandas as pd
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.max_precise import RowProcessor, RowTask
+from synth_xfer._util.max_precise import (
+    RowProcessor,
+    RowTask,
+    check_abs_op_constraint,
+)
+from synth_xfer._util.parse_mlir import get_helper_funcs
 from synth_xfer._util.pattern import PatternDag, get_fallback_op, load_pattern
 from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.tsv import EnumData, EnumMetaData
@@ -255,8 +260,13 @@ def generate_pattern_inputs(
     timeout: int,
     max_failures: int,
     solver_kind: SolverKind,
+    enforce_abs_op_constraint: bool = False,
 ) -> tuple[EnumData, dict[int, int]]:
     dag = load_pattern(path)
+    if enforce_abs_op_constraint:
+        enforce_abs_op_constraint = (
+            get_helper_funcs(path, domain).abs_op_constraint_func is not None
+        )
     generator = PatternInputGenerator(
         dag=dag,
         domain=domain,
@@ -287,6 +297,18 @@ def generate_pattern_inputs(
                 ideal = str(row[-1])
 
                 if arg_values in seen_args:
+                    failed_attempts_since_accept += 1
+                    if failed_attempts_since_accept >= max_failures:
+                        raise ValueError(
+                            f"Failed to add a new row for bw={bw} after {max_failures} "
+                            "consecutive rejected attempts due to duplicates or timeouts."
+                        )
+                    continue
+
+                if enforce_abs_op_constraint and not check_abs_op_constraint(
+                    path, domain, bw, arg_values, timeout, solver_kind
+                ):
+                    seen_args.add(arg_values)
                     failed_attempts_since_accept += 1
                     if failed_attempts_since_accept >= max_failures:
                         raise ValueError(
@@ -332,6 +354,19 @@ def generate_pattern_inputs(
                                     "consecutive rejected attempts due to duplicates or timeouts."
                                 )
                             continue
+
+                        if enforce_abs_op_constraint and not check_abs_op_constraint(
+                            path, domain, bw, arg_values, timeout, solver_kind
+                        ):
+                            seen_args.add(arg_values)
+                            failed_attempts_since_accept += 1
+                            if failed_attempts_since_accept >= max_failures:
+                                raise ValueError(
+                                    f"Failed to add a new row for bw={bw} after {max_failures} "
+                                    "consecutive rejected attempts due to duplicates or timeouts."
+                                )
+                            continue
+
                         batch_rows.append((row, arg_values, weight))
                         tasks.append(
                             RowTask(
@@ -393,6 +428,19 @@ def generate_pattern_inputs(
                         "consecutive rejected attempts due to duplicates or timeouts."
                     )
                 continue
+
+            if enforce_abs_op_constraint and not check_abs_op_constraint(
+                path, domain, bw, key, timeout, solver_kind
+            ):
+                seen_args.add(key)
+                failed_attempts_since_accept += 1
+                if failed_attempts_since_accept >= max_failures:
+                    raise ValueError(
+                        f"Failed to add a new row for bw={bw} after {max_failures} "
+                        "consecutive rejected attempts due to duplicates or timeouts."
+                    )
+                continue
+
             bw_rows.append((*row, weight))
             seen_args.add(key)
             failed_attempts_since_accept = 0
