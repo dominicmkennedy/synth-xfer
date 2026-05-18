@@ -102,13 +102,19 @@ def _get_eval_fn(
 
 def _get_eval_pattern_exact_fn(
     to_eval: ToEval,
-) -> Callable[[ToEval, list[float], str, int], tuple[float, float]]:
+) -> Callable[
+    [ToEval, list[float], str, int],
+    tuple[float, float, float, float, float, float],
+]:
     def _eval_engine_name(to_eval: ToEval) -> str:
         suffix = to_eval.__class__.__name__.lower()[6:]
         return f"eval_pattern_exact_{suffix}"
 
     return cast(
-        Callable[[ToEval, list[float], str, int], tuple[float, float]],
+        Callable[
+            [ToEval, list[float], str, int],
+            tuple[float, float, float, float, float, float],
+        ],
         _get_ee_fn_dyn(_eval_engine_name(to_eval)),
     )
 

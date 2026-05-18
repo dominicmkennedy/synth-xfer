@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, cast
 
 import pandas as pd
 from xdsl.dialects.builtin import ModuleOp, StringAttr, SymbolRefAttr
@@ -267,10 +267,10 @@ def enumdata_to_eval_inputs(data: EnumData) -> dict[int, ToEval]:
 def enumdata_to_eval_input(data: EnumData, bw: int) -> ToEval:
     # Parse only the requested bw so unsupported bws in the TSV are never
     # looked up in the eval engine (the plural variant parses every bw group).
-    rows = data.enumdata[data.enumdata["bw"] == bw]
+    rows = cast(pd.DataFrame, data.enumdata[data.enumdata["bw"] == bw])
     return parse_eval_df(rows, data.metadata.domain, data.metadata.arity, bw)
 
 
 def enumdata_to_run_input(data: EnumData, bw: int) -> ArgsVec:
-    rows = data.enumdata[data.enumdata["bw"] == bw]
+    rows = cast(pd.DataFrame, data.enumdata[data.enumdata["bw"] == bw])
     return parse_enum_df(rows, data.metadata.domain, data.metadata.arity, bw)
