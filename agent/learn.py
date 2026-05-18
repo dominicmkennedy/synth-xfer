@@ -26,6 +26,7 @@ from .util import (
     load_initial_library,
     save_file,
     summarize_token_usage,
+    validate_library_functions,
 )
 
 
@@ -324,10 +325,9 @@ def run_library_learn_task(
         summary = summarize_token_usage(run_result)
         print(summary)
 
+    validated = validate_library_functions(llm_output.functions)
     existing_names = {f.function_name for f in previous_library.functions}
-    new_functions = [
-        f for f in llm_output.functions if f.function_name not in existing_names
-    ]
+    new_functions = [f for f in validated if f.function_name not in existing_names]
     merged = LibraryState(functions=previous_library.functions + new_functions)
 
     lib_dir = output_dir / f"library{version}"

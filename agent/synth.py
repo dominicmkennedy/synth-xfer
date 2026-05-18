@@ -322,16 +322,16 @@ class SynthesisAgent:
             )
 
             round_tag = f"r{self._current_round}"
-            call_tag = f"{self._eval_call_idx:03d}"
+            call_tag = f"{self._eval_call_idx}"
             self._eval_call_idx += 1
             op_output_dir = get_op_output_dir(Path(self._args.output), task.op_name)
             _ = save_file(
                 transformer_mlir,
                 op_output_dir,
-                f"xfer_{round_tag}_{task.op_name}_{call_tag}.mlir",
+                f"{round_tag}_{task.op_name}_{call_tag}_xfer.mlir",
             )
             _ = save_file(
-                summary, op_output_dir, f"eval_{round_tag}_{task.op_name}_{call_tag}.txt"
+                summary, op_output_dir, f"{round_tag}_{task.op_name}_{call_tag}_eval.txt"
             )
             if eval_result and eval_result.is_sound():
                 self._soln_iters.append(transformer_mlir)
@@ -430,7 +430,7 @@ async def run_single_synthesis_task(
     transformer_file = save_file(
         soln_iters[-1],
         op_output_dir,
-        f"xfer_r{round_num}_{synth_agent._task.op_name}.mlir",
+        f"r{round_num}_{synth_agent._task.op_name}_xfer.mlir",
     )
     print(f"{tag} Transformer: {transformer_file}")
 
@@ -453,7 +453,7 @@ async def run_single_synthesis_task(
     save_file(
         f"synthesis_time: {synthesis_time:.2f}s\neval_time: {eval_time:.2f}s\n\n{eval_summary}",
         op_output_dir,
-        f"eval_r{round_num}_{synth_agent._task.op_name}.txt",
+        f"r{round_num}_{synth_agent._task.op_name}_eval.txt",
     )
 
     verify_summary, problems = verify_transformer(

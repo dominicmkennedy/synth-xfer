@@ -7,6 +7,7 @@ import re
 
 from pydantic import BaseModel
 from xdsl.dialects.func import FuncOp
+from xdsl.utils.exceptions import ParseError
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import enum, eval_transfer_func
@@ -92,6 +93,21 @@ class LibraryState(BaseModel):
             "  " + line if line.strip() else "" for line in body.splitlines()
         )
         return f"builtin.module {{\n{indented}\n}}"
+
+
+def validate_library_functions(
+    funcs: list[LibraryFunction],
+) -> list[LibraryFunction]:
+    """Drop functions whose source fails to parse as a func.func."""
+    valid: list[LibraryFunction] = []
+    for f in funcs:
+        try:
+            parse_mlir_func(f.source)
+        except (ParseError, ValueError) as e:
+            print(f"[LIBRARY] Dropping invalid function {f.function_name!r}: {e}")
+            continue
+        valid.append(f)
+    return valid
 
 
 @dataclass

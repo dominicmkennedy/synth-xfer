@@ -134,7 +134,7 @@ def run_library_learning_loop(
         try:
             final_solution = agent.solution_set.build_final_solution()
             op_output_dir = get_op_output_dir(output_dir, op_name)
-            final_solution_path = op_output_dir / f"final_solution_{op_name}.mlir"
+            final_solution_path = op_output_dir / "solution.mlir"
             final_solution_path.write_text(final_solution)
             print(f"[{op_name.upper()}] Final solution: {final_solution_path}")
         except Exception as e:

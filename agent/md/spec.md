@@ -139,7 +139,16 @@ Examples:
 %lhsMin = func.call @getMinValue(%lhs) : (!transfer.abs_value<[!transfer.integer, !transfer.integer]>) -> !transfer.integer
 ```
 
-## 7. Logical vs Bitwise
+## 7. `func.return`
+
+Result types after `:` are a bare, comma-separated list — no parentheses. Examples:
+
+```mlir
+func.return %r : !transfer.integer
+func.return %a, %b, %c : i1, i1, i1
+```
+
+## 8. Logical vs Bitwise
 
 - Use `arith.andi` / `arith.ori` / `arith.xori` for boolean logical composition (the `i1` conditions).
 - Use `transfer.and` / `transfer.or` / `transfer.xor` for bitwise operations on `!transfer.integer` values.
