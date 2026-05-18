@@ -93,6 +93,7 @@ class HelperFuncs:
     instance_constraint_func: FuncOp
     domain_constraint_func: FuncOp
     op_constraint_func: FuncOp | None
+    abs_op_constraint_func: FuncOp | None
     get_top_func: FuncOp
     transfer_func: FuncOp
     meet_func: FuncOp
@@ -105,6 +106,7 @@ def get_helper_funcs(p: Path, d: AbstractDomain) -> HelperFuncs:
     assert "concrete_op" in fns
     crt_func = fns["concrete_op"]
     op_con_fn = fns.get("op_constraint", None)
+    abs_op_con_fn = fns.get("abs_op_constraint", None)
 
     assert len(crt_func.function_type.outputs.data) == 1
 
@@ -143,6 +145,7 @@ def get_helper_funcs(p: Path, d: AbstractDomain) -> HelperFuncs:
         instance_constraint_func=instance_constraint,
         domain_constraint_func=constraint,
         op_constraint_func=op_con_fn,
+        abs_op_constraint_func=abs_op_con_fn,
         get_top_func=top,
         transfer_func=xfer_fn,
         meet_func=meet,
