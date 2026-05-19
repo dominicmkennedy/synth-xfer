@@ -87,11 +87,22 @@ public:
       : composite_xfer_(std::move(composite)),
         pattern_(PatternTy::parse(pattern)) {}
 
-  [[nodiscard]] std::pair<double, double>
+  // Returns (llvm_seq_sound%, composite_sound%, llvm_seq_exact%,
+  // composite_exact%, llvm_seq_dist, composite_dist). "Sound" means the result
+  // over-approximates the optimal (isSuperset of best); "exact" means it equals
+  // the optimal; "dist" is the weighted-mean imprecision dist(result, best) on
+  // a [0,1] norm scale (mirrors the full Eval path; dist() asserts on
+  // incomparable elements, which sound xfers never produce).
+  [[nodiscard]]
+  std::tuple<double, double, double, double, double, double>
   eval_pattern_exact(const std::vector<ExactRow> &rows) const {
     long double total_weight = 0.0L;
+    long double llvm_seq_sound_weight = 0.0L;
+    long double composite_sound_weight = 0.0L;
     long double llvm_seq_correct_weight = 0.0L;
     long double composite_correct_weight = 0.0L;
+    long double llvm_seq_dist_weight = 0.0L;
+    long double composite_dist_weight = 0.0L;
 
     for (const auto &row : rows) {
       const long double inv_weight =
@@ -101,19 +112,34 @@ public:
       const auto composite_result = run_fn_ptr(composite_xfer_, row.args);
       const auto llvm_seq_result = run_llvm_pattern(pattern_, row.args);
 
+      if (isSuperset(llvm_seq_result, row.best))
+        llvm_seq_sound_weight += inv_weight;
+      if (isSuperset(composite_result, row.best))
+        composite_sound_weight += inv_weight;
       if (llvm_seq_result == row.best)
         llvm_seq_correct_weight += inv_weight;
       if (composite_result == row.best)
         composite_correct_weight += inv_weight;
+
+      llvm_seq_dist_weight +=
+          static_cast<long double>(dist(llvm_seq_result, row.best)) *
+          inv_weight;
+      composite_dist_weight +=
+          static_cast<long double>(dist(composite_result, row.best)) *
+          inv_weight;
     }
 
     if (total_weight == 0.0L) {
-      return {0.0, 0.0};
+      return {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
     }
 
     return {
+        static_cast<double>(100.0L * llvm_seq_sound_weight / total_weight),
+        static_cast<double>(100.0L * composite_sound_weight / total_weight),
         static_cast<double>(100.0L * llvm_seq_correct_weight / total_weight),
         static_cast<double>(100.0L * composite_correct_weight / total_weight),
+        static_cast<double>(llvm_seq_dist_weight / total_weight),
+        static_cast<double>(composite_dist_weight / total_weight),
     };
   }
 

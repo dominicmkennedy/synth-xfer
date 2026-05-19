@@ -19,8 +19,8 @@ from synth_xfer._util.parse_mlir import (
 )
 from synth_xfer._util.tsv import EnumData, resolve_dataset_op_path
 from synth_xfer._util.xfer_data import (
-    enumdata_to_eval_inputs,
-    enumdata_to_run_inputs,
+    enumdata_to_eval_input,
+    enumdata_to_run_input,
     resolve_xfer_name,
 )
 
@@ -376,49 +376,59 @@ def eval_pattern(
     composite_xfer: Path,
     xfer_name: str | None,
     data: EnumData,
-    exact_bw: int,
-    norm_bw: int,
-) -> tuple[float, float, float, float]:
+    bw: int,
+) -> tuple[float, float, float, float, float, float, float, float]:
     comp_mod = parse_mlir_mod(composite_xfer)
     comp_xfer_name = resolve_xfer_name(get_fns(comp_mod), xfer_name)
 
-    if exact_bw not in [x[0] for x in data.metadata.mbw + data.metadata.hbw]:
-        raise ValueError(f"Exact BW {exact_bw} not in Enum TSV")
-    if norm_bw not in [x[0] for x in data.metadata.mbw + data.metadata.hbw]:
-        raise ValueError(f"Norm BW {norm_bw} not in Enum TSV")
+    if bw not in [x[0] for x in data.metadata.mbw + data.metadata.hbw]:
+        raise ValueError(f"BW {bw} not in Enum TSV")
 
-    exact_to_eval = enumdata_to_eval_inputs(data)[exact_bw]
-    norm_to_eval = enumdata_to_run_inputs(data)[norm_bw]
+    exact_to_eval = enumdata_to_eval_input(data, bw)
+    norm_to_eval = enumdata_to_run_input(data, bw)
 
-    exact_weights = (
-        data.enumdata[data.enumdata["bw"] == exact_bw]["weight"].astype(float).tolist()
-    )
-    norm_weights = (
-        data.enumdata[data.enumdata["bw"] == norm_bw]["weight"].astype(float).tolist()
-    )
+    rows = data.enumdata[data.enumdata["bw"] == bw]
+    if "weight" not in data.enumdata.columns:
+        # Uniform weighting: a constant weight makes the eval score a plain
+        # unweighted average (the score normalizes by the weight sum).
+        weights = [1.0] * len(rows)
+    else:
+        weights = rows["weight"].astype(float).tolist()
 
     helpers = get_helper_funcs(
         resolve_dataset_op_path(data.metadata.op), data.metadata.domain
     )
-    lowerer = LowerToLLVM(sorted({exact_bw, norm_bw}))
+    lowerer = LowerToLLVM([bw])
     lowerer.add_fn(helpers.meet_func)
     lowerer.add_fn(helpers.get_top_func)
     lowerer.add_mod(comp_mod, [comp_xfer_name])
 
     with Jit() as jit:
         jit.add_mod(lowerer)
-        seq_exact, comp_exact = eval_pattern_exact(
-            exact_to_eval,
-            exact_weights,
-            pattern_str,
-            jit.get_fn_ptr(f"{comp_xfer_name}_{exact_bw}_shim"),
+        shim_ptr = jit.get_fn_ptr(f"{comp_xfer_name}_{bw}_shim")
+        seq_sound, comp_sound, seq_exact, comp_exact, seq_dist, comp_dist = (
+            eval_pattern_exact(
+                exact_to_eval,
+                weights,
+                pattern_str,
+                shim_ptr,
+            )
         )
 
         seq_norm, comp_norm = eval_pattern_norm(
             norm_to_eval,
-            norm_weights,
+            weights,
             pattern_str,
-            jit.get_fn_ptr(f"{comp_xfer_name}_{norm_bw}_shim"),
+            shim_ptr,
         )
 
-    return seq_exact, comp_exact, seq_norm, comp_norm
+    return (
+        seq_sound,
+        comp_sound,
+        seq_exact,
+        comp_exact,
+        seq_dist,
+        comp_dist,
+        seq_norm,
+        comp_norm,
+    )

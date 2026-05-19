@@ -69,10 +69,6 @@ using EnumHighThunk = py::object (*)(std::uintptr_t,
 using EvalThunk = Results (*)(py::handle, const std::vector<std::uintptr_t> &,
                               const std::vector<std::uintptr_t> &, unsigned int,
                               unsigned int);
-using EvalPatternThunk = std::pair<double, double> (*)(py::handle,
-                                                       const std::vector<double> &,
-                                                       const std::string &,
-                                                       std::uintptr_t);
 using RunThunk = py::object (*)(py::handle, std::uintptr_t);
 using LenThunk = std::size_t (*)(py::handle);
 using GetItemThunk = py::object (*)(py::handle, std::size_t);
@@ -81,8 +77,14 @@ using IterThunk = py::object (*)(py::handle);
 void bind_enum_funcs(py::module_ &m, const std::string &fn_name,
                      EnumLowThunk low, EnumMidThunk mid, EnumHighThunk high);
 void bind_eval_func(py::module_ &m, const std::string &fn_name, EvalThunk eval);
+// Templated on the thunk so exact (4-tuple) and norm (pair) returns can share
+// one binder; pybind11 deduces the Python return type from the callable.
+template <typename Thunk>
 void bind_eval_pattern_func(py::module_ &m, const std::string &fn_name,
-                            EvalPatternThunk eval);
+                            Thunk eval) {
+  m.def(fn_name.c_str(), eval, py::arg("rows"), py::arg("weights"),
+        py::arg("pattern"), py::arg("composite"));
+}
 void bind_run_func(py::module_ &m, const std::string &fn_name, RunThunk run);
 template <typename PyClass>
 void bind_sequence_protocol(PyClass &cls, LenThunk len, GetItemThunk getitem,
@@ -301,8 +303,8 @@ void register_eval_pattern_domain(py::module_ &m) {
   bind_eval_pattern_func(
       m, exact_fn_name,
       +[](py::handle to_eval, const std::vector<double> &weights,
-          const std::string &pattern,
-          std::uintptr_t composite_addr) -> std::pair<double, double> {
+          const std::string &pattern, std::uintptr_t composite_addr)
+          -> std::tuple<double, double, double, double, double, double> {
         const EvalVec &v = py::cast<const EvalVec &>(to_eval);
         auto exact_rows = make_exact_pattern_rows<EvalPatternT>(v, weights);
         py::gil_scoped_release release;
