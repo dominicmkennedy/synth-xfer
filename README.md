@@ -330,14 +330,16 @@ pattern generate-input             \
 | `--composite-xfer <Path>` | Composite MLIR transformer to compare against.                |
 | `--xfer-name <str>`       | Optional function name inside the composite MLIR file.        |
 | `-i, --input <Path>`      | Enum TSV input data, typically from `pattern generate-input`. |
-| `--exact-bw <int>`        | Bitwidth used for exact pattern eval.                         |
-| `--norm-bw <int>`         | Bitwidth used for norm pattern eval.                          |
+| `--bw <int>`              | Bitwidth used for the eval (default: 8).                       |
+
+Prints a table comparing the LLVM seq pattern against the composite transformer at the chosen bitwidth.
 
 Example:
 ```bash
 pattern eval                             \
   --composite-xfer composite_008.mlir    \
   -i pattern_008_enum_data.tsv           \
+  --bw 8
 ```
 
 ## Important CLI Options for `simplifier`

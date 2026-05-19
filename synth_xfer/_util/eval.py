@@ -102,13 +102,19 @@ def _get_eval_fn(
 
 def _get_eval_pattern_exact_fn(
     to_eval: ToEval,
-) -> Callable[[ToEval, list[float], str, int], tuple[float, float]]:
+) -> Callable[
+    [ToEval, list[float], str, int],
+    tuple[float, float, float, float, float, float],
+]:
     def _eval_engine_name(to_eval: ToEval) -> str:
         suffix = to_eval.__class__.__name__.lower()[6:]
         return f"eval_pattern_exact_{suffix}"
 
     return cast(
-        Callable[[ToEval, list[float], str, int], tuple[float, float]],
+        Callable[
+            [ToEval, list[float], str, int],
+            tuple[float, float, float, float, float, float],
+        ],
         _get_ee_fn_dyn(_eval_engine_name(to_eval)),
     )
 
@@ -304,7 +310,9 @@ def parse_to_eval_inputs(
 
 def eval_pattern_exact(
     to_eval: ToEval, weights: list[float], pattern: str, composite: FnPtr
-) -> tuple[float, float]:
+) -> tuple[float, float, float, float, float, float]:
+    # (llvm_seq_sound%, composite_sound%, llvm_seq_exact%, composite_exact%,
+    #  llvm_seq_dist, composite_dist)
     return _get_eval_pattern_exact_fn(to_eval)(to_eval, weights, pattern, composite.addr)
 
 
