@@ -2,4 +2,5 @@ build/
 venv/
 __pycache__/
 .cache/
+.env
 outputs/

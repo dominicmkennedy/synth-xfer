@@ -23,6 +23,12 @@ dependencies = [
   "xdsl>=0.48.3",
   "xdsl-smt @ https://github.com/dominicmkennedy/xdsl-smt/archive/dbdbc06.tar.gz",
   "z3-solver==4.15.1.0",
+  "llvmlite==0.44.0",
+  "pandas>=2.3.3",
+  "egglog>=1.0.0",
+  "cloudpickle>=3.1.2",
+  "PyYAML>=6.0.3",
+  "pydantic-ai-slim[openai]",
 ]
 
 [project.optional-dependencies]
@@ -42,6 +48,10 @@ lower-to-llvm = "synth_xfer.cli.lower_to_llvm:main"
 simplifier = "synth_xfer.cli.simplifier:main"
 enum = "synth_xfer.cli.enum:main"
 max-precise = "synth_xfer.cli.max_precise:main"
+agent-synth = "agent.main:main"
+agent-learn = "agent.learn:main"
+stitch-match = "agent.stitch.match:main"
+stitch-search = "agent.stitch.main:main"
 pattern = "synth_xfer.cli.pattern:main"
 format-mlir = "synth_xfer.cli.format_mlir:main"
 
@@ -80,6 +90,7 @@ SYNTH_XFER_WIDTHS = [
 [tool.ruff]
 line-length = 90
 target-version = "py313"
+exclude = ["results/"]
 lint.extend-select = ["I"]
 lint.ignore = ["E731"]
 
@@ -91,6 +102,6 @@ force-sort-within-sections = true
 [tool.pyright]
 pythonVersion = "3.13"
 typeCheckingMode = "standard"
-include = ["synth_xfer", "tests"]
+include = ["synth_xfer", "tests", "agent"]
 reportMissingImports = "error"
 reportUnnecessaryTypeIgnoreComment = "warning"
