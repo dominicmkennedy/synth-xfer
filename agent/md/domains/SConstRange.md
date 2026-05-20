@@ -6,4 +6,4 @@ Top is `[-2^(bw-1), 2^(bw-1) - 1]` (the full signed range).
 Meet is interval intersection: `(smax(lo₁, lo₂), smin(hi₁, hi₂))` using **signed** max/min.
 
 ## BOTTOM_REPR
-`lo = 0, hi = -1` (canonical empty interval, since `lo > hi` signed)
+`lo = 2^(bw-1) - 1, hi = -2^(bw-1)` (canonical empty interval, since `lo > hi` signed)

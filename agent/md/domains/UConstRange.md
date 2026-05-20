@@ -6,4 +6,4 @@ Top is `[0, 2^bw - 1]` (the full unsigned range).
 Meet is interval intersection: `(max(lo₁, lo₂), min(hi₁, hi₂))` using **unsigned** max/min.
 
 ## BOTTOM_REPR
-`lo = 1, hi = 0` (canonical empty interval, since `lo > hi` unsigned)
+`lo = 2^bw - 1, hi = 0` (canonical empty interval, since `lo > hi` unsigned)
