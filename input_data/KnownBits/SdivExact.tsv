@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/SdivExact.mlir
+# op: SdivExact
 # arity: 2
 # seed: null
 # lbw: []

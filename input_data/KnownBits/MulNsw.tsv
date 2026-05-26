@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/MulNsw.mlir
+# op: MulNsw
 # arity: 2
 # seed: null
 # lbw: []

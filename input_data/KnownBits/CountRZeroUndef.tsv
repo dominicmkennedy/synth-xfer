@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/CountRZeroUndef.mlir
+# op: CountRZeroUndef
 # arity: 1
 # seed: null
 # lbw: []

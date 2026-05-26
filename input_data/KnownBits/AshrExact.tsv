@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/AshrExact.mlir
+# op: AshrExact
 # arity: 2
 # seed: null
 # lbw: []

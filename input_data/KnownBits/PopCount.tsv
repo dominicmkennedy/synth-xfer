@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/PopCount.mlir
+# op: PopCount
 # arity: 1
 # seed: null
 # lbw: []

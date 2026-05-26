@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/SsubSat.mlir
+# op: SsubSat
 # arity: 2
 # seed: null
 # lbw: []

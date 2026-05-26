@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/Fshl.mlir
+# op: Fshl
 # arity: 3
 # seed: null
 # lbw: []

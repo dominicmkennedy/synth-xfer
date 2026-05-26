@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/Udiv.mlir
+# op: Udiv
 # arity: 2
 # seed: null
 # lbw: []

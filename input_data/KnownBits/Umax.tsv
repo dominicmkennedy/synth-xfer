@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/Umax.mlir
+# op: Umax
 # arity: 2
 # seed: null
 # lbw: []
