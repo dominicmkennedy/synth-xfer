@@ -442,7 +442,7 @@ class _LowerFuncToLLVM:
         res_name = self.result_name(op)
         lhs, rhs = self.operands(op)
 
-        ty = lower_type(op.result_types[0], self.bw)
+        ty = lower_type(op.operands[0].type, self.bw)
         assert isinstance(ty, ir.IntType)
 
         bw_const = ir.Constant(ty, ty.width)
