@@ -1,7 +1,5 @@
 from dataclasses import dataclass, field
-from functools import lru_cache
 from io import StringIO
-from pathlib import Path
 import re
 
 from xdsl.context import Context
@@ -28,7 +26,8 @@ from xdsl_smt.traits.smt_printer import print_to_smtlib
 from xdsl_smt.utils.transfer_function_util import get_argument_instances_with_effect
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.parse_mlir import get_helper_funcs
+from synth_xfer._util.parse_mlir import HelperFuncs
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.smt_solver import IncrementalSolver, SolverKind, make_solver
 from synth_xfer._util.verifier import lower_to_smt_module
 
@@ -392,7 +391,7 @@ class RowResult:
 
 @dataclass(frozen=True)
 class RowProcessor:
-    op_path: Path
+    pattern: PatternDag
     domain: AbstractDomain
     timeout: int
     solver_kind: SolverKind
@@ -402,7 +401,7 @@ class RowProcessor:
             return RowResult(
                 index=task.index,
                 ideal=compute_max_precise(
-                    self.op_path,
+                    self.pattern,
                     self.domain,
                     task.bw,
                     task.args,
@@ -415,7 +414,7 @@ class RowProcessor:
 
 
 def compute_max_precise(
-    op_path: Path,
+    pattern: PatternDag,
     domain: AbstractDomain,
     bw: int,
     args: tuple[str, ...],
@@ -424,11 +423,16 @@ def compute_max_precise(
 ) -> str:
     ctx = _get_ctx()
 
-    hlprs = get_helper_funcs(op_path, domain)
+    hlprs = HelperFuncs(pattern, domain)
     parsed_args = [_get_abst_val(arg, domain, bw) for arg in args]
     if any(arg is None for arg in parsed_args):
         return "(bottom)"
     abst_arg_values = [arg for arg in parsed_args if arg is not None]
+
+    if len(hlprs.crt_func.args) != len(args):
+        raise ValueError(
+            f"arity of expression ({len(hlprs.crt_func.args)}) doesn't match number of args provided ({len(args)})"
+        )
 
     fns = [hlprs.instance_constraint_func, hlprs.crt_func, hlprs.op_constraint_func]
     lower_to_smt_module(m := ModuleOp([x.clone() for x in fns if x is not None]), bw, ctx)
@@ -500,9 +504,8 @@ class AbsOpConstraintQueryBuilder:
         return ModuleOp(ops + [const_i1, pair_op, pair_res_op, call_op, eq_op, assert_op])
 
 
-@lru_cache(maxsize=None)
 def check_abs_op_constraint(
-    op_path: Path,
+    pattern: PatternDag,
     domain: AbstractDomain,
     bw: int,
     args: tuple[str, ...],
@@ -512,7 +515,7 @@ def check_abs_op_constraint(
     """Return True if `args` satisfy the pattern's abs_op_constraint (or the
     pattern has none). Used as a rejection-sampling filter, so anything
     uncertain (malformed args, bottom, solver timeout) returns False."""
-    hlprs = get_helper_funcs(op_path, domain)
+    hlprs = HelperFuncs(pattern, domain)
     if hlprs.abs_op_constraint_func is None:
         return True
 

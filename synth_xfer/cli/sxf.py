@@ -16,7 +16,8 @@ from synth_xfer._util.log import get_logger, write_log_file
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.mcmc_sampler import setup_mcmc
 from synth_xfer._util.one_iter import synthesize_one_iteration
-from synth_xfer._util.parse_mlir import HelperFuncs, get_helper_funcs, top_as_xfer
+from synth_xfer._util.parse_mlir import HelperFuncs, top_as_xfer
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.random import Random, Sampler
 from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.solution_set import EvalFn, SolutionSet
@@ -96,7 +97,7 @@ def run(
     condition_length: int,
     num_abd_procs: int,
     seed: int | None,
-    transformer_file: Path,
+    op: PatternDag,
     dsl_ops_path: Path | None,
     weighted_dsl: bool,
     num_unsound_candidates: int,
@@ -112,8 +113,7 @@ def run(
     random = Random(seed)
     seed = random.randint(0, 2**32 - 1) if seed is None else seed
 
-    helper_funcs = get_helper_funcs(transformer_file, domain)
-
+    helper_funcs = HelperFuncs(op, domain)
     context = _setup_context(random, False, dsl_ops)
     context_weighted = _setup_context(random, False, dsl_ops)
     context_cond = _setup_context(random, True, dsl_ops)
@@ -244,7 +244,7 @@ def run(
 def _build_arg_parser() -> Namespace:
     p = ArgumentParser(prog="sxf", formatter_class=ArgumentDefaultsHelpFormatter)
 
-    p.add_argument("--op", type=Path, help="path to op or pattern")
+    p.add_argument("--op", type=PatternDag, help="Concrete op or pattern")
     p.add_argument(
         "-d",
         "--domain",
@@ -311,7 +311,7 @@ def _build_arg_parser() -> Namespace:
         "--lbw",
         nargs="*",
         type=int,
-        default=[4],
+        default=[],
         help="Low-bitwidths to evaluate exhaustively",
     )
     p.add_argument(
@@ -390,7 +390,7 @@ def _validate_args(args: Namespace) -> None:
             raise ValueError(f"{', '.join(invalid_flags)} cannot be used with --input")
 
         invalid_bw_flags: list[str] = []
-        if args.lbw != [4]:
+        if args.lbw != []:
             invalid_bw_flags.append("--lbw")
         if args.mbw != []:
             invalid_bw_flags.append("--mbw")
@@ -412,7 +412,7 @@ def _validate_args(args: Namespace) -> None:
         invalid_flags: list[str] = []
         if args.domain is not None:
             invalid_flags.append("--domain")
-        if args.lbw != [4]:
+        if args.lbw != []:
             invalid_flags.append("--lbw")
         if args.mbw != []:
             invalid_flags.append("--mbw")

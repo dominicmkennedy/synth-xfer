@@ -10,17 +10,16 @@ import yaml
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.log import init_logging
-from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
-from synth_xfer._util.tsv import EnumData, resolve_dataset_op_path
+from synth_xfer._util.pattern_dsl import PatternDag
+from synth_xfer._util.tsv import EnumData
 from synth_xfer.cli.args import get_sampler
 from synth_xfer.cli.sxf import run
 
 
 @dataclass(frozen=True)
 class BenchmarkInput:
-    name: str
+    op: PatternDag
     domain: AbstractDomain
-    op_path: Path
     arity: int
     lbw: list[int]
     mbw: list[tuple[int, int]]
@@ -37,45 +36,20 @@ def _prepare_output_dir(output_dir: Path, allow_existing: bool) -> None:
             raise FileExistsError(f'Output folder "{output_dir}" already exists.')
 
 
-def _benchmark_output_folder(base_output: Path, bench: BenchmarkInput) -> Path:
-    return base_output / f"{bench.domain}_{bench.name}"
-
-
 def _validate_unique_output_folders(
     benchmark: list[BenchmarkInput], base_output: Path
 ) -> None:
     seen: dict[Path, BenchmarkInput] = {}
     for bench in benchmark:
-        output_folder = _benchmark_output_folder(base_output, bench)
+        output_folder = base_output / f"{bench.domain}_{bench.op}"
         prev = seen.get(output_folder)
         if prev is not None:
             raise ValueError(
                 "Benchmark config produces duplicate output folder "
-                f'"{output_folder}" for {prev.domain} {prev.name} and '
-                f"{bench.domain} {bench.name}"
+                f'"{output_folder}" for {prev.domain} {prev.op} and '
+                f"{bench.domain} {bench.op}"
             )
         seen[output_folder] = bench
-
-
-def _resolve_benchmark_input(name: str) -> Path:
-    mlir_dir = Path("mlir")
-    candidates = [
-        mlir_dir / "Operations" / f"{name}.mlir",
-        mlir_dir / "Patterns" / f"{name}.mlir",
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return candidate
-    raise FileNotFoundError(
-        f"Could not find benchmark input '{name}' in mlir/Operations or mlir/Patterns"
-    )
-
-
-def _normalize_benchmark_name(value: object) -> str:
-    if isinstance(value, int):
-        value = f"{value:03d}"
-    assert isinstance(value, str)
-    return value
 
 
 def _parse_int_tuples(value: object, width: int) -> list[tuple[int, ...]]:
@@ -92,7 +66,8 @@ def _load_arity_config(
 ) -> tuple[list[int], list[tuple[int, int]], list[tuple[int, int, int]]]:
     assert isinstance(arity_config, dict)
     arity_cfg = arity_config.get(str(arity), arity_config.get(arity))
-    assert isinstance(arity_cfg, dict)
+    if not isinstance(arity_cfg, dict):
+        raise ValueError(f"No arity config given for {arity}-ary functions")
 
     lbw = [int(x) for x in arity_cfg.get("lbw", [])]
     mbw_raw = _parse_int_tuples(arity_cfg.get("mbw", []), width=2)
@@ -114,20 +89,17 @@ def _load_benchmark(config_path: Path) -> list[BenchmarkInput]:
         domain = AbstractDomain[domain_name]
         assert isinstance(domain_cfg, dict)
         patterns = domain_cfg.get("patterns", [])
+        patterns = [PatternDag(x) for x in patterns]
         assert isinstance(patterns, list)
         arity_cfg = domain_cfg["arity"]
 
         for pattern_spec in patterns:
-            pattern_name = _normalize_benchmark_name(pattern_spec)
-            op_path = _resolve_benchmark_input(pattern_name)
-            arity = len(get_fns(parse_mlir_mod(op_path))["concrete_op"].args)
-            lbw, mbw, hbw = _load_arity_config(arity_cfg, arity=arity)
+            lbw, mbw, hbw = _load_arity_config(arity_cfg, arity=pattern_spec.num_args)
             benchmark.append(
                 BenchmarkInput(
-                    name=pattern_name,
+                    op=pattern_spec,
                     domain=domain,
-                    op_path=op_path,
-                    arity=arity,
+                    arity=pattern_spec.num_args,
                     lbw=lbw,
                     mbw=mbw,
                     hbw=hbw,
@@ -145,8 +117,7 @@ def _execute_job(
     eval_data: EnumData | None = None,
 ) -> dict[str, Any]:
     sampler = get_sampler(args)
-
-    print(f"Running {bench.domain} {bench.name}")
+    print(f"Running {bench.domain} {bench.op}")
 
     try:
         _prepare_output_dir(output_folder, allow_existing=allow_existing)
@@ -156,8 +127,8 @@ def _execute_job(
             len(k)
             for k in [*vars(args), "transfer_functions", "arity", "lbw", "mbw", "hbw"]
         )
-        logger.config(f"{'transfer_functions':<{max_len}} | {bench.op_path}")
-        logger.config(f"{'arity':<{max_len}} | {bench.arity}")
+        logger.config(f"{'transfer_functions':<{max_len}} | {bench.op}")
+        logger.config(f"{'arity':<{max_len}} | {bench.op.num_args}")
         logger.config(f"{'lbw':<{max_len}} | {bench.lbw}")
         logger.config(f"{'mbw':<{max_len}} | {bench.mbw}")
         logger.config(f"{'hbw':<{max_len}} | {bench.hbw}")
@@ -177,7 +148,7 @@ def _execute_job(
             condition_length=args.condition_length,
             num_abd_procs=args.num_abd_procs,
             seed=args.seed,
-            transformer_file=bench.op_path,
+            op=bench.op,
             dsl_ops_path=args.dsl_ops,
             weighted_dsl=args.weighted_dsl,
             num_unsound_candidates=args.num_unsound_candidates,
@@ -189,8 +160,8 @@ def _execute_job(
 
         return {
             "Domain": str(bench.domain),
-            "Function": bench.name,
-            "Arity": bench.arity,
+            "Function": str(bench.op),
+            "Arity": bench.op.num_args,
             "lbw": bench.lbw,
             "mbw": [list(item) for item in bench.mbw],
             "hbw": [list(item) for item in bench.hbw],
@@ -210,8 +181,8 @@ def _execute_job(
             e = "Top coincides with ideal transformer"
         return {
             "Domain": str(bench.domain),
-            "Function": bench.name,
-            "Arity": bench.arity,
+            "Function": str(bench.op),
+            "Arity": bench.op.num_args,
             "Success": False,
             "Termanation Error": str(e),
         }
@@ -221,14 +192,14 @@ def _execute_benchmark_job(x: tuple[BenchmarkInput, Namespace]) -> dict[str, Any
     bench, args = x
     assert args.output is not None
 
-    proc_name = f"sxf:{bench.domain} {bench.name}"
+    proc_name = f"sxf:{bench.domain} {bench.op}"
     setproctitle(proc_name)
 
     try:
         return _execute_job(
             bench,
             args,
-            _benchmark_output_folder(args.output, bench),
+            args.output / f"{bench.domain}_{bench.op}",
             allow_existing=False,
         )
     finally:
@@ -241,8 +212,7 @@ def run_single_synth(args: Namespace) -> None:
         with args.input.open("r", encoding="utf-8") as f:
             eval_data = EnumData.read_tsv(f)
         domain = eval_data.metadata.domain
-        op_path = resolve_dataset_op_path(eval_data.metadata.op)
-        arity = len(get_fns(parse_mlir_mod(op_path))["concrete_op"].args)
+        op = eval_data.metadata.op
         lbw = eval_data.metadata.lbw
         mbw = eval_data.metadata.mbw
         hbw = eval_data.metadata.hbw
@@ -250,26 +220,22 @@ def run_single_synth(args: Namespace) -> None:
         assert args.op is not None
         assert args.domain is not None
         domain = AbstractDomain[args.domain]
-        op_path = Path(args.op)
-        arity = len(get_fns(parse_mlir_mod(op_path))["concrete_op"].args)
+        op = args.op
         lbw = args.lbw
         mbw = args.mbw
         hbw = args.hbw
 
     bench = BenchmarkInput(
-        name=op_path.stem,
+        op=op,
         domain=domain,
-        op_path=op_path,
-        arity=arity,
+        arity=op.num_args,
         lbw=lbw,
         mbw=mbw,
         hbw=hbw,
     )
 
     output_folder = (
-        Path("outputs", f"{domain}_{op_path.stem}")
-        if args.output is None
-        else Path(args.output)
+        Path("outputs", f"{domain}_{op}") if args.output is None else Path(args.output)
     )
 
     ret = _execute_job(

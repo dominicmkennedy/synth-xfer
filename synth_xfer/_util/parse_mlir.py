@@ -12,6 +12,12 @@ from xdsl_smt.dialects.transfer import AbstractValueType, Transfer, TransInteger
 from xdsl_smt.passes.transfer_inline import FunctionCallInline
 
 from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.pattern_dsl import (
+    CONSTRAINT_HELPERS,
+    PatternDag,
+    lower_concrete_op,
+    lower_op_constraint,
+)
 
 _ctx = Context()
 _ctx.load_dialect(Arith)
@@ -84,6 +90,16 @@ def get_fns(mod: ModuleOp) -> dict[str, FuncOp]:
     return {x.sym_name.data: x for x in mod.ops if isinstance(x, FuncOp)}
 
 
+def lower_pattern_to_mlir(dag: PatternDag) -> ModuleOp:
+    ops: list[Operation] = [lower_concrete_op(dag)]
+    op_constraint, helper_names = lower_op_constraint(dag)
+    if op_constraint is not None:
+        ops.append(op_constraint)
+    for helper in sorted(helper_names):
+        ops.append(parse_mlir_func(CONSTRAINT_HELPERS[helper]))
+    return ModuleOp(ops)
+
+
 @dataclass
 class HelperFuncs:
     conc_ret_ty: TransIntegerType | IntegerType
@@ -98,58 +114,53 @@ class HelperFuncs:
     transfer_func: FuncOp
     meet_func: FuncOp
 
+    def __init__(self, op: PatternDag, d: AbstractDomain) -> None:
+        fns = get_fns(inline_mod(lower_pattern_to_mlir(op)))
 
-def get_helper_funcs(p: Path, d: AbstractDomain) -> HelperFuncs:
-    mod = parse_mlir_mod(p, inline=True)
-    fns = get_fns(mod)
+        assert "concrete_op" in fns
+        crt_func = fns["concrete_op"]
+        op_con_fn = fns.get("op_constraint", None)
+        abs_op_con_fn = fns.get("abs_op_constraint", None)
 
-    assert "concrete_op" in fns
-    crt_func = fns["concrete_op"]
-    op_con_fn = fns.get("op_constraint", None)
-    abs_op_con_fn = fns.get("abs_op_constraint", None)
+        assert len(crt_func.function_type.outputs.data) == 1
 
-    assert len(crt_func.function_type.outputs.data) == 1
+        def get_ty(x: Attribute):
+            assert isinstance(x, TransIntegerType) or isinstance(x, IntegerType)
+            return x
 
-    def get_ty(x: Attribute):
-        assert isinstance(x, TransIntegerType) or isinstance(x, IntegerType)
-        return x
+        def make_abst_ty(x: Attribute):
+            if d.const_bw is None:
+                return AbstractValueType([x for _ in range(d.vec_size)])
+            else:
+                return AbstractValueType(
+                    [IntegerType(d.const_bw) for _ in range(d.vec_size)]
+                )
 
-    def make_abst_ty(x: Attribute):
-        if d.const_bw is None:
-            return AbstractValueType([x for _ in range(d.vec_size)])
-        else:
-            return AbstractValueType([IntegerType(d.const_bw) for _ in range(d.vec_size)])
+        crt_ret_ty = get_ty(crt_func.function_type.outputs.data[0])
+        crt_arg_ty = tuple(get_ty(x.type) for x in crt_func.args)
 
-    crt_ret_ty = get_ty(crt_func.function_type.outputs.data[0])
-    crt_arg_ty = tuple(get_ty(x.type) for x in crt_func.args)
+        # TODO xfer fn is only ever used as a type to construct a top fn
+        xfer_ret = [make_abst_ty(crt_ret_ty)]
+        xfer_args = [make_abst_ty(x.type) for x in crt_func.args]
+        xfer_fn = FuncOp.from_region("empty_transformer", xfer_args, xfer_ret)
 
-    # TODO xfer fn is only ever used as a type to construct a top fn
-    xfer_ret = [make_abst_ty(crt_ret_ty)]
-    xfer_args = [make_abst_ty(x.type) for x in crt_func.args]
-    xfer_fn = FuncOp.from_region("empty_transformer", xfer_args, xfer_ret)
+        base_path = Path(__file__).parent.parent.parent / "mlir" / str(d)
+        top = parse_mlir_func(base_path / "top.mlir")
+        meet = parse_mlir_func(base_path / "meet.mlir")
+        constraint = parse_mlir_func(base_path / "get_constraint.mlir")
+        instance_constraint = parse_mlir_func(base_path / "get_instance_constraint.mlir")
 
-    def get_domain_fns(fp: str) -> FuncOp:
-        dp = p.resolve().parent.parent.joinpath(str(d), fp)
-        return parse_mlir_func(dp)
-
-    top = get_domain_fns("top.mlir")
-    meet = get_domain_fns("meet.mlir")
-    constraint = get_domain_fns("get_constraint.mlir")
-    instance_constraint = get_domain_fns("get_instance_constraint.mlir")
-
-    return HelperFuncs(
-        conc_ret_ty=crt_ret_ty,
-        conc_arg_ty=crt_arg_ty,
-        domain=d,
-        crt_func=crt_func,
-        instance_constraint_func=instance_constraint,
-        domain_constraint_func=constraint,
-        op_constraint_func=op_con_fn,
-        abs_op_constraint_func=abs_op_con_fn,
-        get_top_func=top,
-        transfer_func=xfer_fn,
-        meet_func=meet,
-    )
+        self.conc_ret_ty = crt_ret_ty
+        self.conc_arg_ty = crt_arg_ty
+        self.domain = d
+        self.crt_func = crt_func
+        self.instance_constraint_func = instance_constraint
+        self.domain_constraint_func = constraint
+        self.op_constraint_func = op_con_fn
+        self.abs_op_constraint_func = abs_op_con_fn
+        self.get_top_func = top
+        self.transfer_func = xfer_fn
+        self.meet_func = meet
 
 
 def top_as_xfer(transfer: FuncOp) -> FuncOp:

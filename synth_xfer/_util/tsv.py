@@ -9,14 +9,15 @@ import yaml
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import enum
-from synth_xfer._util.parse_mlir import get_helper_funcs
+from synth_xfer._util.parse_mlir import HelperFuncs
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.random import Random, Sampler
 
 
 @dataclass(frozen=True)
 class EnumMetaData:
     domain: AbstractDomain
-    op: str
+    op: PatternDag
     arity: int
     seed: int | None
     lbw: list[int]
@@ -27,7 +28,7 @@ class EnumMetaData:
         return yaml.safe_dump(
             {
                 "domain": str(self.domain),
-                "op": self.op,
+                "op": str(self.op),
                 "arity": self.arity,
                 "seed": self.seed,
                 "lbw": self.lbw,
@@ -50,7 +51,7 @@ class EnumMetaData:
         hbw = [tuple(map(int, t)) for t in obj["hbw"]]
         return cls(
             domain=AbstractDomain[obj["domain"]],
-            op=str(obj["op"]),
+            op=PatternDag(obj["op"]),
             arity=int(obj["arity"]),
             seed=None if obj["seed"] is None else int(obj["seed"]),
             lbw=[int(a) for a in obj["lbw"]],
@@ -169,14 +170,14 @@ class EnumData:
 
 def build_enum_data(
     domain: AbstractDomain,
-    op_path: Path,
+    op: PatternDag,
     lbw: list[int],
     mbw: list[tuple[int, int]],
     hbw: list[tuple[int, int, int]],
     seed: int | None,
     sampler: Sampler,
 ) -> EnumData:
-    helpers = get_helper_funcs(op_path, domain)
+    helpers = HelperFuncs(op, domain)
     random = Random(seed)
     resolved_seed = random.randint(0, 2**32 - 1) if seed is None else seed
     arity = len(helpers.conc_arg_ty)
@@ -193,7 +194,7 @@ def build_enum_data(
 
     metadata = EnumMetaData(
         domain=domain,
-        op=str(op_path),
+        op=op,
         arity=arity,
         seed=resolved_seed,
         lbw=lbw,
@@ -202,15 +203,3 @@ def build_enum_data(
     )
 
     return EnumData(metadata, df)
-
-
-def resolve_dataset_op_path(op: str) -> Path:
-    op_input = Path(op)
-    if op_input.suffix != ".mlir":
-        raise ValueError("Dataset metadata 'op' must be a .mlir path")
-    if op_input.is_file():
-        return op_input
-    repo_path = Path(__file__).resolve().parents[2] / op_input
-    if repo_path.is_file():
-        return repo_path
-    raise FileNotFoundError(f"Could not find mlir op from dataset path: {op_input}")

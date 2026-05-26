@@ -2,6 +2,7 @@ from argparse import ArgumentParser, Namespace
 from pathlib import Path
 
 from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.tsv import build_enum_data
 from synth_xfer.cli.args import get_sampler, int_triple, int_tuple, make_sampler_parser
 
@@ -10,7 +11,7 @@ def _register_parser() -> Namespace:
     p = ArgumentParser()
 
     p.add_argument("-o", "--output", type=Path, required=True)
-    p.add_argument("--op", type=Path, help="path to concrete operation")
+    p.add_argument("--op", type=PatternDag, help="op or pattern expression")
     p.add_argument(
         "-d",
         "--domain",
@@ -50,7 +51,7 @@ def main() -> None:
     args = _register_parser()
     build_enum_data(
         domain=AbstractDomain[args.domain],
-        op_path=args.op,
+        op=args.op,
         lbw=args.lbw,
         mbw=args.mbw,
         hbw=args.hbw,
