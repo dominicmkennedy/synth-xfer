@@ -11,8 +11,9 @@ from synth_xfer._util.eval import eval_transfer_func
 from synth_xfer._util.eval_result import PerBitRes
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
-from synth_xfer._util.parse_mlir import get_helper_funcs, top_as_xfer
-from synth_xfer._util.tsv import EnumData, build_enum_data, resolve_dataset_op_path
+from synth_xfer._util.parse_mlir import HelperFuncs, top_as_xfer
+from synth_xfer._util.pattern_dsl import PatternDag
+from synth_xfer._util.tsv import EnumData, build_enum_data
 from synth_xfer._util.xfer_data import (
     PreparedCandidates,
     XferCandidate,
@@ -25,13 +26,13 @@ from synth_xfer.cli.args import get_sampler, make_sampler_parser
 ExactBw: TypeAlias = int | tuple[int, int]
 DistBw: TypeAlias = int | tuple[int, int] | tuple[int, int, int]
 OutputRow: TypeAlias = tuple[str, str, str, float, float]
-GroupItem: TypeAlias = tuple[tuple[AbstractDomain, Path], list[XferCandidate]]
+GroupItem: TypeAlias = tuple[tuple[AbstractDomain, PatternDag], list[XferCandidate]]
 
 
 @dataclass(frozen=True)
 class EvalGroup:
     domain: AbstractDomain
-    op_path: Path
+    op: PatternDag
     candidates: list[XferCandidate]
     prepared: PreparedCandidates
     data: EnumData
@@ -40,13 +41,13 @@ class EvalGroup:
     def from_candidates(
         cls,
         domain: AbstractDomain,
-        op_path: Path,
+        op: PatternDag,
         candidates: list[XferCandidate],
         data: EnumData,
     ) -> "EvalGroup":
         return cls(
             domain=domain,
-            op_path=op_path,
+            op=op,
             candidates=candidates,
             prepared=PreparedCandidates.from_candidates(candidates),
             data=data,
@@ -80,7 +81,9 @@ def _register_parser() -> Namespace:
         choices=[str(x) for x in AbstractDomain],
         help="Abstract Domain",
     )
-    p.add_argument("--op", type=Path, help="Concrete op for generated eval mode")
+    p.add_argument(
+        "--op", type=PatternDag, help="Concrete op or pattern for generated eval mode"
+    )
     p.add_argument(
         "--exact-bw",
         type=_parse_exact_bw,
@@ -255,7 +258,7 @@ def _eval_group(group: EvalGroup, args: Namespace) -> list[OutputRow]:
         selected_to_eval[dist_bw] = to_eval[dist_bw]
     low_and_med_bw = {exact_bw}
 
-    helpers = get_helper_funcs(group.op_path, group.domain)
+    helpers = HelperFuncs(group.op, group.domain)
     top_mlir = top_as_xfer(helpers.transfer_func)
     lowerer = LowerToLLVM(list(selected_to_eval))
     lowerer.add_fn(helpers.meet_func)
@@ -291,9 +294,9 @@ def _eval_group(group: EvalGroup, args: Namespace) -> list[OutputRow]:
         dist_per_bit = next(x for x in result.per_bit_res if x.bitwidth == dist_bw)
         rows.append((label, exact_per_bit.get_exact_prop() * 100.0, dist_per_bit.dist))
 
-    _print_summary(group.domain, group.data.metadata.op, rows)
+    _print_summary(group.domain, str(group.data.metadata.op), rows)
     output_rows = [
-        (str(group.domain), group.data.metadata.op, label, exact, dist)
+        (str(group.domain), str(group.data.metadata.op), label, exact, dist)
         for label, exact, dist in rows
     ]
 
@@ -313,29 +316,28 @@ def _eval_group(group: EvalGroup, args: Namespace) -> list[OutputRow]:
     return output_rows
 
 
-def _dataset_groups(candidates: list[XferCandidate], args: Namespace) -> EvalGroup:
+def _dataset_groups(cands: list[XferCandidate], args: Namespace) -> EvalGroup:
     with args.input.open("r") as f:
         data = EnumData.read_tsv(f)
 
-    op_path = resolve_dataset_op_path(data.metadata.op)
-    return EvalGroup.from_candidates(data.metadata.domain, op_path, candidates, data)
+    return EvalGroup.from_candidates(data.metadata.domain, data.metadata.op, cands, data)
 
 
 def _build_generated_groups(items: list[GroupItem], args: Namespace) -> list[EvalGroup]:
     lbw, mbw, hbw = _workload_lists(args.exact_bw, args.dist_bw)
 
     def build_one(item: GroupItem) -> EvalGroup:
-        (domain, op_path), group_cands = item
+        (domain, op), group_cands = item
         data = build_enum_data(
             domain=domain,
-            op_path=op_path,
+            op=op,
             lbw=lbw,
             mbw=mbw,
             hbw=hbw,
             seed=args.seed,
             sampler=get_sampler(args),
         )
-        return EvalGroup.from_candidates(domain, op_path, group_cands, data)
+        return EvalGroup.from_candidates(domain, op, group_cands, data)
 
     if len(items) > 1:
         with ThreadPoolExecutor(max_workers=len(items)) as pool:

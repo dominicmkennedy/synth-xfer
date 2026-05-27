@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/UaddSat.mlir
+# op: UaddSat
 # arity: 2
 # seed: null
 # lbw: []

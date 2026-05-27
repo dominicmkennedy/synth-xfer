@@ -14,18 +14,17 @@ from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import get_per_bit
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
-from synth_xfer._util.parse_mlir import get_helper_funcs, parse_mlir_func
+from synth_xfer._util.parse_mlir import HelperFuncs, parse_mlir_func
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.random import Sampler
 
-PROJ_DIR = Path(__file__).parent.parent
-DATA_DIR = PROJ_DIR / "tests" / "data"
+DATA_DIR = Path(__file__).parent.parent / "tests" / "data"
 
 
 def test_jit_with_kb_and():
-    conc_and_f = PROJ_DIR / "mlir" / "Operations" / "And.mlir"
-
     lowerer = LowerToLLVM([4, 8])
-    helpers = get_helper_funcs(conc_and_f, AbstractDomain.KnownBits)
+
+    helpers = HelperFuncs(PatternDag("And"), AbstractDomain.KnownBits)
     xfer_mlir = parse_mlir_func(DATA_DIR / "ideal_xfers" / "kb_and.mlir")
     lowerer.add_fn(xfer_mlir, shim=True)
     lowerer.add_fn(helpers.crt_func, shim=True)
@@ -59,10 +58,8 @@ def test_jit_with_kb_and():
 
 
 def test_jit_with_ucr_add():
-    conc_add_f = PROJ_DIR / "mlir" / "Operations" / "Add.mlir"
-
     lowerer = LowerToLLVM([4, 8])
-    helpers = get_helper_funcs(conc_add_f, AbstractDomain.UConstRange)
+    helpers = HelperFuncs(PatternDag("Add"), AbstractDomain.UConstRange)
     xfer_mlir = parse_mlir_func(DATA_DIR / "ideal_xfers" / "ucr_add.mlir")
     lowerer.add_fn(xfer_mlir, shim=True)
     lowerer.add_fn(helpers.crt_func, shim=True)

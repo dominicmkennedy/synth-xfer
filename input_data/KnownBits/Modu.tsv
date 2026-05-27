@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/Modu.mlir
+# op: Modu
 # arity: 2
 # seed: null
 # lbw: []

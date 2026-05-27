@@ -1,11 +1,13 @@
 from argparse import ArgumentParser, Namespace
+from importlib.resources import files
 from pathlib import Path
 
 import pandas as pd
+from xdsl.dialects.func import FuncOp
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import RunInputMap, parse_to_run_inputs, run_xfer_fns
-from synth_xfer._util.parse_mlir import get_helper_funcs
+from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
 from synth_xfer._util.tsv import EnumData
 from synth_xfer._util.xfer_data import (
     PreparedCandidates,
@@ -62,7 +64,8 @@ def _validate_args(args: Namespace, p: ArgumentParser) -> None:
 
 def _run_apply(
     prepared: PreparedCandidates,
-    helper_funcs,
+    top: FuncOp,
+    meet: FuncOp,
     domain: AbstractDomain,
     to_eval: RunInputMap,
     df: pd.DataFrame,
@@ -71,7 +74,7 @@ def _run_apply(
     run_outputs = run_xfer_fns(
         domain,
         to_eval,
-        prepare_exec_module(prepared.merged_mod.clone(), helper_funcs),
+        prepare_exec_module(prepared.merged_mod.clone(), top, meet),
         prepared.xfer_names,
     )
 
@@ -118,8 +121,8 @@ def main() -> None:
         }
         df = pd.DataFrame({f"arg_{n}": [x] for n, x in enumerate(fn_args[0])})
 
-    helper_funcs = get_helper_funcs(args.op, domain)
-    _run_apply(prepared, helper_funcs, domain, to_eval, df, args.output)
+    d_fns = get_fns(parse_mlir_mod(files("synth_xfer") / "mlir" / f"{domain}.mlir"))
+    _run_apply(prepared, d_fns["top"], d_fns["meet"], domain, to_eval, df, args.output)
 
 
 if __name__ == "__main__":

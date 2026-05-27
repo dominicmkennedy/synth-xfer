@@ -1,6 +1,7 @@
 """Synthesis workflow helpers."""
 
 import asyncio
+from io import StringIO
 import json
 from pathlib import Path
 import time
@@ -8,9 +9,11 @@ import time
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
+from xdsl.printer import Printer
 
 from agent.agent_solution_set import AgentSolutionSet
 from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.parse_mlir import lower_pattern_to_mlir
 
 from .prompts import DomainFragment, fill_template, load_domain_fragment
 from .util import (
@@ -27,21 +30,20 @@ from .util import (
 
 
 def _make_initial_prompt(task: SynthesisTask, domain: AbstractDomain) -> str:
-    return (
-        f"Synthesize the {domain.name} transfer function for operation "
-        f"{task.op_name} (file: {task.op_file})."
-    )
+    return f"Synthesize the {domain.name} transfer function for pattern {task.op}."
 
 
 def build_agent_instructions(
     template: str,
     op_name: str,
-    op_file: str,
+    op_pattern: str,
     domain: AbstractDomain,
     fragment: DomainFragment,
 ) -> str:
     """Instantiate agent_instructions.md template with task and domain values."""
-    return fill_template(template, domain, fragment, op_name=op_name, op_file=op_file)
+    return fill_template(
+        template, domain, fragment, op_name=op_name, op_pattern=op_pattern
+    )
 
 
 class SynthesisAgent:
@@ -93,26 +95,29 @@ class SynthesisAgent:
             return paths
 
         def get_task_bundle() -> str:
-            """Return JSON with op_name, op_file, and op_content.
+            """Return JSON with op_pattern and op_content.
 
-            op_content is the MLIR module from op_file and includes:
-            - concrete_op: the concrete operator whose transfer function you must synthesize.
-            - op_constraint (optional): a predicate over concrete inputs; concretizations that violate it are out of scope.
+            - op_pattern: the DSL expression describing the pattern.
+            - op_content: lowered MLIR module containing:
+              - concrete_op: the concrete operator(s) whose transfer function you must synthesize.
+              - op_constraint (optional): a predicate over concrete inputs; concretizations that violate it are out of scope.
             """
             print(f"[{task.op_name.upper()}] [TOOL] get_task_bundle", flush=True)
-            op_path = Path(task.op_file)
-            if not op_path.is_file():
-                return f"Error: op file {str(op_path)!r} does not exist."
+            assert task.op is not None, (
+                "get_task_bundle requires a pattern; task.op is None"
+            )
+            mod = lower_pattern_to_mlir(task.op)
+            stream = StringIO()
+            Printer(stream=stream).print_op(mod)
             bundle = {
-                "op_name": task.op_name,
-                "op_file": str(op_path),
-                "op_content": op_path.read_text(encoding="utf-8"),
+                "op_pattern": str(task.op),
+                "op_content": stream.getvalue(),
             }
             return json.dumps(bundle)
 
-        def get_program_templates() -> str:
-            """Return the MLIR output templates (agent/template.mlir)."""
-            print(f"[{task.op_name.upper()}] [TOOL] get_program_templates", flush=True)
+        def get_program_template() -> str:
+            """Return the MLIR output template (agent/template.mlir)."""
+            print(f"[{task.op_name.upper()}] [TOOL] get_program_template", flush=True)
             if not template_path.is_file():
                 return f"Error: template file {str(template_path)!r} does not exist."
             return template_path.read_text(encoding="utf-8")
@@ -343,13 +348,13 @@ class SynthesisAgent:
             instructions=build_agent_instructions(
                 instructions_path.read_text(encoding="utf-8").strip(),
                 task.op_name,
-                task.op_file,
+                str(task.op),
                 domain,
                 self._domain_fragment,
             ),
             tools=[
                 get_task_bundle,
-                get_program_templates,
+                get_program_template,
                 get_dialect_spec,
                 list_examples,
                 get_example,

@@ -14,14 +14,12 @@ from synth_xfer._util.eval import (
     parse_to_eval_inputs,
     parse_to_run_inputs,
 )
-from synth_xfer._util.parse_mlir import HelperFuncs, get_fns, parse_mlir_mod
+from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.tsv import EnumData
 
 
-def resolve_xfer_name(
-    xfer_fns: dict[str, FuncOp],
-    requested_name: str | None,
-) -> str:
+def resolve_xfer_name(xfer_fns: dict[str, FuncOp], requested_name: str | None) -> str:
     if requested_name is not None:
         xfer_name = requested_name
     elif len(xfer_fns) == 1:
@@ -132,24 +130,20 @@ def namespace_module(mod: ModuleOp, prefix: str) -> ModuleOp:
     return cloned
 
 
-def prepare_exec_module(mod: ModuleOp, helpers: HelperFuncs) -> ModuleOp:
-    # Modifies `mod` in place by adding missing domain helpers needed for JIT
-    existing = get_fns(mod)
-    helper_defs = (
-        helpers.get_top_func,
-        helpers.meet_func,
-    )
+def prepare_exec_module(mod: ModuleOp, top: FuncOp, meet: FuncOp) -> ModuleOp:
+    "Modifies `mod` in place by adding missing domain helpers needed for JIT"
 
-    for helper in helper_defs:
-        if helper is not None and helper.sym_name.data not in existing:
+    existing = get_fns(mod)
+    for helper in (top, meet):
+        if helper.sym_name.data not in existing:
             mod.body.block.add_op(helper.clone())
             existing[helper.sym_name.data] = helper
 
     return mod
 
 
-def _parse_config(config_path: Path) -> tuple[Path, AbstractDomain]:
-    transfer_path: Path | None = None
+def _parse_config(config_path: Path) -> tuple[PatternDag, AbstractDomain]:
+    op: PatternDag | None = None
     domain: AbstractDomain | None = None
 
     with config_path.open("r", encoding="utf-8") as f:
@@ -162,23 +156,22 @@ def _parse_config(config_path: Path) -> tuple[Path, AbstractDomain]:
             value = value.strip()
 
             if key == "transfer_functions":
-                transfer_path = Path(value)
+                op = PatternDag(value)
 
             if key == "domain":
                 domain = AbstractDomain[value]
 
-    if transfer_path is None:
+    if op is None:
         print(config_path)
         raise ValueError("Missing 'transfer_functions' entry in config.")
     if domain is None:
         raise ValueError("Missing 'domain' entry in config.")
 
-    return transfer_path, domain
+    return op, domain
 
 
 def load_file_candidates(
-    xfer_paths: list[Path],
-    requested_name: str | None,
+    xfer_paths: list[Path], requested_name: str | None
 ) -> list[XferCandidate]:
     candidates: list[XferCandidate] = []
     for i, xfer_path in enumerate(xfer_paths):
@@ -195,8 +188,8 @@ def load_file_candidates(
 
 def load_solution_dir_candidates(
     solutions: Path,
-) -> dict[tuple[AbstractDomain, Path], list[XferCandidate]]:
-    candidates: dict[tuple[AbstractDomain, Path], list[XferCandidate]] = {}
+) -> dict[tuple[AbstractDomain, PatternDag], list[XferCandidate]]:
+    candidates: dict[tuple[AbstractDomain, PatternDag], list[XferCandidate]] = {}
     solution_paths = sorted(solutions.rglob("solution.mlir"))
 
     for i, solution_path in enumerate(solution_paths):

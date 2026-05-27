@@ -10,19 +10,16 @@ from pathlib import Path
 import pandas as pd
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.max_precise import (
-    RowProcessor,
-    RowTask,
-    compute_max_precise,
-)
+from synth_xfer._util.max_precise import RowProcessor, RowTask, compute_max_precise
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.smt_solver import SolverKind
-from synth_xfer._util.tsv import EnumData, resolve_dataset_op_path
+from synth_xfer._util.tsv import EnumData
 
 
 def _get_args() -> Namespace:
     p = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
 
-    p.add_argument("--op", type=Path, help="path to op or pattern")
+    p.add_argument("--op", type=PatternDag, help="op or pattern expression")
     p.add_argument("-i", "--input", type=Path, help="path to enum TSV")
     p.add_argument("-o", "--output", type=Path, help="output TSV path")
     p.add_argument(
@@ -83,7 +80,6 @@ def _fill_hbw_rows(
     timeout: int,
     solver_kind: SolverKind,
 ) -> tuple[EnumData, list[str]]:
-    op_path = resolve_dataset_op_path(data.metadata.op)
     hbw_bws = {bw for bw, _, _ in data.metadata.hbw}
     arg_cols = [f"arg_{i}" for i in range(data.metadata.arity)]
     tasks = [
@@ -98,7 +94,7 @@ def _fill_hbw_rows(
 
     with Pool() as pool:
         results = pool.map(
-            RowProcessor(op_path, data.metadata.domain, timeout, solver_kind),
+            RowProcessor(data.metadata.op, data.metadata.domain, timeout, solver_kind),
             tasks,
         )
 
@@ -146,7 +142,7 @@ def main() -> None:
         output_path = args.input if args.output is None else args.output
         updated.write_tsv_with_comments(output_path, commented_rows)
     else:
-        fn_args = tuple(x.strip() for x in args.args.split(";"))
+        fn_args: tuple[str, ...] = tuple(x.strip() for x in args.args.split(";"))
         domain = AbstractDomain[args.domain]
         max_prec = compute_max_precise(
             args.op,

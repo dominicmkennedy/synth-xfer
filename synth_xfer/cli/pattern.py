@@ -1,48 +1,22 @@
 from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
+from io import StringIO
 from pathlib import Path
 from random import Random, SystemRandom
 
+from xdsl.printer import Printer
+
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.input_generation import generate_pattern_inputs
-from synth_xfer._util.pattern import (
-    CompletenessReport,
-    analyze_pattern,
-    construct_pattern_solution,
-    eval_pattern,
-    load_pattern,
-)
+from synth_xfer._util.parse_mlir import lower_pattern_to_mlir
+from synth_xfer._util.pattern import analyze_pattern, eval_pattern
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.tsv import EnumData
 from synth_xfer.cli.args import int_tuple
 
 
-def _format_report(report: CompletenessReport) -> str:
-    lines = [
-        f"Pattern:   {report.dag.expression}",
-        f"Coincide:  {'True' if report.coincides else 'False'}",
-        f"SSA Reuse: {'True' if report.reuse else 'False'}",
-        "Complete Edges:",
-    ]
-    edge_map = dict(report.edges)
-    for i, node in enumerate(report.dag.nodes):
-        if i:
-            lines.append("")
-        lines.append(f"  n{i} = {node.operation}({', '.join(node.operands)})")
-        for operand in node.operands:
-            if not operand.startswith("n"):
-                continue
-            producer_idx = int(operand.removeprefix("n"))
-            producer = report.dag.nodes[producer_idx]
-            edge = f"n{producer_idx}({producer.operation}) -> n{i}({node.operation})"
-            is_complete = edge_map[edge]
-            lines.append(f"    {operand} : {'complete' if is_complete else 'incomplete'}")
-    return "\n".join(lines)
-
-
 def _gen_args(p: ArgumentParser):
-    p.add_argument(
-        "--pattern", type=Path, required=True, help="Pattern MLIR file to analyze"
-    )
+    p.add_argument("--op", type=PatternDag, required=True, help="pattern expression")
     p.add_argument(
         "-d",
         "--domain",
@@ -69,7 +43,7 @@ def _gen_args(p: ArgumentParser):
     p.add_argument(
         "--data-dir",
         type=Path,
-        required=True,
+        default="input_data",
         help="Directory containing per-domain input TSVs",
     )
     p.add_argument(
@@ -116,21 +90,6 @@ def _gen_args(p: ArgumentParser):
     )
 
 
-def _eval_args(p: ArgumentParser):
-    p.add_argument(
-        "--composite-xfer", type=Path, required=True, help="Composite MLIR file"
-    )
-    p.add_argument("--xfer-name", type=str, help="Name of composite function")
-    p.add_argument(
-        "-i",
-        "--input",
-        type=Path,
-        required=True,
-        help="path to enum TSV (use `pattern generate-input` to make this)",
-    )
-    p.add_argument("--bw", type=int, default=8, help="BW to use for eval")
-
-
 def main() -> None:
     p = ArgumentParser(
         prog="pattern",
@@ -139,10 +98,12 @@ def main() -> None:
     sub = p.add_subparsers(dest="command", required=True)
 
     analyze_parser = sub.add_parser(
-        "analyze", formatter_class=ArgumentDefaultsHelpFormatter
+        "analyze",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+        help="Analyze forward/backward completeness of a pattern expression",
     )
     analyze_parser.add_argument(
-        "--pattern", type=Path, required=True, help="Pattern MLIR file to analyze"
+        "--op", type=PatternDag, required=True, help="pattern expression"
     )
     analyze_parser.add_argument(
         "-d",
@@ -153,47 +114,50 @@ def main() -> None:
         help="Abstract Domain to evaluate",
     )
 
-    seq_parser = sub.add_parser(
-        "make-sequential", formatter_class=ArgumentDefaultsHelpFormatter
+    _gen_args(
+        sub.add_parser(
+            "generate-input",
+            formatter_class=ArgumentDefaultsHelpFormatter,
+            help="Generate abstract inputs for a pattern expression",
+        )
     )
-    seq_parser.add_argument(
-        "--pattern", type=Path, required=True, help="Pattern MLIR file"
-    )
-    seq_parser.add_argument(
-        "-d",
-        "--domain",
-        type=str,
-        choices=[str(x) for x in AbstractDomain],
-        required=True,
-        help="Abstract Domain",
-    )
-    seq_parser.add_argument(
-        "--xfer-dir",
-        type=Path,
-        required=True,
-        help="Directory containing component op solutions",
-    )
-    seq_parser.add_argument("-o", "--output", type=Path, help="Output mlir function")
-
-    gen_parser = sub.add_parser(
-        "generate-input", formatter_class=ArgumentDefaultsHelpFormatter
-    )
-    _gen_args(gen_parser)
 
     eval_parser = sub.add_parser(
         "eval",
         formatter_class=ArgumentDefaultsHelpFormatter,
+        help="Evaluate a pattern transformer compared to LLVM",
     )
-    _eval_args(eval_parser)
+    eval_parser.add_argument(
+        "--composite-xfer", type=Path, required=True, help="Composite MLIR file"
+    )
+    eval_parser.add_argument("--xfer-name", type=str, help="Name of composite function")
+    eval_parser.add_argument(
+        "-i",
+        "--input",
+        type=Path,
+        required=True,
+        help="path to enum TSV (use `pattern generate-input` to make this)",
+    )
+    eval_parser.add_argument("--bw", type=int, default=8, help="BW to use for eval")
+
+    lift_parser = sub.add_parser(
+        "lift",
+        formatter_class=ArgumentDefaultsHelpFormatter,
+        help="Lift a pattern expression to MLIR",
+    )
+    lift_parser.add_argument(
+        "--op", type=PatternDag, required=True, help="pattern expression"
+    )
+    lift_parser.add_argument("-o", "--output", type=Path, help="Output MLIR path")
 
     args = p.parse_args()
     if args.command == "analyze":
-        print(_format_report(analyze_pattern(args.pattern, AbstractDomain[args.domain])))
+        print(analyze_pattern(args.op, AbstractDomain[args.domain]))
 
     if args.command == "generate-input":
         rng = Random(SystemRandom().randrange(2**32) if args.seed is None else args.seed)
         generated_inputs, timeouts = generate_pattern_inputs(
-            args.pattern,
+            args.op,
             AbstractDomain[args.domain],
             args.mbw,
             args.hbw,
@@ -211,20 +175,10 @@ def main() -> None:
             if timeout:
                 print(f"bw {bw} had {timeout} max-precise timeouts")
 
-    if args.command == "make-sequential":
-        fn = construct_pattern_solution(
-            args.pattern, args.xfer_dir, AbstractDomain[args.domain]
-        )
-        if args.output:
-            args.output.write_text(str(fn))
-        else:
-            print(fn)
     if args.command == "eval":
         with args.input.open("r") as f:
             data = EnumData.read_tsv(f)
 
-        pattern_path = Path(data.metadata.op)
-        dag = load_pattern(pattern_path)
         (
             seq_sound,
             comp_sound,
@@ -235,7 +189,7 @@ def main() -> None:
             seq_norm,
             comp_norm,
         ) = eval_pattern(
-            dag.expression,
+            data.metadata.op,
             args.composite_xfer,
             args.xfer_name,
             data,
@@ -271,6 +225,14 @@ def main() -> None:
             print(
                 f"Composite  | {comp_sound:6.2f}% | {comp_exact:6.2f}% | {comp_norm:7.5f}"
             )
+    if args.command == "lift":
+        stream = StringIO()
+        Printer(stream=stream).print_op(lower_pattern_to_mlir(args.op))
+        if args.output:
+            args.output.write_text(stream.getvalue())
+            args.output.write_text("\n")
+        else:
+            print(stream.getvalue())
 
 
 if __name__ == "__main__":

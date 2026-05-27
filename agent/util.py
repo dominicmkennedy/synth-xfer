@@ -15,11 +15,12 @@ from synth_xfer._util.eval_result import EvalResult
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.parse_mlir import (
-    get_helper_funcs,
+    HelperFuncs,
     parse_mlir_func,
     parse_mlir_mod,
     top_as_xfer,
 )
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.random import Random, Sampler
 from synth_xfer._util.smt_solver import Model, SolverKind
 from synth_xfer.cli.verify import format_counterexample, verify_function
@@ -29,7 +30,7 @@ from synth_xfer.cli.verify import format_counterexample, verify_function
 class EvalArgs:
     """Arguments for evaluating a transfer function."""
 
-    op_path: Path
+    op: PatternDag
     domain: AbstractDomain
     lbw: list[int]
     mbw: list[tuple[int, int]] = field(default_factory=list)
@@ -41,9 +42,13 @@ class EvalArgs:
 
 @dataclass
 class SynthesisTask:
-    """Concrete synthesis task for one operator/program file."""
+    """Concrete synthesis task for one pattern.
 
-    op_file: str
+    `op` may be None in the standalone `agent-learn` flow, which loads
+    pre-existing transformer MLIRs that aren't tied to a synthesis pattern.
+    """
+
+    op: PatternDag | None
     op_name: str
 
 
@@ -123,7 +128,7 @@ class CollectiveLibrary:
                 funcs.append(
                     LibraryFunction(
                         function_name=op_name,
-                        docstring=result.task.op_file,
+                        docstring=str(result.task.op) if result.task.op else op_name,
                         source=result.solution_text,
                     )
                 )
@@ -174,9 +179,17 @@ def get_api_key() -> str:
     return api_key
 
 
-def extract_op_name(op_file_path: str) -> str:
-    """Extract operation name from file path (e.g., mlir/Operations/Add.mlir -> Add)."""
-    return Path(op_file_path).stem
+def pattern_to_op_name(dag: PatternDag) -> str:
+    """Return a valid MLIR/filesystem identifier for a pattern.
+
+    Single-op patterns keep their op name (e.g. ``Add``). Multi-node patterns
+    are flattened to an underscore-joined form (e.g. ``OrDisjoint(arg0,
+    And(arg1, arg2))`` -> ``OrDisjoint_arg0_And_arg1_arg2``). The human-readable
+    expression is still available via ``str(dag)``.
+    """
+    s = str(dag)
+    name = re.sub(r"[^A-Za-z0-9]+", "_", s).strip("_")
+    return name or "pattern"
 
 
 def _parse_library_function(text: str) -> LibraryFunction | None:
@@ -266,7 +279,7 @@ def make_output_dir(output_dir: Path):
 
 def summarize_token_usage(run_result) -> TokenUsageSummary:
     """Aggregate input/cached-input/output tokens from the run result."""
-    u = run_result.usage()
+    u = run_result.usage
     return TokenUsageSummary(
         input_tokens=u.input_tokens or 0,
         cached_input_tokens=u.cache_read_tokens or 0,
@@ -446,7 +459,7 @@ def _run_eval(
     sampler = Sampler.uniform()
 
     base_names = [_get_xfer_name(s) for s in base]
-    helpers = get_helper_funcs(eval_args.op_path, eval_args.domain)
+    helpers = HelperFuncs(eval_args.op, eval_args.domain)
 
     combined = ""
     for p in lib + base + xfer:
@@ -525,7 +538,7 @@ def verify_transformer(
     try:
         func = parse_mlir_func(xfer)
         xfer_helpers: list[FuncOp | None] = [parse_mlir_func(s) for s in lib]
-        helpers = get_helper_funcs(eval_args.op_path, eval_args.domain)
+        helpers = HelperFuncs(eval_args.op, eval_args.domain)
         problems: dict[int, Model | None] = {}
         for bw in VERIFY_BITWIDTHS:
             is_sound, model = verify_function(
@@ -542,7 +555,6 @@ def verify_transformer(
         return ("VERIFIED sound at all checked bitwidths", problems)
 
     xfer_name = func.sym_name.data
-    op_name = eval_args.op_path.stem
     mlir_mod = None
     if any(m is not None for m in problems.values()):
         combined = ""
@@ -557,7 +569,14 @@ def verify_transformer(
         else:
             assert mlir_mod is not None
             cx = format_counterexample(
-                op_name, model, bw, eval_args.domain, mlir_mod, xfer_name, helpers, False
+                eval_args.op,
+                model,
+                bw,
+                eval_args.domain,
+                mlir_mod,
+                xfer_name,
+                helpers,
+                False,
             )
             lines.append(f"bw={bw}: UNSOUND")
             lines.append(cx)

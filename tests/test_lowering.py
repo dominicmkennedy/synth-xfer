@@ -2,10 +2,10 @@ from pathlib import Path
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.lower import LowerToLLVM
-from synth_xfer._util.parse_mlir import get_helper_funcs, parse_mlir_func
+from synth_xfer._util.parse_mlir import HelperFuncs, parse_mlir_func
+from synth_xfer._util.pattern_dsl import PatternDag
 
-PROJ_DIR = Path(__file__).parent.parent
-DATA_DIR = PROJ_DIR / "tests" / "data"
+DATA_DIR = Path(__file__).parent.parent / "tests" / "data"
 
 
 def test_xfer_lowering():
@@ -23,18 +23,15 @@ def test_xfer_lowering():
 
 
 def test_conc_lowering():
-    conc_and_f = PROJ_DIR / "mlir" / "Operations" / "And.mlir"
-    conc_add_f = PROJ_DIR / "mlir" / "Operations" / "Add.mlir"
-
     lowerer = LowerToLLVM([4, 8, 64])
-    and_kb_helpers = get_helper_funcs(conc_and_f, AbstractDomain.KnownBits)
+    and_kb_helpers = HelperFuncs(PatternDag("And"), AbstractDomain.KnownBits)
     lowerer.add_fn(and_kb_helpers.meet_func)
     lowerer.add_fn(and_kb_helpers.get_top_func)
     lowerer.add_fn(and_kb_helpers.crt_func, shim=True)
     assert str(lowerer) == (DATA_DIR / "kb_and_conc.ll").read_text()
 
     lowerer = LowerToLLVM([4, 8, 64])
-    add_ucr_helpers = get_helper_funcs(conc_add_f, AbstractDomain.UConstRange)
+    add_ucr_helpers = HelperFuncs(PatternDag("Add"), AbstractDomain.UConstRange)
     lowerer.add_fn(add_ucr_helpers.meet_func)
     lowerer.add_fn(add_ucr_helpers.get_top_func)
     lowerer.add_fn(add_ucr_helpers.crt_func, shim=True)

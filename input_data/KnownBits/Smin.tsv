@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/Smin.mlir
+# op: Smin
 # arity: 2
 # seed: null
 # lbw: []

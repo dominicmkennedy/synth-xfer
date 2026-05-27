@@ -55,32 +55,32 @@ these executables depend on paths in the repo the should be run from the project
 Here's a simple invocation of the `sxf` program for quick testing (should take ~60s):
 
 ```bash
-sxf --op mlir/Operations/And.mlir \
-    --domain KnownBits            \
-    --num-iters 2                 \
-    --num-steps 100               \
-    --num-mcmc 50                 \
+sxf --op And           \
+    --domain KnownBits \
+    --num-iters 2      \
+    --num-steps 100    \
+    --num-mcmc 50      \
     --seed 2333
 ```
 
 Output:
 ```
-Top Solution | Exact 1.2346% |
-Iteration 0  | Exact 62.4295% | 1 solutions | 22.7674s |
-Iteration 1  | Exact 96.7078% | 3 solutions | 39.6943s |
-Final Soln   | Exact 96.7078% | 3 solutions |
+Running KnownBits And
+Top Solution | Exact 1.2346% | Dist 3499.2000 |
+Iteration 0  | Exact 62.4295% | Dist 583.2000 | 1 solutions | 21.4510s |
+Iteration 1  | Exact 62.5667% | Dist 580.8000 | 4 solutions | 35.7060s |
+Final Soln   | Exact 62.5667% | 4 solutions |
 ```
+Addtional output info is written to `outputs/KnownBits_And/`.
 
-(The final output may be different depending on your system's RNG differences).
-
-The command reads the MLIR program `mlir/Operations/And.mlir` and writes addtional output infor into `outputs/KnownBits_And/`.
+(The final output may differ slightly depending on your system RNG).
 
 ### Dataset-Driven Run
 
 Use an existing input dataset (metadata in the TSV determines op/domain/bitwidth workloads):
 
 ```bash
-sxf --input knownbits_and_input_data.tsv \
+sxf --input input_data/KnownBits/And.tsv \
     --num-iters 2                        \
     --num-steps 100                      \
     --num-mcmc 50
@@ -91,13 +91,13 @@ sxf --input knownbits_and_input_data.tsv \
 This is a more comprehensive invocation closer to the experiment setup used in the paper (this can take up to an hour depending on your machine):
 
 ```bash
-sxf --op mlir/Operations/Add.mlir     \
-    --domain KnownBits                \
-    --num-iters 5                     \
-    --num-steps 1000                  \
-    --num-mcmc 100                    \
-    --mbw 8,5000 16,5000              \
-    --hbw 32,5000,10000 64,5000,10000 \
+sxf --op "AshrExact(Sub(arg0, arg1), arg2)" \
+    --domain KnownBits                      \
+    --num-iters 5                           \
+    --num-steps 1000                        \
+    --num-mcmc 100                          \
+    --mbw 8,1000                            \
+    --hbw 32,5000,10000 64,5000,10000       \
     --vbw 4,8,16,32,64
 ```
 
@@ -105,7 +105,7 @@ sxf --op mlir/Operations/Add.mlir     \
 
 | CLI flag                         | Description                                                                                                                                                                          |
 |----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `--op <path>`                    | Path to a concrete operation or pattern (`.mlir` file) to synthesize an abstract transformer for.                                                                                    |
+| `--op <str>`                     | Concrete expression or operation to synthesize an abstract transformer for.                                                                                                          |
 | `-i, --input <path>`             | Path to an existing dataset TSV. In dataset mode, op/domain/bitwidth workloads are read from dataset metadata.                                                                       |
 | `--benchmark <path>`             | Path to a benchmark YAML file. Runs multiple synthesis jobs in parallel using the per-domain, per-arity settings from the file.                                                      |
 | `-o <path>`                      | Output directory where synthesized results and intermediate outputs will be written.                                                                                                 |
@@ -136,27 +136,26 @@ When using `--input`, do not pass `--op`, `--domain`, `--benchmark`, `--lbw`, `-
 
 The `--benchmark` flag accepts a YAML file whose top-level keys are domains.
 Each domain contains a list of `patterns` and bitwidth settings per pattern arity.
-Entries under `patterns` may be either operation names like `Add` or integer pattern ids like `017`.
 
 Example:
 
 ```yaml
 KnownBits:
-  patterns: [Add, 017]
+  patterns: ["And", "Sub(Xor(PopCount(arg0), arg1), Sdiv(arg2, arg3))"]
   arity:
     2:
       lbw: [4]
       mbw: [[8, 1000]]
       hbw: [[64, 1000, 1000]]
-    3:
+    4:
       lbw: []
       mbw: [[4, 1000], [8, 1000]]
       hbw: [[64, 1000, 1000]]
 
 UConstRange:
-  patterns: [008, 081]
+  patterns: ["AddNuw", "Xor(arg0, Sub(arg0, arg1))"]
   arity:
-    4:
+    2:
       lbw: []
       mbw: [[4, 1000]]
       hbw: [[8, 1000, 1000]]
@@ -179,16 +178,16 @@ sxf --benchmark bench.yaml \
 | `--xfer-name <str>`  | Name of the function in the transformer file to verify (defaults to `solution`, or the only function in the transformer file if there's just one). |
 | `--bw <list[int]>`   | Bitwidth(s) to verify at (e.g. `-bw 4`, `-bw 4-64` or `-bw 4,8,16`).                                                                               |
 | `--domain <Name>`    | Abstract domain semantics to verify with (e.g., `KnownBits`, `UConstRange`, `SConstRange`).                                                        |
-| `--op <Path>`        | Path to the concrete operation (`.mlir` file), for the concrete semantics to verify with.                                                          |
+| `--op <str>`         | Concrete expression or operation to verify with.                                                                                                   |
 | `--timeout <int>`    | Timeout flag (in seconds) to pass to the selected SMT solver (this is a per bit-width timeout).                                                    |
 | `--solver <Name>`    | SMT solver backend to use. Choices: `z3`, `cvc5`, `bitwuzla` (default: `bitwuzla`).                                                                |
 
 For example:
 ```bash
-verify --xfer-file tests/data/kb_xor.mlir \
-       --bw 4-8,16,32                     \
-       --domain KnownBits                 \
-       --op mlir/Operations/Xor.mlir      \
+verify --xfer-file tests/data/ideal_xfers/kb_xor.mlir \
+       --bw 4-8,16,32                                 \
+       --domain KnownBits                             \
+       --op Xor                                       \
        --solver cvc5
 ```
 Should produce:
@@ -216,9 +215,9 @@ Should produce:
 
 Example invocation:
 ```bash
-run-xfer --xfer-file tests/data/kb_or.mlir --bw 4 -d KnownBits --args="00??; 11?0"
+run-xfer --xfer-file tests/data/ideal_xfers/kb_xor.mlir --bw 4 -d KnownBits --args="00??; 11?0"
 # or
-run-xfer --xfer-file tests/data/cr_add.mlir --bw 4 -d UConstRange --args="[5, 10]; [2, 3]"
+run-xfer --xfer-file tests/data/ideal_xfers/ucr_add.mlir --bw 4 -d UConstRange --args="[5, 10]; [2, 3]"
 ```
 
 ## Important CLI Options for `eval-xfer`
@@ -230,29 +229,24 @@ run-xfer --xfer-file tests/data/cr_add.mlir --bw 4 -d UConstRange --args="[5, 10
 | `--xfer-name <str>`     | Name of the transformer function to evaluate for `--xfer-file` inputs. Not allowed with `--solution-dir`.                   |
 | `-i, --input <Path>`    | Existing enum TSV dataset to evaluate against. Dataset mode only. Cannot be combined with `--solution-dir`.                 |
 | `--domain <Name>`       | Abstract domain for generated eval with `--xfer-file`. Required when `--input` is omitted and `--solution-dir` is not used. |
-| `--op <Path>`           | Concrete operation used to generate an eval workload on the fly for `--xfer-file`. Required in generated mode.              |
+| `--op <str>`            | Concrete expression or operation used to generate an eval workload on the fly for `--xfer-file`. Required in generated mode |
 | `--exact-bw`            | Exact-scoring workload. Accepts `bw` or `bw,samples`. Default: `8,1000`.                                                    |
 | `--dist-bw`             | Distance-scoring workload. Accepts `bw`, `bw,samples`, or `bw,lat_samples,crt_samples`. Default: `64,1000,100000`.          |
 | `-o, --output <Path>`   | Write the evaluation table as CSV.                                                                                          |
 
 Generated eval from explicit transformer files:
 ```bash
-eval-xfer --xfer-file tests/data/kb_and.mlir tests/data/kb_or.mlir \
-          --domain KnownBits                                       \
-          --op mlir/Operations/And.mlir                            \
-          --exact-bw 8,1000                                        \
+eval-xfer --xfer-file tests/data/ideal_xfers/kb_and.mlir tests/data/ideal_xfers/kb_xor.mlir \
+          --domain KnownBits                                                                \
+          --op And                                                                          \
+          --exact-bw 8,1000                                                                 \
           --dist-bw 64,1000,100000
 ```
 
 Dataset eval:
 ```bash
-eval-xfer --xfer-file tests/data/kb_and.mlir \
+eval-xfer --xfer-file tests/data/ideal_xfers/kb_and.mlir \
           --input generated_from_enum.tsv
-```
-
-Generated eval from an `sxf` solution directory:
-```bash
-eval-xfer --solution-dir outputs/ \
 ```
 
 ## Important CLI Options for `pattern`
@@ -262,7 +256,7 @@ The `pattern` executable provides four subcommands:
 | Subcommand                | Purpose                                                                       |
 |---------------------------|-------------------------------------------------------------------------------|
 | `pattern analyze`         | Determine SSA reuse and if the composite and sequential transformers coincide |
-| `pattern make-sequential` | Make a sequential transformer out of the synthesized mlir operations          |
+| `pattern lift`            | Lift a pattern expression into the internal MLIR representation               |
 | `pattern generate-input`  | Generate abstract inputs for patterns, mined LLVM's seen abstract inputs      |
 | `pattern eval`            | Evaluate a composite transformer compared to LLVM's sequential version        |
 
@@ -270,41 +264,22 @@ The `pattern` executable provides four subcommands:
 
 | CLI flag          | Description                                |
 |-------------------|--------------------------------------------|
-| `--pattern <Path>`| Pattern MLIR file to analyze.              |
+| `--op <str>`      | expression to analyze.                     |
 | `--domain <Name>` | Abstract domain to analyze the pattern in. |
 
 Example:
 ```bash
-pattern analyze --pattern mlir/Patterns/008.mlir --domain KnownBits
-```
-
-### `pattern make-sequential`
-
-| CLI flag              | Description                                                                                                 |
-|-----------------------|-------------------------------------------------------------------------------------------------------------|
-| `--pattern <Path>`    | Pattern MLIR file to lower into a sequential transformer.                                                   |
-| `--domain <Name>`     | Abstract domain to build the sequential transformer in.                                                     |
-| `--xfer-dir <Path>`   | Directory containing synthesized component-op solutions (expects the same format as a benchmark output dir) |
-| `-o, --output <Path>` | Output MLIR file for the sequential transformer.                                                            |
-
-Example:
-```bash
-pattern make-sequential \
-  --pattern mlir/Patterns/008.mlir \
-  --domain KnownBits \
-  --xfer-dir outputs \
-  -o pattern_008_seq.mlir
+pattern analyze -d KnownBits --op "Select(ICmpUlt(AddNsw(Umax(arg0, arg1), arg0), arg0), arg2, Umin(arg3, arg2))"
 ```
 
 ### `pattern generate-input`
 
 | CLI flag                   | Description                                                                                     |
 |----------------------------|-------------------------------------------------------------------------------------------------|
-| `--pattern <Path>`         | Pattern MLIR file to generate inputs for.                                                       |
+| `--op <str>`               | pattern expression to generate input for.                                                       |
 | `--domain <Name>`          | Abstract domain to generate inputs in.                                                          |
 | `--mbw <bw,samples>`       | Bitwidth/sample-count pairs to sample that compute the ideal abstract output with `max-precise` |
 | `--hbw <bw,samples>`       | Bitwidth/sample-count pairs to sample but not compute the ideal value                           |
-| `--data-dir <Path>`        | Directory containing per-domain input TSVs used for sampling.                                   |
 | `--sampling-alpha <Float>` | Exponent applied to `count` before weighted row sampling. Default `0.70`                        |
 | `--weight-beta <Float>`    | Exponent applied to the proposal probability when emitting row weights. Default `0.15`          |
 | `--timeout <int>`          | Per-row ideal-computation timeout in seconds for `--mbw` rows.                                  |
@@ -314,13 +289,12 @@ pattern make-sequential \
 
 Example (This command may take several minutes or more depending on the size of `mbw`):
 ```bash
-pattern generate-input             \
-  --pattern mlir/Patterns/008.mlir \
-  --domain KnownBits               \
-  --mbw 8,10000                    \
-  --hbw 64,10000                   \
-  --data-dir notes/input_data      \
-  -o pattern_008_enum_data.tsv
+pattern generate-input                    \
+  --op "AshrExact(Sub(arg0, arg1), arg2)" \
+  --domain KnownBits                      \
+  --mbw 8,100                             \
+  --hbw 64,100                            \
+  -o pattern_data.tsv
 ```
 
 ### `pattern eval`
@@ -336,9 +310,9 @@ Prints a table comparing the LLVM seq pattern against the composite transformer 
 
 Example:
 ```bash
-pattern eval                             \
-  --composite-xfer composite_008.mlir    \
-  -i pattern_008_enum_data.tsv           \
+pattern eval                          \
+  --composite-xfer composite_008.mlir \
+  -i pattern_data.tsv                 \
   --bw 8
 ```
 
@@ -358,7 +332,7 @@ The simplifier runs an [egglog](https://github.com/egraphs-good/egglog) e-graph 
 Example:
 ```bash
 simplifier tests/data/ideal_xfers/kb_and.mlir \
-           --domain KnownBits                           \
+           --domain KnownBits                 \
            -o rewritten.mlir
 ```
 
@@ -366,7 +340,7 @@ simplifier tests/data/ideal_xfers/kb_and.mlir \
 
 | CLI flag          | Description                                                                         |
 |-------------------|-------------------------------------------------------------------------------------|
-| `--op`            | Path to a concrete operation or pattern (`.mlir` file).                             |
+| `--op <str>`      | Path to a concrete operation or expression to solve for                             |
 | `--args`          | The string representation of abstract value inputs.                                 |
 | `--bw`            | The bitwidth of the arguments.                                                      |
 | `--domain`        | The abstract domain (e.g. `KnownBits`, `UConstRange`, `SConstRange`).               |
@@ -376,7 +350,7 @@ simplifier tests/data/ideal_xfers/kb_and.mlir \
 
 Example:
 ```bash
-max-precise --op mlir/Operations/Or.mlir --bw 4 -d KnownBits --args "00??; 11??"
+max-precise --op Xor --bw 4 -d KnownBits --args "00??; 11??"
 # or
-max-precise --op mlir/Operations/Add.mlir --bw 4 -d UConstRange --args="[5, 10]; [2, 3]"
+max-precise --op Add --bw 4 -d UConstRange --args="[5, 10]; [2, 3]"
 ```

@@ -7,12 +7,8 @@ from xdsl.parser import ModuleOp
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import parse_to_run_inputs, run_concrete_fn, run_xfer_fns
-from synth_xfer._util.parse_mlir import (
-    HelperFuncs,
-    get_fns,
-    get_helper_funcs,
-    parse_mlir_mod,
-)
+from synth_xfer._util.parse_mlir import HelperFuncs, get_fns, parse_mlir_mod
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.smt_solver import Model, SolverKind
 from synth_xfer._util.verifier import verify_transfer_function
 from synth_xfer._util.xfer_data import prepare_exec_module, resolve_xfer_name
@@ -53,7 +49,7 @@ def _register_parser() -> Namespace:
         "--bw",
         type=int_list,
         required=True,
-        help="Bitwidth range (e.g. `-bw 4`, `-bw 4-64` or `-bw 4,8,16`)",
+        help="Bitwidth range (e.g. `--bw 4`, `--bw 4-64` or `--bw 4,8,16`)",
     )
 
     p.add_argument(
@@ -65,7 +61,7 @@ def _register_parser() -> Namespace:
         help="Abstract Domain to evaluate",
     )
 
-    p.add_argument("--op", type=Path, required=True, help="Concrete op")
+    p.add_argument("--op", type=PatternDag, required=True, help="Concrete op or pattern")
     p.add_argument("--xfer-file", type=Path, required=True, help="Transformer file")
     p.add_argument("--xfer-name", type=str, help="Transformer to verify")
     p.add_argument("--timeout", type=int, default=30, help="solver timeout")
@@ -175,8 +171,18 @@ def _bv_ref_to_abst_str(domain: AbstractDomain, bw: int, abst_bv: tuple[int, int
     return abst_val_str
 
 
+def _fmt_exec(expr: PatternDag, args: list[str]) -> str:
+    if expr.is_op():
+        return f"{expr}({', '.join(args)})"
+    else:
+        s = str(expr)
+        for i in range(expr.num_args):
+            s = s.replace(f"arg{i}", args[i])
+        return s
+
+
 def format_counterexample(
-    op_name: str,
+    op: PatternDag,
     model: Model,
     bw: int,
     domain: AbstractDomain,
@@ -194,7 +200,9 @@ def format_counterexample(
         conc_output = None
     else:
         try:
-            exec_mod = prepare_exec_module(mlir_mod.clone(), helper_funcs)
+            exec_mod = prepare_exec_module(
+                mlir_mod.clone(), helper_funcs.get_top_func, helper_funcs.meet_func
+            )
             input_args = parse_to_run_inputs(domain, bw, func_arity, [tuple(abst_args)])
             abst_output = run_xfer_fns(
                 domain,
@@ -212,12 +220,12 @@ def format_counterexample(
             else conc_output
         )
 
-    conc_line = f"Concrete Execution: {op_name}(" + ", ".join(conc_args_str) + ")"
+    conc_line = f"Concrete Execution: {_fmt_exec(op, conc_args_str)}"
     if conc_output:
         conc_line += f" -> {conc_output}"
     out_lines.append(conc_line)
 
-    abst_line = f"Abstract Execution: {op_name}(" + ", ".join(map(str, abst_args)) + ")"
+    abst_line = f"Abstract Execution: {_fmt_exec(op, abst_args)}"
     if abst_output:
         abst_line += f" -> {abst_output}"
     out_lines.append(abst_line)
@@ -236,7 +244,7 @@ def main() -> None:
 
     xfer_fn = xfer_fns[xfer_name]
     del xfer_fns[xfer_name]
-    helper_funcs = get_helper_funcs(args.op, domain)
+    helper_funcs = HelperFuncs(args.op, domain)
 
     for bw in args.bw:
         start_time = perf_counter()
@@ -268,7 +276,7 @@ def main() -> None:
             assert model is not None
             print(
                 format_counterexample(
-                    str(args.op.stem),
+                    args.op,
                     model,
                     bw,
                     domain,

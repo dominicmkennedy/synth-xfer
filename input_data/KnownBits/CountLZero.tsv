@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/CountLZero.mlir
+# op: CountLZero
 # arity: 1
 # seed: null
 # lbw: []

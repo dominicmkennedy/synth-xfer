@@ -17,7 +17,7 @@ Then re-run `pip install -e .` to pick up the `pydantic-ai-slim[openai]` depende
 ## Quick Run
 
 ```bash
-agent-synth --domain KnownBits mlir/Operations/Add.mlir \
+agent-synth --domain KnownBits Add \
     -o outputs/ag \
     --synth-model openai-responses:gpt-5.1-codex-mini
 ```
@@ -25,16 +25,24 @@ agent-synth --domain KnownBits mlir/Operations/Add.mlir \
 Multi-op example used as the smoke test for this project:
 
 ```bash
-agent-synth --domain KnownBits mlir/Operations/And.mlir mlir/Operations/Or.mlir \
+agent-synth --domain KnownBits And Or \
     --synth-model openai-responses:gpt-5.1-codex-mini \
     --library-model openai-responses:gpt-5.1-codex-mini \
     --rounds 1 --max-turns 10 \
     -o outputs/agent
 ```
 
-`--domain` is required for `op_file` and `--benchmark` runs. Supported domains
-today: `KnownBits`, `UConstRange`, `SConstRange`. With `--input`, the domain
-is inferred from each TSV's metadata.
+Multi-node pattern (DSL expression):
+
+```bash
+agent-synth --domain KnownBits 'OrDisjoint(arg0, And(arg1, arg2))' \
+    -o outputs/pattern \
+    --synth-model openai-responses:gpt-5.1-codex-mini
+```
+
+`--domain` is required for positional `op` and `--benchmark` runs. Supported
+domains today: `KnownBits`, `UConstRange`, `SConstRange`. With `--input`, the
+domain is inferred from each TSV's metadata.
 
 ## Model strings
 
@@ -53,9 +61,9 @@ See the [Pydantic AI model docs](https://ai.pydantic.dev/models/) for the full l
 
 | Option | Description |
 |--------|-------------|
-| `op_file` | Operation MLIR file(s) (e.g. `mlir/Operations/And.mlir mlir/Operations/Or.mlir`). Mutually exclusive with `--benchmark`. |
-| `--benchmark` | Path to a `bench.yaml` file specifying ops per domain (see below). Mutually exclusive with `op_file`. |
-| `--domain` | Abstract domain: `KnownBits`, `UConstRange`, or `SConstRange`. Required with `op_file`/`--benchmark`; inferred from metadata with `--input`. |
+| `op` | Pattern expression(s) (e.g. `Add Or` or `'OrDisjoint(arg0, And(arg1, arg2))'`). Mutually exclusive with `--benchmark`. |
+| `--benchmark` | Path to a `bench.yaml` file specifying patterns per domain (see below). Mutually exclusive with positional `op`. |
+| `--domain` | Abstract domain: `KnownBits`, `UConstRange`, or `SConstRange`. Required with positional `op`/`--benchmark`; inferred from metadata with `--input`. |
 | `-i, --input` | One or more EnumData TSV datasets used for eval-driven synthesis (`--input a.tsv b.tsv ...`). Task/op, domain, and bitwidths come from each dataset's metadata. |
 | `-o, --output` | Output directory (default: `outputs/agent`). |
 | `--synth-model` | Pydantic AI model string for synthesis (default: `openai-responses:gpt-5.2-codex`). |
@@ -69,7 +77,7 @@ See the [Pydantic AI model docs](https://ai.pydantic.dev/models/) for the full l
 
 - Accepts only EnumData TSV files (frontmatter + tab-separated rows), not plain CSV.
 - One TSV per op; pass multiple TSV paths to synthesize multiple ops in one run.
-- Do not combine with `op_file`, `--benchmark`, `--lbw`, `--mbw`, or `--hbw`.
+- Do not combine with positional `op`, `--benchmark`, `--lbw`, `--mbw`, or `--hbw`.
 - Domain comes from each TSV's metadata; all TSVs in a single run must share one domain. If `--domain` is supplied alongside `--input`, it is validated against the dataset metadata.
 
 ```bash
@@ -78,14 +86,17 @@ agent-synth --input kb_and_input_data.tsv kb_or_input_data.tsv -o outputs/agent-
 
 ## Benchmark mode (`--benchmark`)
 
-Instead of listing MLIR files on the command line, specify operations in a YAML file:
+Instead of listing patterns on the command line, specify them in a YAML file:
 
 ```yaml
 # bench.yaml
 KnownBits:
-  concrete_ops: [And, Or]
+  patterns:
+    - And
+    - Or
+    - OrDisjoint(arg0, And(arg1, arg2))
 UConstRange:
-  concrete_ops: [Add, Umin]
+  patterns: [Add, Umin]
 ```
 
 ```bash
@@ -95,7 +106,7 @@ agent-synth --benchmark bench.yaml --domain KnownBits \
     --rounds 2
 ```
 
-Op names in `concrete_ops` under the selected `--domain` key are resolved to `mlir/Operations/{Name}.mlir` relative to the project root. Other domain sections in the same `bench.yaml` are ignored.
+Each entry in `patterns:` under the selected `--domain` key is parsed as a pattern-DSL expression. Other domain sections in the same `bench.yaml` are ignored.
 
 Each run prints the model in use and token usage (input / cached_input / output). The agent is prompted to reason about the operation in the selected abstract domain (KnownBits, UConstRange, or SConstRange) before writing MLIR and to use multiple turns to improve quality rather than stopping at the first candidate that passes eval.
 
@@ -107,7 +118,7 @@ Domain-specific resources live under per-domain subdirectories:
 - `agent/examples/<DomainName>/*.mlir` — domain-specific reference implementations. Each domain must have at least `top.mlir` (used by `--mock-synth`).
 - `agent/examples/shared/*.mlir` — domain-agnostic operator-usage corpus, surfaced to all domains.
 - `agent/library/<DomainName>/*.mlir` — initial library functions for that domain (loaded when `--library-dir agent/library` is passed).
-- `mlir/<DomainName>/{top,meet,get_constraint,get_instance_constraint}.mlir` — domain helper MLIR consumed by the eval / verify pipeline.
+- `synth_xfer/mlir/<DomainName>.mlir` — domain helper MLIR consumed by the eval / verify pipeline.
 
 ## Meet Mode
 
@@ -118,7 +129,7 @@ Domain-specific resources live under per-domain subdirectories:
 Single-op run with meet mode and no library learning (fast test):
 
 ```bash
-agent-synth --domain KnownBits mlir/Operations/Umax.mlir \
+agent-synth --domain KnownBits Umax \
     -o outputs/umax                   \
     --synth-model openai-responses:gpt-5.1-codex-mini \
     --rounds 3                        \
@@ -129,7 +140,7 @@ agent-synth --domain KnownBits mlir/Operations/Umax.mlir \
 Multi-op run with meet mode and library learning enabled:
 
 ```bash
-agent-synth --domain KnownBits mlir/Operations/Umin.mlir mlir/Operations/Umax.mlir \
+agent-synth --domain KnownBits Umin Umax \
     -o outputs/meet-test              \
     --synth-model openai-responses:gpt-5.1-codex-mini \
     --rounds 3                        \

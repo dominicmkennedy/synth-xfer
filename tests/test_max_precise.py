@@ -1,7 +1,6 @@
 from ctypes import CFUNCTYPE, c_bool, c_int64
 from functools import lru_cache
 from itertools import product
-from pathlib import Path
 
 import pytest
 
@@ -9,13 +8,11 @@ from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.jit import Jit
 from synth_xfer._util.lower import LowerToLLVM
 from synth_xfer._util.max_precise import compute_max_precise
-from synth_xfer._util.parse_mlir import get_helper_funcs
+from synth_xfer._util.parse_mlir import HelperFuncs
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.smt_solver import SolverKind
 
-PROJ_DIR = Path(__file__).parent.parent
-OPS_DIR = PROJ_DIR / "mlir" / "Operations"
 BW = 4
-
 
 KB_CASES = [
     ("And", "1?0?", "?10?"),
@@ -140,7 +137,7 @@ def _scr_expected(outputs: list[int], bw: int) -> str:
 def _truth_table(
     op_name: str, domain: AbstractDomain, bw: int
 ) -> dict[tuple[int, int], int | None]:
-    helpers = get_helper_funcs(OPS_DIR / f"{op_name}.mlir", domain)
+    helpers = HelperFuncs(PatternDag(op_name), domain)
     lowerer = LowerToLLVM([bw])
     crt = lowerer.add_fn(helpers.crt_func, shim=True)
     op_constraint = (
@@ -200,11 +197,10 @@ def _check_cases(
     bw: int = BW,
 ) -> None:
     for op_name, arg0, arg1 in cases:
-        op_path = OPS_DIR / f"{op_name}.mlir"
         args = (arg0, arg1)
         expected = _expected(domain, op_name, args, bw)
         actual = compute_max_precise(
-            op_path,
+            PatternDag(op_name),
             domain,
             bw,
             args,

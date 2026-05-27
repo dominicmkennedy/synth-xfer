@@ -192,9 +192,6 @@ def _build_init_module(
     helper_funcs: list[FuncOp],
     ctx: Context,
 ):
-    INSTANCE_CONSTRAINT = "getInstanceConstraint"
-    DOMAIN_CONSTRAINT = "getConstraint"
-
     func_name_to_func: dict[str, FuncOp] = {}
     module_op = ModuleOp([])
     functions: list[FuncOp] = [transfer_function.clone()]
@@ -228,10 +225,10 @@ def _build_init_module(
         if func_name == transfer_function_name:
             assert transfer_function_obj is None
             transfer_function_obj = TransferFunction(func)
-        if func_name == DOMAIN_CONSTRAINT:
+        if func_name == "is_not_bottom":
             assert domain_constraint is None
             domain_constraint = FunctionCollection(func, _create_smt_function, ctx)
-        elif func_name == INSTANCE_CONSTRAINT:
+        elif func_name == "abstract_val_contains":
             assert instance_constraint is None
             instance_constraint = FunctionCollection(func, _create_smt_function, ctx)
 

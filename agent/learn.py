@@ -21,7 +21,6 @@ from .util import (
     SynthesisResult,
     SynthesisTask,
     dump_library,
-    extract_op_name,
     get_api_key,
     load_initial_library,
     save_file,
@@ -342,7 +341,7 @@ def main():
     parser.add_argument(
         "input_files",
         nargs="+",
-        help="MLIR files to learn from (e.g., mlir/Operations/Add.mlir)",
+        help="Transformer-source MLIR files to learn from (e.g., outputs/Add/solution.mlir)",
     )
     parser.add_argument(
         "-o", "--output", default="outputs/agent", help="Output directory"
@@ -453,7 +452,7 @@ def main():
     # Parse input files
     corpus = []
     for input_file in args.input_files:
-        task = SynthesisTask("", extract_op_name(input_file))
+        task = SynthesisTask(None, Path(input_file).stem)
         result = SynthesisResult(
             task=task,
             solution_iters=[Path(input_file).read_text()],

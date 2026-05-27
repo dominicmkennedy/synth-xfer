@@ -1,6 +1,6 @@
 # ---
 # domain: KnownBits
-# op: mlir/Operations/LshrExact.mlir
+# op: LshrExact
 # arity: 2
 # seed: null
 # lbw: []

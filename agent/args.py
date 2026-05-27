@@ -6,6 +6,7 @@ from pathlib import Path
 import yaml
 
 from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.tsv import EnumData
 
 
@@ -23,8 +24,8 @@ def _parse_bw_triple(s: str) -> tuple[int, int, int]:
     return (parts[0], parts[1], parts[2])
 
 
-def _load_ops_from_bench(bench_path: Path, domain: AbstractDomain) -> list[str]:
-    """Parse bench.yaml and return list of MLIR op file paths for `domain`."""
+def _load_ops_from_bench(bench_path: Path, domain: AbstractDomain) -> list[PatternDag]:
+    """Parse bench.yaml and return list of pattern expressions for `domain`."""
     with bench_path.open() as f:
         data = yaml.safe_load(f)
     if domain.name not in data:
@@ -33,10 +34,7 @@ def _load_ops_from_bench(bench_path: Path, domain: AbstractDomain) -> list[str]:
             f"Available keys: {sorted(data.keys())}"
         )
     cfg = data[domain.name] or {}
-    return [
-        str(Path("mlir/Operations") / f"{op_name}.mlir")
-        for op_name in cfg.get("concrete_ops", [])
-    ]
+    return [PatternDag(expr) for expr in cfg.get("patterns", [])]
 
 
 def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
@@ -63,7 +61,7 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
 
     has_input = bool(args.input)
     has_benchmark = args.benchmark is not None
-    has_op_file = bool(args.op_file)
+    has_op = bool(args.op)
 
     args.domain_enum = AbstractDomain[args.domain] if args.domain is not None else None
 
@@ -76,8 +74,8 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
     if has_input:
         if has_benchmark:
             parser.error("--input and --benchmark are mutually exclusive")
-        if has_op_file:
-            parser.error("--input and op_file are mutually exclusive")
+        if has_op:
+            parser.error("--input and op are mutually exclusive")
         for input_path in args.input:
             if not input_path.exists():
                 parser.error(f"--input: path does not exist: {input_path}")
@@ -100,13 +98,13 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
                 f"{', '.join(invalid_bw_flags)} cannot be used with --input; bitwidths come from dataset metadata"
             )
     else:
-        if has_benchmark and has_op_file:
-            parser.error("op_file and --benchmark are mutually exclusive")
-        if not has_benchmark and not has_op_file:
-            parser.error("provide op_file, --benchmark, or --input")
+        if has_benchmark and has_op:
+            parser.error("op and --benchmark are mutually exclusive")
+        if not has_benchmark and not has_op:
+            parser.error("provide op, --benchmark, or --input")
         if args.domain is None:
             parser.error(
-                "--domain is required when using op_file or --benchmark "
+                "--domain is required when using op or --benchmark "
                 "(it is inferred from dataset metadata only with --input)"
             )
 
@@ -115,7 +113,7 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
             parser.error(f"--benchmark: path does not exist: {args.benchmark}")
         assert args.domain_enum is not None
         try:
-            args.op_file = _load_ops_from_bench(args.benchmark, args.domain_enum)
+            args.op = _load_ops_from_bench(args.benchmark, args.domain_enum)
         except ValueError as e:
             parser.error(str(e))
 
@@ -128,10 +126,6 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
             parser.error(
                 f"--compress-prompt: path does not exist: {args.compress_prompt}"
             )
-
-    for op_file in args.op_file:
-        if not Path(op_file).exists():
-            parser.error(f"op_file: path does not exist: {op_file}")
 
     if args.max_turns <= 0:
         parser.error("--max-turns: must be greater than 0")
@@ -155,16 +149,17 @@ def parse_args() -> argparse.Namespace:
     """Parse and validate command-line arguments."""
     parser = argparse.ArgumentParser(description="Synthesize transfer functions")
     parser.add_argument(
-        "op_file",
+        "op",
         nargs="*",
-        help="Operation MLIR file(s) (e.g., mlir/Operations/Add.mlir)",
+        type=PatternDag,
+        help="Pattern expression(s) (e.g., 'Add' or 'OrDisjoint(arg0, And(arg1, arg2))')",
     )
     parser.add_argument(
         "--benchmark",
         type=Path,
         default=None,
         metavar="YAML",
-        help="Path to bench.yaml specifying ops per domain (mutually exclusive with op_file)",
+        help="Path to bench.yaml specifying patterns per domain (mutually exclusive with positional op)",
     )
     parser.add_argument(
         "-i",
@@ -181,7 +176,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Abstract domain (e.g. KnownBits, UConstRange, SConstRange). "
-            "Required with op_file or --benchmark; inferred from --input "
+            "Required with positional op or --benchmark; inferred from --input "
             "metadata (validated against this flag if also given)."
         ),
     )
