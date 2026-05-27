@@ -103,7 +103,9 @@ class SynthesisAgent:
               - op_constraint (optional): a predicate over concrete inputs; concretizations that violate it are out of scope.
             """
             print(f"[{task.op_name.upper()}] [TOOL] get_task_bundle", flush=True)
-            assert task.op is not None, "get_task_bundle requires a pattern; task.op is None"
+            assert task.op is not None, (
+                "get_task_bundle requires a pattern; task.op is None"
+            )
             mod = lower_pattern_to_mlir(task.op)
             stream = StringIO()
             Printer(stream=stream).print_op(mod)
