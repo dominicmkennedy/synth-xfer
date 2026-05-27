@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.tsv import EnumData, resolve_dataset_op_path
+from synth_xfer._util.tsv import EnumData
 from synth_xfer._util.xfer_data import enumdata_to_eval_inputs
 
 from .args import parse_args
@@ -19,10 +19,10 @@ from .util import (
     LibraryState,
     SynthesisResult,
     SynthesisTask,
-    extract_op_name,
     get_api_key,
     get_op_output_dir,
     load_initial_library,
+    pattern_to_op_name,
 )
 
 
@@ -151,11 +151,11 @@ def build_tasks_and_eval_args(
         domain: AbstractDomain = args.domain_enum
         tasks: list[SynthesisTask] = []
         eval_args_by_op: dict[str, EvalArgs] = {}
-        for op_file in args.op_file:
-            op_name = extract_op_name(op_file)
-            tasks.append(SynthesisTask(op_file=op_file, op_name=op_name))
+        for dag in args.op:
+            op_name = pattern_to_op_name(dag)
+            tasks.append(SynthesisTask(op=dag, op_name=op_name))
             eval_args_by_op[op_name] = EvalArgs(
-                op_path=Path(op_file),
+                op=dag,
                 domain=domain,
                 lbw=args.lbw,
                 mbw=args.mbw,
@@ -186,16 +186,16 @@ def build_tasks_and_eval_args(
                 "All --input TSVs in a single run must share one domain."
             )
 
-        op_path = resolve_dataset_op_path(data.metadata.op)
-        op_name = extract_op_name(str(op_path))
+        dag = data.metadata.op
+        op_name = pattern_to_op_name(dag)
         if op_name in eval_args_by_op:
             raise ValueError(
                 f"Duplicate op '{op_name}' inferred from --input datasets; each input TSV must target a distinct op"
             )
 
-        task = SynthesisTask(op_file=str(op_path), op_name=op_name)
+        task = SynthesisTask(op=dag, op_name=op_name)
         eval_args = EvalArgs(
-            op_path=op_path,
+            op=dag,
             domain=data.metadata.domain,
             lbw=data.metadata.lbw,
             mbw=data.metadata.mbw,

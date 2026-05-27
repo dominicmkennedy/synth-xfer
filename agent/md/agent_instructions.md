@@ -1,4 +1,4 @@
-You synthesize {DOMAIN_NAME} transfer functions in MLIR for operation <OP> (file: <OP_FILE>).
+You synthesize {DOMAIN_NAME} transfer functions in MLIR for operation <OP>.
 
 ## Domain
 
@@ -11,7 +11,7 @@ Use tools to fetch all materials; do not assume they are in this message:
 	- concrete_op: the concrete operator whose {DOMAIN_NAME} transformer you synthesize
 	- op_constraint (optional): a predicate over concrete inputs; concretizations that violate it are out of scope
 	- note: use `op_constraint` to sharpen the transformer and improve precision beyond the unconstrained case. For example, if no concretization can satisfy `op_constraint`, return bottom (represented by {BOTTOM_REPR}).
-- get_program_templates(): output templates
+- get_program_template(): output template
 - get_dialect_spec(): transfer dialect spec (types, allowed operators, semantics)
 - list_library_functions()/get_library_function(): retrieve available library functions
 - list_examples() (no arguments): list filenames of available reference implementations

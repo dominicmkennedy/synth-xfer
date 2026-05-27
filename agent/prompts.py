@@ -55,16 +55,20 @@ def fill_template(
     fragment: DomainFragment,
     *,
     op_name: str = "",
-    op_file: str = "",
+    op_pattern: str = "",
 ) -> str:
-    """Substitute domain placeholders and (optionally) per-task placeholders."""
+    """Substitute domain placeholders and (optionally) per-task placeholders.
+
+    `<OP>` (uppercase) is replaced with the readable pattern expression (e.g.
+    ``Add(arg0, And(arg1, arg2))``). `<op>` (lowercase) is replaced with a
+    sanitized identifier safe for MLIR symbol names (e.g. ``Add_arg0_And_arg1_arg2``).
+    """
     out = template
     out = out.replace("{DOMAIN_NAME}", domain.name)
     out = out.replace("{DOMAIN_SEMANTICS}", fragment.semantics)
     out = out.replace("{BOTTOM_REPR}", fragment.bottom_repr)
+    if op_pattern:
+        out = out.replace("<OP>", op_pattern)
     if op_name:
-        out = out.replace("<OP>", op_name)
         out = out.replace("<op>", op_name)
-    if op_file:
-        out = out.replace("<OP_FILE>", op_file)
     return out
