@@ -1,4 +1,5 @@
 from argparse import ArgumentParser, Namespace
+from importlib.resources import files
 from pathlib import Path
 
 import pandas as pd
@@ -6,7 +7,7 @@ from xdsl.dialects.func import FuncOp
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import RunInputMap, parse_to_run_inputs, run_xfer_fns
-from synth_xfer._util.parse_mlir import parse_mlir_func
+from synth_xfer._util.parse_mlir import get_fns, parse_mlir_mod
 from synth_xfer._util.tsv import EnumData
 from synth_xfer._util.xfer_data import (
     PreparedCandidates,
@@ -120,11 +121,8 @@ def main() -> None:
         }
         df = pd.DataFrame({f"arg_{n}": [x] for n, x in enumerate(fn_args[0])})
 
-    base_path = Path(__file__).parent.parent.parent / "mlir" / str(domain)
-    top = parse_mlir_func(base_path / "top.mlir")
-    meet = parse_mlir_func(base_path / "meet.mlir")
-
-    _run_apply(prepared, top, meet, domain, to_eval, df, args.output)
+    d_fns = get_fns(parse_mlir_mod(files("synth_xfer") / "mlir" / f"{domain}.mlir"))
+    _run_apply(prepared, d_fns["top"], d_fns["meet"], domain, to_eval, df, args.output)
 
 
 if __name__ == "__main__":

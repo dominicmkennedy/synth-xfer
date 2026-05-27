@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from importlib.resources import files
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -52,10 +53,8 @@ def get_solution(p: Path, d: AbstractDomain) -> FuncOp:
     sol_mod = parse_mlir(p)
     assert isinstance(sol_mod, ModuleOp)
 
-    base_path = Path(__file__).parent.parent.parent / "mlir" / str(d)
-    meet = parse_mlir_func(base_path / "meet.mlir")
-    top = parse_mlir_func(base_path / "top.mlir")
-    sol_mod.body.block.add_ops([meet, top])
+    domain_fns = get_fns(parse_mlir_mod(files("synth_xfer") / "mlir" / f"{d}.mlir"))
+    sol_mod.body.block.add_ops([domain_fns["meet"], domain_fns["top"]])
     inline_mod(sol_mod)
 
     return get_fns(sol_mod)["solution"]
@@ -143,24 +142,19 @@ class HelperFuncs:
         xfer_ret = [make_abst_ty(crt_ret_ty)]
         xfer_args = [make_abst_ty(x.type) for x in crt_func.args]
         xfer_fn = FuncOp.from_region("empty_transformer", xfer_args, xfer_ret)
-
-        base_path = Path(__file__).parent.parent.parent / "mlir" / str(d)
-        top = parse_mlir_func(base_path / "top.mlir")
-        meet = parse_mlir_func(base_path / "meet.mlir")
-        constraint = parse_mlir_func(base_path / "get_constraint.mlir")
-        instance_constraint = parse_mlir_func(base_path / "get_instance_constraint.mlir")
+        domain_fns = get_fns(parse_mlir_mod(files("synth_xfer") / "mlir" / f"{d}.mlir"))
 
         self.conc_ret_ty = crt_ret_ty
         self.conc_arg_ty = crt_arg_ty
         self.domain = d
         self.crt_func = crt_func
-        self.instance_constraint_func = instance_constraint
-        self.domain_constraint_func = constraint
+        self.instance_constraint_func = domain_fns["abstract_val_contains"]
+        self.domain_constraint_func = domain_fns["is_not_bottom"]
         self.op_constraint_func = op_con_fn
         self.abs_op_constraint_func = abs_op_con_fn
-        self.get_top_func = top
+        self.get_top_func = domain_fns["top"]
         self.transfer_func = xfer_fn
-        self.meet_func = meet
+        self.meet_func = domain_fns["meet"]
 
 
 def top_as_xfer(transfer: FuncOp) -> FuncOp:
@@ -168,7 +162,7 @@ def top_as_xfer(transfer: FuncOp) -> FuncOp:
     block = func.body.block
     args = func.args
 
-    call_top_op = CallOp("getTop", [args[0]], func.function_type.outputs.data)
+    call_top_op = CallOp("top", [args[0]], func.function_type.outputs.data)
     assert len(call_top_op.results) == 1
     top_res = call_top_op.results[0]
     return_op = ReturnOp(top_res)

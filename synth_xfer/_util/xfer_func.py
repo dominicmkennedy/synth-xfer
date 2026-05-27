@@ -52,7 +52,7 @@ class XferFunc:
     def build(self) -> FuncOp:
         """Assemble the full guarded transfer function.
 
-        Emits: f(a) = if cond(a) then body(a) else getTop(a)
+        Emits: f(a) = if cond(a) then body(a) else top(a)
 
         SelectOp doesn't support AbstractValueType, so the select is done
         field-wise via Get/Select/Make.
@@ -69,7 +69,7 @@ class XferFunc:
             fn.body.block.add_ops([body_call, ReturnOp(body_call.results[0])])
             return fn
 
-        top_call = CallOp("getTop", [args[0]], out_types)
+        top_call = CallOp("top", [args[0]], out_types)
         body_call = CallOp(body_name, args, out_types)
         cond_call = CallOp(
             self.cond.sym_name.data, args, self.cond.function_type.outputs.data
