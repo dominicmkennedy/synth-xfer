@@ -118,7 +118,7 @@ Domain-specific resources live under per-domain subdirectories:
 - `agent/examples/<DomainName>/*.mlir` — domain-specific reference implementations. Each domain must have at least `top.mlir` (used by `--mock-synth`).
 - `agent/examples/shared/*.mlir` — domain-agnostic operator-usage corpus, surfaced to all domains.
 - `agent/library/<DomainName>/*.mlir` — initial library functions for that domain (loaded when `--library-dir agent/library` is passed).
-- `mlir/<DomainName>/{top,meet,get_constraint,get_instance_constraint}.mlir` — domain helper MLIR consumed by the eval / verify pipeline.
+- `synth_xfer/mlir/<DomainName>.mlir` — domain helper MLIR consumed by the eval / verify pipeline.
 
 ## Meet Mode
 
