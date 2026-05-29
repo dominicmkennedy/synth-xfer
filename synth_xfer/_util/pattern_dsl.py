@@ -16,7 +16,6 @@ from xdsl_smt.dialects.transfer import (
     CountRZeroOp,
     LShrOp,
     MulOp,
-    NegOp,
     OrOp,
     PopCountOp,
     SDivOp,
@@ -75,7 +74,6 @@ class PatternOp(StrEnum):
     CountLZeroUndef = "CountLZeroUndef"
     CountRZero = "CountRZero"
     CountRZeroUndef = "CountRZeroUndef"
-    Neg = "Neg"
     Select = "Select"
     ICmpEq = "ICmpEq"
     ICmpNe = "ICmpNe"
@@ -89,7 +87,6 @@ class PatternOp(StrEnum):
     ICmpUge = "ICmpUge"
     # Abs = "Abs"  # TODO add to dialect
     # AbsUndef = "AbsUndef"  # TODO add to dialect
-    # Not = "Not"  # TODO add to dialect
     # TruncToBool = "TruncToBool"  # TODO add to dialect
     # ZextBool = "ZextBool"  # TODO add to dialect
     # SextBool = "SextBool"  # TODO add to dialect
@@ -248,7 +245,6 @@ _OP_SPECS: dict[PatternOp, OpSpec] = {
     PatternOp.Umin: OpSpec((_iN, _iN), _iN, UMinOp),
     PatternOp.Smax: OpSpec((_iN, _iN), _iN, SMaxOp),
     PatternOp.Smin: OpSpec((_iN, _iN), _iN, SMinOp),
-    PatternOp.Neg: OpSpec((_iN,), _iN, NegOp),
     PatternOp.PopCount: OpSpec((_iN,), _iN, PopCountOp),
     PatternOp.CountLZero: OpSpec((_iN,), _iN, CountLZeroOp),
     PatternOp.CountLZeroUndef: OpSpec(

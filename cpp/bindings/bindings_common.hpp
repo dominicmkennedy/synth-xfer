@@ -30,8 +30,10 @@ template <template <std::size_t> class Dom>
 struct supports_llvm_pattern_domain : std::false_type {};
 
 template <> struct supports_llvm_pattern_domain<KnownBits> : std::true_type {};
-template <> struct supports_llvm_pattern_domain<UConstRange> : std::true_type {};
-template <> struct supports_llvm_pattern_domain<SConstRange> : std::true_type {};
+template <>
+struct supports_llvm_pattern_domain<UConstRange> : std::true_type {};
+template <>
+struct supports_llvm_pattern_domain<SConstRange> : std::true_type {};
 
 void register_rng(py::module_ &m);
 void register_results_class(py::module_ &m);
@@ -303,29 +305,33 @@ void register_eval_pattern_domain(py::module_ &m) {
   bind_eval_pattern_func(
       m, exact_fn_name,
       +[](py::handle to_eval, const std::vector<double> &weights,
-          const std::string &pattern, std::uintptr_t composite_addr)
+          const std::string &pattern,
+          std::optional<std::uintptr_t> composite_addr)
           -> std::tuple<double, double, double, double, double, double> {
         const EvalVec &v = py::cast<const EvalVec &>(to_eval);
         auto exact_rows = make_exact_pattern_rows<EvalPatternT>(v, weights);
         py::gil_scoped_release release;
-        return EvalPatternT{
-            reinterpret_cast<typename EvalPatternT::XferFn>(composite_addr),
-            pattern}
-            .eval_pattern_exact(exact_rows);
+        std::optional<typename EvalPatternT::XferFn> composite;
+        if (composite_addr)
+          composite =
+              reinterpret_cast<typename EvalPatternT::XferFn>(*composite_addr);
+        return EvalPatternT{composite, pattern}.eval_pattern_exact(exact_rows);
       });
 
   bind_eval_pattern_func(
       m, norm_fn_name,
       +[](py::handle to_run, const std::vector<double> &weights,
           const std::string &pattern,
-          std::uintptr_t composite_addr) -> std::pair<double, double> {
+          std::optional<std::uintptr_t> composite_addr)
+          -> std::pair<double, double> {
         const RunVec &v = py::cast<const RunVec &>(to_run);
         auto norm_rows = make_norm_pattern_rows<EvalPatternT>(v, weights);
         py::gil_scoped_release release;
-        return EvalPatternT{
-            reinterpret_cast<typename EvalPatternT::XferFn>(composite_addr),
-            pattern}
-            .eval_pattern_norm(norm_rows);
+        std::optional<typename EvalPatternT::XferFn> composite;
+        if (composite_addr)
+          composite =
+              reinterpret_cast<typename EvalPatternT::XferFn>(*composite_addr);
+        return EvalPatternT{composite, pattern}.eval_pattern_norm(norm_rows);
       });
 }
 

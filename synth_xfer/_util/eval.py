@@ -100,38 +100,6 @@ def _get_eval_fn(
     )
 
 
-def _get_eval_pattern_exact_fn(
-    to_eval: ToEval,
-) -> Callable[
-    [ToEval, list[float], str, int],
-    tuple[float, float, float, float, float, float],
-]:
-    def _eval_engine_name(to_eval: ToEval) -> str:
-        suffix = to_eval.__class__.__name__.lower()[6:]
-        return f"eval_pattern_exact_{suffix}"
-
-    return cast(
-        Callable[
-            [ToEval, list[float], str, int],
-            tuple[float, float, float, float, float, float],
-        ],
-        _get_ee_fn_dyn(_eval_engine_name(to_eval)),
-    )
-
-
-def _get_eval_pattern_norm_fn(
-    to_run: ArgsVec,
-) -> Callable[[ArgsVec, list[float], str, int], tuple[float, float]]:
-    def _eval_engine_name(to_run: ArgsVec) -> str:
-        suffix = to_run.__class__.__name__.lower()[4:]
-        return f"eval_pattern_norm_{suffix}"
-
-    return cast(
-        Callable[[ArgsVec, list[float], str, int], tuple[float, float]],
-        _get_ee_fn_dyn(_eval_engine_name(to_run)),
-    )
-
-
 def get_per_bit(a: Results) -> list[PerBitRes]:
     x = str(a).split("\n")
 
@@ -309,17 +277,37 @@ def parse_to_eval_inputs(
 
 
 def eval_pattern_exact(
-    to_eval: ToEval, weights: list[float], pattern: str, composite: FnPtr
+    to_eval: ToEval, weights: list[float], pattern: str, composite: FnPtr | None
 ) -> tuple[float, float, float, float, float, float]:
     # (llvm_seq_sound%, composite_sound%, llvm_seq_exact%, composite_exact%,
     #  llvm_seq_dist, composite_dist)
-    return _get_eval_pattern_exact_fn(to_eval)(to_eval, weights, pattern, composite.addr)
+
+    def _eval_engine_name(to_eval: ToEval) -> str:
+        suffix = to_eval.__class__.__name__.lower()[6:]
+        return f"eval_pattern_exact_{suffix}"
+
+    fn_addr = composite.addr if composite else None
+    return cast(
+        Callable[
+            [ToEval, list[float], str, int | None],
+            tuple[float, float, float, float, float, float],
+        ],
+        _get_ee_fn_dyn(_eval_engine_name(to_eval)),
+    )(to_eval, weights, pattern, fn_addr)
 
 
 def eval_pattern_norm(
-    to_run: ArgsVec, weights: list[float], pattern: str, composite: FnPtr
+    to_run: ArgsVec, weights: list[float], pattern: str, composite: FnPtr | None
 ) -> tuple[float, float]:
-    return _get_eval_pattern_norm_fn(to_run)(to_run, weights, pattern, composite.addr)
+    def _eval_engine_name(to_run: ArgsVec) -> str:
+        suffix = to_run.__class__.__name__.lower()[4:]
+        return f"eval_pattern_norm_{suffix}"
+
+    fn_addr = composite.addr if composite else None
+    return cast(
+        Callable[[ArgsVec, list[float], str, int | None], tuple[float, float]],
+        _get_ee_fn_dyn(_eval_engine_name(to_run)),
+    )(to_run, weights, pattern, fn_addr)
 
 
 def run_xfer_fns(

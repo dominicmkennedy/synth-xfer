@@ -3,6 +3,8 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
+#include <optional>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -83,7 +85,7 @@ public:
     double weight;
   };
 
-  EvalPattern(XferFn composite, std::string pattern)
+  EvalPattern(std::optional<XferFn> composite, std::string pattern)
       : composite_xfer_(std::move(composite)),
         pattern_(PatternTy::parse(pattern)) {}
 
@@ -109,37 +111,49 @@ public:
           1.0L / static_cast<long double>(row.weight);
       total_weight += inv_weight;
 
-      const auto composite_result = run_fn_ptr(composite_xfer_, row.args);
       const auto llvm_seq_result = run_llvm_pattern(pattern_, row.args);
 
       if (isSuperset(llvm_seq_result, row.best))
         llvm_seq_sound_weight += inv_weight;
-      if (isSuperset(composite_result, row.best))
-        composite_sound_weight += inv_weight;
       if (llvm_seq_result == row.best)
         llvm_seq_correct_weight += inv_weight;
-      if (composite_result == row.best)
-        composite_correct_weight += inv_weight;
 
       llvm_seq_dist_weight +=
           static_cast<long double>(dist(llvm_seq_result, row.best)) *
           inv_weight;
-      composite_dist_weight +=
-          static_cast<long double>(dist(composite_result, row.best)) *
-          inv_weight;
+
+      if (composite_xfer_) {
+        const auto composite_result = run_fn_ptr(*composite_xfer_, row.args);
+        if (isSuperset(composite_result, row.best))
+          composite_sound_weight += inv_weight;
+        if (composite_result == row.best)
+          composite_correct_weight += inv_weight;
+        composite_dist_weight +=
+            static_cast<long double>(dist(composite_result, row.best)) *
+            inv_weight;
+      }
     }
 
+    const double nan = std::numeric_limits<double>::quiet_NaN();
     if (total_weight == 0.0L) {
-      return {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+      return {0.0, composite_xfer_ ? 0.0 : nan,
+              0.0, composite_xfer_ ? 0.0 : nan,
+              0.0, composite_xfer_ ? 0.0 : nan};
     }
 
     return {
         static_cast<double>(100.0L * llvm_seq_sound_weight / total_weight),
-        static_cast<double>(100.0L * composite_sound_weight / total_weight),
+        composite_xfer_ ? static_cast<double>(100.0L * composite_sound_weight /
+                                              total_weight)
+                        : nan,
         static_cast<double>(100.0L * llvm_seq_correct_weight / total_weight),
-        static_cast<double>(100.0L * composite_correct_weight / total_weight),
+        composite_xfer_ ? static_cast<double>(
+                              100.0L * composite_correct_weight / total_weight)
+                        : nan,
         static_cast<double>(llvm_seq_dist_weight / total_weight),
-        static_cast<double>(composite_dist_weight / total_weight),
+        composite_xfer_
+            ? static_cast<double>(composite_dist_weight / total_weight)
+            : nan,
     };
   }
 
@@ -154,23 +168,28 @@ public:
           1.0L / static_cast<long double>(row.weight);
       total_weight += inv_weight;
 
-      const auto composite_result = run_fn_ptr(composite_xfer_, row.args);
       const auto llvm_seq_result = run_llvm_pattern(pattern_, row.args);
 
       llvm_seq_norm_weight +=
           static_cast<long double>(llvm_seq_result.norm()) * inv_weight;
 
-      composite_norm_weight +=
-          static_cast<long double>(composite_result.norm()) * inv_weight;
+      if (composite_xfer_) {
+        const auto composite_result = run_fn_ptr(*composite_xfer_, row.args);
+        composite_norm_weight +=
+            static_cast<long double>(composite_result.norm()) * inv_weight;
+      }
     }
 
+    const double nan = std::numeric_limits<double>::quiet_NaN();
     if (total_weight == 0.0L) {
-      return {0.0, 0.0};
+      return {0.0, composite_xfer_ ? 0.0 : nan};
     }
 
     return {
         static_cast<double>(llvm_seq_norm_weight / total_weight),
-        static_cast<double>(composite_norm_weight / total_weight),
+        composite_xfer_
+            ? static_cast<double>(composite_norm_weight / total_weight)
+            : nan,
     };
   }
 
@@ -194,7 +213,7 @@ private:
     return ResultD({APInt<ResBw>(out_parts[0]), APInt<ResBw>(out_parts[1])});
   }
 
-  XferFn composite_xfer_;
+  std::optional<XferFn> composite_xfer_;
   PatternTy pattern_;
 };
 

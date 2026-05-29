@@ -127,9 +127,7 @@ def main() -> None:
         formatter_class=ArgumentDefaultsHelpFormatter,
         help="Evaluate a pattern transformer compared to LLVM",
     )
-    eval_parser.add_argument(
-        "--composite-xfer", type=Path, required=True, help="Composite MLIR file"
-    )
+    eval_parser.add_argument("--composite-xfer", type=Path, help="Composite MLIR file")
     eval_parser.add_argument("--xfer-name", type=str, help="Name of composite function")
     eval_parser.add_argument(
         "-i",
@@ -215,16 +213,18 @@ def main() -> None:
             print(
                 f"LLVM Seq   | {seq_sound:6.2f}% | {seq_exact:6.2f}% | {seq_norm:7.5f} | {_dist_cell(seq_sound, seq_dist):>7}"
             )
-            print(
-                f"Composite  | {comp_sound:6.2f}% | {comp_exact:6.2f}% | {comp_norm:7.5f} | {_dist_cell(comp_sound, comp_dist):>7}"
-            )
+            if args.composite_xfer:
+                print(
+                    f"Composite  | {comp_sound:6.2f}% | {comp_exact:6.2f}% | {comp_norm:7.5f} | {_dist_cell(comp_sound, comp_dist):>7}"
+                )
         else:
             print(f"Type       | Sound % | Exact % |  Norm    (bw={args.bw})")
             print("-----------|---------|---------|---------")
             print(f"LLVM Seq   | {seq_sound:6.2f}% | {seq_exact:6.2f}% | {seq_norm:7.5f}")
-            print(
-                f"Composite  | {comp_sound:6.2f}% | {comp_exact:6.2f}% | {comp_norm:7.5f}"
-            )
+            if args.composite_xfer:
+                print(
+                    f"Composite  | {comp_sound:6.2f}% | {comp_exact:6.2f}% | {comp_norm:7.5f}"
+                )
     if args.command == "lift":
         stream = StringIO()
         Printer(stream=stream).print_op(lower_pattern_to_mlir(args.op))

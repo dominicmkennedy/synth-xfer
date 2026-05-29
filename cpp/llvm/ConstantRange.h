@@ -20,6 +20,42 @@ struct OverflowingBinaryOperator {
   enum { NoUnsignedWrap = 1u, NoSignedWrap = 2u };
 };
 
+enum ICmpPred : unsigned {
+  // Opcode            U L G E    Intuitive operation
+  FCMP_FALSE = 0, ///< 0 0 0 0    Always false (always folded)
+  FCMP_OEQ = 1,   ///< 0 0 0 1    True if ordered and equal
+  FCMP_OGT = 2,   ///< 0 0 1 0    True if ordered and greater than
+  FCMP_OGE = 3,   ///< 0 0 1 1    True if ordered and greater than or equal
+  FCMP_OLT = 4,   ///< 0 1 0 0    True if ordered and less than
+  FCMP_OLE = 5,   ///< 0 1 0 1    True if ordered and less than or equal
+  FCMP_ONE = 6,   ///< 0 1 1 0    True if ordered and operands are unequal
+  FCMP_ORD = 7,   ///< 0 1 1 1    True if ordered (no nans)
+  FCMP_UNO = 8,   ///< 1 0 0 0    True if unordered: isnan(X) | isnan(Y)
+  FCMP_UEQ = 9,   ///< 1 0 0 1    True if unordered or equal
+  FCMP_UGT = 10,  ///< 1 0 1 0    True if unordered or greater than
+  FCMP_UGE = 11,  ///< 1 0 1 1    True if unordered, greater than, or equal
+  FCMP_ULT = 12,  ///< 1 1 0 0    True if unordered or less than
+  FCMP_ULE = 13,  ///< 1 1 0 1    True if unordered, less than, or equal
+  FCMP_UNE = 14,  ///< 1 1 1 0    True if unordered or not equal
+  FCMP_TRUE = 15, ///< 1 1 1 1    Always true (always folded)
+  FIRST_FCMP_PREDICATE = FCMP_FALSE,
+  LAST_FCMP_PREDICATE = FCMP_TRUE,
+  BAD_FCMP_PREDICATE = FCMP_TRUE + 1,
+  ICMP_EQ = 32,  ///< equal
+  ICMP_NE = 33,  ///< not equal
+  ICMP_UGT = 34, ///< unsigned greater than
+  ICMP_UGE = 35, ///< unsigned greater or equal
+  ICMP_ULT = 36, ///< unsigned less than
+  ICMP_ULE = 37, ///< unsigned less or equal
+  ICMP_SGT = 38, ///< signed greater than
+  ICMP_SGE = 39, ///< signed greater or equal
+  ICMP_SLT = 40, ///< signed less than
+  ICMP_SLE = 41, ///< signed less or equal
+  FIRST_ICMP_PREDICATE = ICMP_EQ,
+  LAST_ICMP_PREDICATE = ICMP_SLE,
+  BAD_ICMP_PREDICATE = ICMP_SLE + 1
+};
+
 struct KnownBits;
 
 class [[nodiscard]] ConstantRange {
@@ -48,6 +84,7 @@ public:
   }
 
   static ConstantRange fromKnownBits(const KnownBits &Known, bool IsSigned);
+  bool icmp(ICmpPred Pred, const ConstantRange &Other) const;
 
   std::pair<ConstantRange, ConstantRange> splitPosNeg() const;
 
@@ -182,6 +219,10 @@ public:
   ConstantRange
   multiplyWithNoWrap(const ConstantRange &Other, unsigned NoWrapKind,
                      PreferredRangeType RangeType = Smallest) const;
+  ConstantRange smax(const ConstantRange &Other) const;
+  ConstantRange umax(const ConstantRange &Other) const;
+  ConstantRange smin(const ConstantRange &Other) const;
+  ConstantRange umin(const ConstantRange &Other) const;
   ConstantRange udiv(const ConstantRange &Other) const;
   ConstantRange sdiv(const ConstantRange &Other) const;
   ConstantRange urem(const ConstantRange &Other) const;
@@ -205,6 +246,9 @@ public:
   ConstantRange sshl_sat(const ConstantRange &Other) const;
   ConstantRange inverse() const;
   ConstantRange abs(bool IntMinIsPoison = false) const;
+  ConstantRange ctlz(bool ZeroIsPoison = false) const;
+  ConstantRange cttz(bool ZeroIsPoison = false) const;
+  ConstantRange ctpop() const;
   KnownBits toKnownBits() const;
 };
 
@@ -252,6 +296,41 @@ inline KnownBits ConstantRange::toKnownBits() const {
     Known.One.clearLowBits(*DifferentBit + 1);
   }
   return Known;
+}
+
+inline bool ConstantRange::icmp(ICmpPred Pred,
+                                const ConstantRange &Other) const {
+  if (isEmptySet() || Other.isEmptySet())
+    return true;
+
+  switch (Pred) {
+  case ICmpPred::ICMP_EQ:
+    if (const APInt *L = getSingleElement())
+      if (const APInt *R = Other.getSingleElement())
+        return *L == *R;
+    return false;
+  case ICmpPred::ICMP_NE:
+    return inverse().contains(Other);
+  case ICmpPred::ICMP_ULT:
+    return getUnsignedMax().ult(Other.getUnsignedMin());
+  case ICmpPred::ICMP_ULE:
+    return getUnsignedMax().ule(Other.getUnsignedMin());
+  case ICmpPred::ICMP_UGT:
+    return getUnsignedMin().ugt(Other.getUnsignedMax());
+  case ICmpPred::ICMP_UGE:
+    return getUnsignedMin().uge(Other.getUnsignedMax());
+  case ICmpPred::ICMP_SLT:
+    return getSignedMax().slt(Other.getSignedMin());
+  case ICmpPred::ICMP_SLE:
+    return getSignedMax().sle(Other.getSignedMin());
+  case ICmpPred::ICMP_SGT:
+    return getSignedMin().sgt(Other.getSignedMax());
+  case ICmpPred::ICMP_SGE:
+    return getSignedMin().sge(Other.getSignedMax());
+  default:
+    assert(false);
+  }
+  return false;
 }
 
 inline std::pair<ConstantRange, ConstantRange>
@@ -808,6 +887,58 @@ ConstantRange::multiplyWithNoWrap(const ConstantRange &Other,
   }
 
   return Result;
+}
+
+inline ConstantRange ConstantRange::smax(const ConstantRange &Other) const {
+  // X smax Y is: range(smax(X_smin, Y_smin),
+  //                    smax(X_smax, Y_smax))
+  if (isEmptySet() || Other.isEmptySet())
+    return getEmpty();
+  APInt NewL = APIntOps::smax(getSignedMin(), Other.getSignedMin());
+  APInt NewU = APIntOps::smax(getSignedMax(), Other.getSignedMax()) + 1;
+  ConstantRange Res = getNonEmpty(std::move(NewL), std::move(NewU));
+  if (isSignWrappedSet() || Other.isSignWrappedSet())
+    return Res.intersectWith(unionWith(Other, Signed), Signed);
+  return Res;
+}
+
+inline ConstantRange ConstantRange::umax(const ConstantRange &Other) const {
+  // X umax Y is: range(umax(X_umin, Y_umin),
+  //                    umax(X_umax, Y_umax))
+  if (isEmptySet() || Other.isEmptySet())
+    return getEmpty();
+  APInt NewL = APIntOps::umax(getUnsignedMin(), Other.getUnsignedMin());
+  APInt NewU = APIntOps::umax(getUnsignedMax(), Other.getUnsignedMax()) + 1;
+  ConstantRange Res = getNonEmpty(std::move(NewL), std::move(NewU));
+  if (isWrappedSet() || Other.isWrappedSet())
+    return Res.intersectWith(unionWith(Other, Unsigned), Unsigned);
+  return Res;
+}
+
+inline ConstantRange ConstantRange::smin(const ConstantRange &Other) const {
+  // X smin Y is: range(smin(X_smin, Y_smin),
+  //                    smin(X_smax, Y_smax))
+  if (isEmptySet() || Other.isEmptySet())
+    return getEmpty();
+  APInt NewL = APIntOps::smin(getSignedMin(), Other.getSignedMin());
+  APInt NewU = APIntOps::smin(getSignedMax(), Other.getSignedMax()) + 1;
+  ConstantRange Res = getNonEmpty(std::move(NewL), std::move(NewU));
+  if (isSignWrappedSet() || Other.isSignWrappedSet())
+    return Res.intersectWith(unionWith(Other, Signed), Signed);
+  return Res;
+}
+
+inline ConstantRange ConstantRange::umin(const ConstantRange &Other) const {
+  // X umin Y is: range(umin(X_umin, Y_umin),
+  //                    umin(X_umax, Y_umax))
+  if (isEmptySet() || Other.isEmptySet())
+    return getEmpty();
+  APInt NewL = APIntOps::umin(getUnsignedMin(), Other.getUnsignedMin());
+  APInt NewU = APIntOps::umin(getUnsignedMax(), Other.getUnsignedMax()) + 1;
+  ConstantRange Res = getNonEmpty(std::move(NewL), std::move(NewU));
+  if (isWrappedSet() || Other.isWrappedSet())
+    return Res.intersectWith(unionWith(Other, Unsigned), Unsigned);
+  return Res;
 }
 
 inline ConstantRange ConstantRange::udiv(const ConstantRange &RHS) const {
@@ -1391,6 +1522,158 @@ inline ConstantRange ConstantRange::abs(bool IntMinIsPoison) const {
   // Range crosses zero.
   return ConstantRange::getNonEmpty(APInt::getZero(getBitWidth()),
                                     APIntOps::umax(-SMin, SMax) + 1);
+}
+
+inline ConstantRange ConstantRange::ctlz(bool ZeroIsPoison) const {
+  if (isEmptySet())
+    return getEmpty();
+
+  APInt Zero = APInt::getZero(getBitWidth());
+  if (ZeroIsPoison && contains(Zero)) {
+    // ZeroIsPoison is set, and zero is contained. We discern three cases, in
+    // which a zero can appear:
+    // 1) Lower is zero, handling cases of kind [0, 1), [0, 2), etc.
+    // 2) Upper is zero, wrapped set, handling cases of kind [3, 0], etc.
+    // 3) Zero contained in a wrapped set, e.g., [3, 2), [3, 1), etc.
+
+    if (getLower().isZero()) {
+      if ((getUpper() - 1).isZero()) {
+        // We have in input interval of kind [0, 1). In this case we cannot
+        // really help but return empty-set.
+        return getEmpty();
+      }
+
+      // Compute the resulting range by excluding zero from Lower.
+      return ConstantRange(
+          APInt(getBitWidth(), (getUpper() - 1).countl_zero()),
+          APInt(getBitWidth(), (getLower() + 1).countl_zero() + 1));
+    } else if ((getUpper() - 1).isZero()) {
+      // Compute the resulting range by excluding zero from Upper.
+      return ConstantRange(Zero,
+                           APInt(getBitWidth(), getLower().countl_zero() + 1));
+    } else {
+      return ConstantRange(Zero, APInt(getBitWidth(), getBitWidth()));
+    }
+  }
+
+  // Zero is either safe or not in the range. The output range is composed by
+  // the result of countLeadingZero of the two extremes.
+  return getNonEmpty(APInt(getBitWidth(), getUnsignedMax().countl_zero()),
+                     APInt(getBitWidth(), getUnsignedMin().countl_zero()) + 1);
+}
+
+static ConstantRange getUnsignedCountTrailingZerosRange(const APInt &Lower,
+                                                        const APInt &Upper) {
+  assert(!ConstantRange(Lower, Upper).isWrappedSet() &&
+         "Unexpected wrapped set.");
+  assert(Lower != Upper && "Unexpected empty set.");
+  unsigned BitWidth = Lower.getBitWidth();
+  if (Lower + 1 == Upper)
+    return ConstantRange(APInt(BitWidth, Lower.countr_zero()));
+  if (Lower.isZero())
+    return ConstantRange(APInt::getZero(BitWidth),
+                         APInt(BitWidth, BitWidth + 1));
+
+  // Calculate longest common prefix.
+  unsigned LCPLength = (Lower ^ (Upper - 1)).countl_zero();
+  // If Lower is {LCP, 000...}, the maximum is Lower.countr_zero().
+  // Otherwise, the maximum is BitWidth - LCPLength - 1 ({LCP, 100...}).
+  return ConstantRange(
+      APInt::getZero(BitWidth),
+      APInt(BitWidth,
+            std::max(BitWidth - LCPLength - 1, Lower.countr_zero()) + 1));
+}
+
+inline ConstantRange ConstantRange::cttz(bool ZeroIsPoison) const {
+  if (isEmptySet())
+    return getEmpty();
+
+  unsigned BitWidth = getBitWidth();
+  APInt Zero = APInt::getZero(BitWidth);
+  if (ZeroIsPoison && contains(Zero)) {
+    // ZeroIsPoison is set, and zero is contained. We discern three cases, in
+    // which a zero can appear:
+    // 1) Lower is zero, handling cases of kind [0, 1), [0, 2), etc.
+    // 2) Upper is zero, wrapped set, handling cases of kind [3, 0], etc.
+    // 3) Zero contained in a wrapped set, e.g., [3, 2), [3, 1), etc.
+
+    if (Lower.isZero()) {
+      if (Upper == 1) {
+        // We have in input interval of kind [0, 1). In this case we cannot
+        // really help but return empty-set.
+        return getEmpty();
+      }
+
+      // Compute the resulting range by excluding zero from Lower.
+      return getUnsignedCountTrailingZerosRange(APInt(BitWidth, 1), Upper);
+    } else if (Upper == 1) {
+      // Compute the resulting range by excluding zero from Upper.
+      return getUnsignedCountTrailingZerosRange(Lower, Zero);
+    } else {
+      ConstantRange CR1 = getUnsignedCountTrailingZerosRange(Lower, Zero);
+      ConstantRange CR2 =
+          getUnsignedCountTrailingZerosRange(APInt(BitWidth, 1), Upper);
+      return CR1.unionWith(CR2);
+    }
+  }
+
+  if (isFullSet())
+    return getNonEmpty(Zero, APInt(BitWidth, BitWidth) + 1);
+  if (!isWrappedSet())
+    return getUnsignedCountTrailingZerosRange(Lower, Upper);
+  // The range is wrapped. We decompose it into two ranges, [0, Upper) and
+  // [Lower, 0).
+  // Handle [Lower, 0)
+  ConstantRange CR1 = getUnsignedCountTrailingZerosRange(Lower, Zero);
+  // Handle [0, Upper)
+  ConstantRange CR2 = getUnsignedCountTrailingZerosRange(Zero, Upper);
+  return CR1.unionWith(CR2);
+}
+
+static ConstantRange getUnsignedPopCountRange(const APInt &Lower,
+                                              const APInt &Upper) {
+  assert(!ConstantRange(Lower, Upper).isWrappedSet() &&
+         "Unexpected wrapped set.");
+  assert(Lower != Upper && "Unexpected empty set.");
+  unsigned BitWidth = Lower.getBitWidth();
+  if (Lower + 1 == Upper)
+    return ConstantRange(APInt(BitWidth, Lower.popcount()));
+
+  APInt Max = Upper - 1;
+  // Calculate longest common prefix.
+  unsigned LCPLength = (Lower ^ Max).countl_zero();
+  unsigned LCPPopCount = Lower.getHiBits(LCPLength).popcount();
+  // If Lower is {LCP, 000...}, the minimum is the popcount of LCP.
+  // Otherwise, the minimum is the popcount of LCP + 1.
+  unsigned MinBits =
+      LCPPopCount + (Lower.countr_zero() < BitWidth - LCPLength ? 1 : 0);
+  // If Max is {LCP, 111...}, the maximum is the popcount of LCP + (BitWidth -
+  // length of LCP).
+  // Otherwise, the minimum is the popcount of LCP + (BitWidth -
+  // length of LCP - 1).
+  unsigned MaxBits = LCPPopCount + (BitWidth - LCPLength) -
+                     (Max.countr_one() < BitWidth - LCPLength ? 1 : 0);
+  return ConstantRange(APInt(BitWidth, MinBits), APInt(BitWidth, MaxBits + 1));
+}
+
+inline ConstantRange ConstantRange::ctpop() const {
+  if (isEmptySet())
+    return getEmpty();
+
+  unsigned BitWidth = getBitWidth();
+  APInt Zero = APInt::getZero(BitWidth);
+  if (isFullSet())
+    return getNonEmpty(Zero, APInt(BitWidth, BitWidth) + 1);
+  if (!isWrappedSet())
+    return getUnsignedPopCountRange(Lower, Upper);
+  // The range is wrapped. We decompose it into two ranges, [0, Upper) and
+  // [Lower, 0).
+  // Handle [Lower, 0) == [Lower, Max]
+  ConstantRange CR1 = ConstantRange(APInt(BitWidth, Lower.countl_one()),
+                                    APInt(BitWidth, BitWidth + 1));
+  // Handle [0, Upper)
+  ConstantRange CR2 = getUnsignedPopCountRange(Zero, Upper);
+  return CR1.unionWith(CR2);
 }
 
 } // end namespace llvm
