@@ -188,14 +188,11 @@ def analyze_pattern(dag: PatternDag, domain: AbstractDomain) -> str:
 
 def eval_pattern(
     pattern: PatternDag,
-    composite_xfer: Path,
+    composite_xfer: Path | None,
     xfer_name: str | None,
     data: EnumData,
     bw: int,
 ) -> tuple[float, float, float, float, float, float, float, float]:
-    comp_mod = parse_mlir_mod(composite_xfer)
-    comp_xfer_name = resolve_xfer_name(get_fns(comp_mod), xfer_name)
-
     if bw not in [x[0] for x in data.metadata.mbw + data.metadata.hbw]:
         raise ValueError(f"BW {bw} not in Enum TSV")
 
@@ -210,22 +207,31 @@ def eval_pattern(
     else:
         weights = rows["weight"].astype(float).tolist()
 
-    helpers = HelperFuncs(data.metadata.op, data.metadata.domain)
-    lowerer = LowerToLLVM([bw])
-    lowerer.add_fn(helpers.meet_func)
-    lowerer.add_fn(helpers.get_top_func)
-    lowerer.add_mod(comp_mod, [comp_xfer_name])
+    if composite_xfer:
+        comp_mod = parse_mlir_mod(composite_xfer)
+        comp_xfer_name = resolve_xfer_name(get_fns(comp_mod), xfer_name)
+        helpers = HelperFuncs(data.metadata.op, data.metadata.domain)
+        lowerer = LowerToLLVM([bw])
+        lowerer.add_fn(helpers.meet_func)
+        lowerer.add_fn(helpers.get_top_func)
+        lowerer.add_mod(comp_mod, [comp_xfer_name])
 
-    with Jit() as jit:
-        jit.add_mod(lowerer)
-        shim_ptr = jit.get_fn_ptr(f"{comp_xfer_name}_{bw}_shim")
+        with Jit() as jit:
+            jit.add_mod(lowerer)
+            shim_ptr = jit.get_fn_ptr(f"{comp_xfer_name}_{bw}_shim")
+            seq_sound, comp_sound, seq_exact, comp_exact, seq_dist, comp_dist = (
+                eval_pattern_exact(exact_to_eval, weights, str(pattern), shim_ptr)
+            )
+
+            seq_norm, comp_norm = eval_pattern_norm(
+                norm_to_eval, weights, str(pattern), shim_ptr
+            )
+    else:
         seq_sound, comp_sound, seq_exact, comp_exact, seq_dist, comp_dist = (
-            eval_pattern_exact(exact_to_eval, weights, str(pattern), shim_ptr)
+            eval_pattern_exact(exact_to_eval, weights, str(pattern), None)
         )
 
-        seq_norm, comp_norm = eval_pattern_norm(
-            norm_to_eval, weights, str(pattern), shim_ptr
-        )
+        seq_norm, comp_norm = eval_pattern_norm(norm_to_eval, weights, str(pattern), None)
 
     return (
         seq_sound,
