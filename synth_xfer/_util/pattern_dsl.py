@@ -1,13 +1,13 @@
 from dataclasses import dataclass
 from enum import StrEnum
 import re
-from typing import Callable
 
 from xdsl.dialects.arith import AndIOp
 from xdsl.dialects.builtin import i1
 from xdsl.dialects.func import CallOp, FuncOp, ReturnOp
 from xdsl.ir import Attribute, Operation, SSAValue
 from xdsl_smt.dialects.transfer import (
+    AbsOp,
     AddOp,
     AndOp,
     AShrOp,
@@ -20,17 +20,20 @@ from xdsl_smt.dialects.transfer import (
     PopCountOp,
     SDivOp,
     SelectOp,
+    SextBoolOp,
     ShlOp,
     SMaxOp,
     SMinOp,
     SRemOp,
     SubOp,
     TransIntegerType,
+    TruncToBoolOp,
     UDivOp,
     UMaxOp,
     UMinOp,
     URemOp,
     XorOp,
+    ZextBoolOp,
 )
 
 
@@ -85,19 +88,19 @@ class PatternOp(StrEnum):
     ICmpUle = "ICmpUle"
     ICmpUgt = "ICmpUgt"
     ICmpUge = "ICmpUge"
-    # Abs = "Abs"  # TODO add to dialect
-    # AbsUndef = "AbsUndef"  # TODO add to dialect
-    # TruncToBool = "TruncToBool"  # TODO add to dialect
-    # ZextBool = "ZextBool"  # TODO add to dialect
-    # SextBool = "SextBool"  # TODO add to dialect
-    # SaddSat = "SaddSat"  # TODO add to dialect
-    # UaddSat = "UaddSat"  # TODO add to dialect
-    # SsubSat = "SsubSat"  # TODO add to dialect
-    # UsubSat = "UsubSat"  # TODO add to dialect
-    # SmulSat = "SmulSat"  # TODO add to dialect
-    # UmulSat = "UmulSat"  # TODO add to dialect
-    # SshlSat = "SshlSat"  # TODO add to dialect
-    # UshlSat = "UshlSat"  # TODO add to dialect
+    Abs = "Abs"
+    AbsUndef = "AbsUndef"
+    TruncToBool = "TruncToBool"
+    ZextBool = "ZextBool"
+    SextBool = "SextBool"
+    SaddSat = "SaddSat"
+    UaddSat = "UaddSat"
+    SsubSat = "SsubSat"
+    UsubSat = "UsubSat"
+    SmulSat = "SmulSat"
+    UmulSat = "UmulSat"
+    SshlSat = "SshlSat"
+    UshlSat = "UshlSat"
 
     @property
     def spec(self) -> "OpSpec":
@@ -132,6 +135,7 @@ class PatternNode:
 @dataclass(slots=True)
 class PatternDag:
     num_args: int
+    arg_types: tuple[Attribute, ...]
     nodes: tuple[PatternNode, ...]
     result: NodeRef
 
@@ -157,7 +161,8 @@ class PatternDag:
         return render_ref(self.result)
 
     def __init__(self, expr: str) -> None:
-        self.num_args, self.nodes, self.result = _PatternExprParser(expr).parse()
+        self.arg_types, self.nodes, self.result = _PatternExprParser(expr).parse()
+        self.num_args = len(self.arg_types)
 
 
 @dataclass(frozen=True, slots=True)
@@ -165,15 +170,15 @@ class OpSpec:
     operand_types: tuple[Attribute, ...]
     result_type: Attribute
     op_cls: type[Operation] | None = None
-    builder: Callable[[tuple[SSAValue, ...]], Operation] | None = None
     constraints: tuple[str, ...] = ()
     cmp_pred: str | None = None
+    impl_helper: str | None = None
 
     def build(self, operands: tuple[SSAValue, ...]) -> Operation:
         if self.cmp_pred is not None:
             return CmpOp(operands[0], operands[1], self.cmp_pred)
-        if self.builder is not None:
-            return self.builder(operands)
+        if self.impl_helper is not None:
+            return CallOp(self.impl_helper, operands, [self.result_type])
         assert self.op_cls is not None
         return self.op_cls(*operands)
 
@@ -245,6 +250,18 @@ _OP_SPECS: dict[PatternOp, OpSpec] = {
     PatternOp.Umin: OpSpec((_iN, _iN), _iN, UMinOp),
     PatternOp.Smax: OpSpec((_iN, _iN), _iN, SMaxOp),
     PatternOp.Smin: OpSpec((_iN, _iN), _iN, SMinOp),
+    PatternOp.SaddSat: OpSpec((_iN, _iN), _iN, impl_helper="sadd_sat"),
+    PatternOp.UaddSat: OpSpec((_iN, _iN), _iN, impl_helper="uadd_sat"),
+    PatternOp.SsubSat: OpSpec((_iN, _iN), _iN, impl_helper="ssub_sat"),
+    PatternOp.UsubSat: OpSpec((_iN, _iN), _iN, impl_helper="usub_sat"),
+    PatternOp.SmulSat: OpSpec((_iN, _iN), _iN, impl_helper="smul_sat"),
+    PatternOp.UmulSat: OpSpec((_iN, _iN), _iN, impl_helper="umul_sat"),
+    PatternOp.SshlSat: OpSpec(
+        (_iN, _iN), _iN, constraints=("shift_lt_bw",), impl_helper="sshl_sat"
+    ),
+    PatternOp.UshlSat: OpSpec(
+        (_iN, _iN), _iN, constraints=("shift_lt_bw",), impl_helper="ushl_sat"
+    ),
     PatternOp.PopCount: OpSpec((_iN,), _iN, PopCountOp),
     PatternOp.CountLZero: OpSpec((_iN,), _iN, CountLZeroOp),
     PatternOp.CountLZeroUndef: OpSpec(
@@ -254,6 +271,11 @@ _OP_SPECS: dict[PatternOp, OpSpec] = {
     PatternOp.CountRZeroUndef: OpSpec(
         (_iN,), _iN, CountRZeroOp, constraints=("nonzero",)
     ),
+    PatternOp.Abs: OpSpec((_iN,), _iN, AbsOp),
+    PatternOp.AbsUndef: OpSpec((_iN,), _iN, AbsOp, constraints=("not_intmin",)),
+    PatternOp.TruncToBool: OpSpec((_iN,), i1, TruncToBoolOp),
+    PatternOp.ZextBool: OpSpec((i1,), _iN, ZextBoolOp),
+    PatternOp.SextBool: OpSpec((i1,), _iN, SextBoolOp),
     PatternOp.Select: OpSpec((i1, _iN, _iN), _iN, SelectOp),
     PatternOp.ICmpEq: OpSpec((_iN, _iN), i1, cmp_pred="eq"),
     PatternOp.ICmpNe: OpSpec((_iN, _iN), i1, cmp_pred="ne"),
@@ -265,6 +287,84 @@ _OP_SPECS: dict[PatternOp, OpSpec] = {
     PatternOp.ICmpUle: OpSpec((_iN, _iN), i1, cmp_pred="ule"),
     PatternOp.ICmpUgt: OpSpec((_iN, _iN), i1, cmp_pred="ugt"),
     PatternOp.ICmpUge: OpSpec((_iN, _iN), i1, cmp_pred="uge"),
+}
+
+
+OP_HELPERS: dict[str, str] = {
+    "uadd_sat": """func.func @uadd_sat(%arg0: !transfer.integer, %arg1: !transfer.integer) -> !transfer.integer {
+    %sum = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %overflow = "transfer.uadd_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %uint_max = "transfer.get_all_ones"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %result = "transfer.select"(%overflow, %uint_max, %sum) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
+    return %result : !transfer.integer
+  }""",
+    "sadd_sat": """func.func @sadd_sat(%arg0: !transfer.integer, %arg1: !transfer.integer) -> !transfer.integer {
+    %sum = "transfer.add"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %overflow = "transfer.sadd_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %zero = "transfer.constant"(%arg0) {value = 0 : i64} : (!transfer.integer) -> !transfer.integer
+    %lhs_neg = "transfer.cmp"(%arg0, %zero) {predicate = 2 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %int_min = "transfer.get_signed_min_value"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %int_max = "transfer.get_signed_max_value"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %sat = "transfer.select"(%lhs_neg, %int_min, %int_max) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
+    %result = "transfer.select"(%overflow, %sat, %sum) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
+    return %result : !transfer.integer
+  }""",
+    "usub_sat": """func.func @usub_sat(%arg0: !transfer.integer, %arg1: !transfer.integer) -> !transfer.integer {
+    %diff = "transfer.sub"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %overflow = "transfer.usub_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %zero = "transfer.constant"(%arg0) {value = 0 : i64} : (!transfer.integer) -> !transfer.integer
+    %result = "transfer.select"(%overflow, %zero, %diff) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
+    return %result : !transfer.integer
+  }""",
+    "ssub_sat": """func.func @ssub_sat(%arg0: !transfer.integer, %arg1: !transfer.integer) -> !transfer.integer {
+    %diff = "transfer.sub"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %overflow = "transfer.ssub_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %zero = "transfer.constant"(%arg0) {value = 0 : i64} : (!transfer.integer) -> !transfer.integer
+    %lhs_neg = "transfer.cmp"(%arg0, %zero) {predicate = 2 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %int_min = "transfer.get_signed_min_value"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %int_max = "transfer.get_signed_max_value"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %sat = "transfer.select"(%lhs_neg, %int_min, %int_max) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
+    %result = "transfer.select"(%overflow, %sat, %diff) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
+    return %result : !transfer.integer
+  }""",
+    "umul_sat": """func.func @umul_sat(%arg0: !transfer.integer, %arg1: !transfer.integer) -> !transfer.integer {
+    %product = "transfer.mul"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %overflow = "transfer.umul_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %uint_max = "transfer.get_all_ones"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %result = "transfer.select"(%overflow, %uint_max, %product) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
+    return %result : !transfer.integer
+  }""",
+    "smul_sat": """func.func @smul_sat(%arg0: !transfer.integer, %arg1: !transfer.integer) -> !transfer.integer {
+    %product = "transfer.mul"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %overflow = "transfer.smul_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %zero = "transfer.constant"(%arg0) {value = 0 : i64} : (!transfer.integer) -> !transfer.integer
+    %lhs_neg = "transfer.cmp"(%arg0, %zero) {predicate = 2 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %rhs_neg = "transfer.cmp"(%arg1, %zero) {predicate = 2 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %signs_differ = arith.xori %lhs_neg, %rhs_neg : i1
+    %int_min = "transfer.get_signed_min_value"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %int_max = "transfer.get_signed_max_value"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %sat = "transfer.select"(%signs_differ, %int_min, %int_max) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
+    %result = "transfer.select"(%overflow, %sat, %product) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
+    return %result : !transfer.integer
+  }""",
+    "ushl_sat": """func.func @ushl_sat(%arg0: !transfer.integer, %arg1: !transfer.integer) -> !transfer.integer {
+    %shifted = "transfer.shl"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %overflow = "transfer.ushl_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %uint_max = "transfer.get_all_ones"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %result = "transfer.select"(%overflow, %uint_max, %shifted) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
+    return %result : !transfer.integer
+  }""",
+    "sshl_sat": """func.func @sshl_sat(%arg0: !transfer.integer, %arg1: !transfer.integer) -> !transfer.integer {
+    %shifted = "transfer.shl"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> !transfer.integer
+    %overflow = "transfer.sshl_overflow"(%arg0, %arg1) : (!transfer.integer, !transfer.integer) -> i1
+    %zero = "transfer.constant"(%arg0) {value = 0 : i64} : (!transfer.integer) -> !transfer.integer
+    %lhs_neg = "transfer.cmp"(%arg0, %zero) {predicate = 2 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    %int_min = "transfer.get_signed_min_value"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %int_max = "transfer.get_signed_max_value"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %sat = "transfer.select"(%lhs_neg, %int_min, %int_max) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
+    %result = "transfer.select"(%overflow, %sat, %shifted) : (i1, !transfer.integer, !transfer.integer) -> !transfer.integer
+    return %result : !transfer.integer
+  }""",
 }
 
 
@@ -351,6 +451,11 @@ CONSTRAINT_HELPERS: dict[str, str] = {
     %rhs_not = "transfer.cmp"(%const, %arg1) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
     return %rhs_not : i1
   }""",
+    "not_intmin": """func.func @not_intmin(%arg0: !transfer.integer) -> i1 {
+    %int_min = "transfer.get_signed_min_value"(%arg0) : (!transfer.integer) -> !transfer.integer
+    %not_int_min = "transfer.cmp"(%int_min, %arg0) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
+    return %not_int_min : i1
+  }""",
     "no_sdiv_ov": """func.func @no_sdiv_ov(%arg0: !transfer.integer, %arg1: !transfer.integer) -> i1 {
     %int_min = "transfer.get_signed_min_value"(%arg0) : (!transfer.integer) -> !transfer.integer
     %lhs_not_int_min = "transfer.cmp"(%int_min, %arg0) {predicate = 1 : i64} : (!transfer.integer, !transfer.integer) -> i1
@@ -392,8 +497,9 @@ class _PatternExprParser:
         self.nodes: list[PatternNode] = []
         self.interned: dict[tuple[PatternOp, tuple[PatternRef, ...]], NodeRef] = {}
         self.args: set[int] = set()
+        self.arg_types: dict[int, Attribute] = {}
 
-    def parse(self) -> tuple[int, tuple[PatternNode, ...], NodeRef]:
+    def parse(self) -> tuple[tuple[Attribute, ...], tuple[PatternNode, ...], NodeRef]:
         if len(self.tokens) == 1:
             result = self._parse_bare_op_shorthand()
         else:
@@ -410,7 +516,11 @@ class _PatternExprParser:
                 f"Pattern arguments must be contiguous; missing {sorted(missing)}."
             )
 
-        return max_arg + 1, tuple(self.nodes), result
+        return (
+            tuple(self.arg_types[index] for index in range(max_arg + 1)),
+            tuple(self.nodes),
+            result,
+        )
 
     def _parse_bare_op_shorthand(self) -> NodeRef:
         name = self._consume()
@@ -422,16 +532,19 @@ class _PatternExprParser:
 
         operands: list[PatternRef] = []
         for index, expected_ty in enumerate(op.spec.operand_types):
-            if expected_ty != _iN:
-                raise ValueError(
-                    f"Cannot use shorthand for operation '{name}' because operand "
-                    f"{index} has type {expected_ty}; shorthand can only infer argN "
-                    f"operands of type {_iN}."
-                )
+            self._record_arg_type(index, expected_ty)
             self.args.add(index)
             operands.append(ArgRef(index))
 
         return self._add_node(op, tuple(operands))
+
+    def _record_arg_type(self, index: int, ty: Attribute) -> None:
+        existing_ty = self.arg_types.get(index)
+        if existing_ty is not None and existing_ty != ty:
+            raise ValueError(
+                f"Pattern argument 'arg{index}' is used as both {existing_ty} and {ty}."
+            )
+        self.arg_types[index] = ty
 
     def _add_node(
         self,
@@ -464,7 +577,7 @@ class _PatternExprParser:
 
     def _ref_type(self, ref: PatternRef) -> Attribute:
         if isinstance(ref, ArgRef):
-            return _iN
+            return self.arg_types.get(ref.index, _iN)
         return self.nodes[ref.index].op.spec.result_type
 
     def _parse_value(self) -> PatternRef:
@@ -496,6 +609,8 @@ class _PatternExprParser:
                 f"got {len(operands)}."
             )
         for operand, expected_ty in zip(operands, spec.operand_types):
+            if isinstance(operand, ArgRef):
+                self._record_arg_type(operand.index, expected_ty)
             actual_ty = self._ref_type(operand)
             if actual_ty != expected_ty:
                 raise ValueError(
@@ -527,7 +642,7 @@ def _append_dag_ops(fn: FuncOp, dag: PatternDag) -> dict[PatternRef, SSAValue]:
 
 def lower_concrete_op(dag: PatternDag) -> FuncOp:
     res_ty = dag.nodes[dag.result.index].op.spec.result_type
-    fn = FuncOp.from_region("concrete_op", [_iN for _ in range(dag.num_args)], [res_ty])
+    fn = FuncOp.from_region("concrete_op", dag.arg_types, [res_ty])
     value_map = _append_dag_ops(fn, dag)
     fn.body.block.add_op(ReturnOp(value_map[dag.result]))
     return fn
@@ -538,7 +653,7 @@ def lower_op_constraint(dag: PatternDag) -> tuple[FuncOp | None, set[str]]:
     if not helper_names:
         return None, set()
 
-    fn = FuncOp.from_region("op_constraint", [_iN for _ in range(dag.num_args)], [i1])
+    fn = FuncOp.from_region("op_constraint", dag.arg_types, [i1])
     value_map = _append_dag_ops(fn, dag)
     constraint_values: list[SSAValue] = []
     for node_idx, node in enumerate(dag.nodes):

@@ -4,8 +4,8 @@ import re
 
 from xdsl.context import Context
 from xdsl.dialects.arith import Arith
-from xdsl.dialects.builtin import Builtin, ModuleOp
-from xdsl.dialects.func import Func
+from xdsl.dialects.builtin import Builtin, IntegerType, ModuleOp, StringAttr, i1
+from xdsl.dialects.func import Func, FuncOp
 from xdsl.dialects.smt import ConstantBoolOp
 from xdsl.ir import Operation, OpResult
 from xdsl.transforms.canonicalize import CanonicalizePass
@@ -17,8 +17,8 @@ from xdsl_smt.dialects.smt_dialect import (
     DefineFunOp,
     EqOp,
 )
-from xdsl_smt.dialects.smt_utils_dialect import FirstOp, PairOp
-from xdsl_smt.dialects.transfer import Transfer
+from xdsl_smt.dialects.smt_utils_dialect import FirstOp, PairOp, PairType
+from xdsl_smt.dialects.transfer import Transfer, TransIntegerType
 from xdsl_smt.passes.dead_code_elimination import DeadCodeElimination
 from xdsl_smt.passes.lower_pairs import LowerPairs
 from xdsl_smt.passes.transfer_inline import FunctionCallInline
@@ -98,9 +98,12 @@ def _get_abst_val(arg: str, domain: AbstractDomain, bw: int) -> tuple[int, int] 
 @dataclass
 class MaxPreciseQueryBuilder:
     domain: AbstractDomain
-    bitwidth: int
+    result_width: int
+    arg_widths: list[int]
+    arg_is_i1: list[bool]
     abstract_arg_values: list[tuple[int, int]]
-    instance_constraint: DefineFunOp
+    instance_constraint_iN: DefineFunOp
+    instance_constraint_i1: DefineFunOp | None
     concrete_op: DefineFunOp
     op_constraint: DefineFunOp | None
     _const_false: ConstantBoolOp = field(init=False, repr=False)
@@ -118,13 +121,17 @@ class MaxPreciseQueryBuilder:
         if self.op_constraint is None:
             return []
 
+        true_ops, true_value = self._poison_result_true()
+        call_op = CallOp(self.op_constraint.ret, inputs + [self._const_false.result])
+        eq_op = EqOp(true_value, call_op.res[0])
+        assert_op = AssertOp(eq_op.res)
+        return true_ops + [call_op, eq_op, assert_op]
+
+    def _poison_result_true(self) -> tuple[list[Operation], OpResult]:
         const_i1 = ConstantOp.from_int_value(1, 1)
         pair_op = PairOp(const_i1.res, self._const_false.result)
         pair_res_op = PairOp(pair_op.res, self._const_false.result)
-        call_op = CallOp(self.op_constraint.ret, inputs + [self._const_false.result])
-        eq_op = EqOp(pair_res_op.res, call_op.res[0])
-        assert_op = AssertOp(eq_op.res)
-        return [const_i1, pair_op, pair_res_op, call_op, eq_op, assert_op]
+        return [const_i1, pair_op, pair_res_op], pair_res_op.res
 
     def _to_pair_value(self, val_list: list[ConstantOp]) -> tuple[list[PairOp], OpResult]:
         last_val = self._const_false.result
@@ -137,15 +144,28 @@ class MaxPreciseQueryBuilder:
     def _abstract_values(self) -> tuple[list[Operation], list[OpResult]]:
         ops: list[Operation] = []
         values: list[OpResult] = []
-        for abst_bv in self.abstract_arg_values:
+        for abst_bv, arg_width in zip(self.abstract_arg_values, self.arg_widths):
             constant_ops = [
-                ConstantOp.from_int_value(x % (2**self.bitwidth), self.bitwidth)
-                for x in abst_bv
+                ConstantOp.from_int_value(x % (2**arg_width), arg_width) for x in abst_bv
             ]
             pair_ops, pair_value = self._to_pair_value(constant_ops)
             ops += constant_ops + pair_ops
             values.append(pair_value)
         return ops, values
+
+    def _instance_constraint(self, arg_is_i1: bool) -> DefineFunOp:
+        if arg_is_i1:
+            assert self.instance_constraint_i1 is not None
+            return self.instance_constraint_i1
+        return self.instance_constraint_iN
+
+    def _concrete_payload(self, value: OpResult) -> tuple[list[Operation], OpResult]:
+        result: list[Operation] = []
+        while isinstance(value.type, PairType):
+            first_op = FirstOp(value)
+            result.append(first_op)
+            value = first_op.res
+        return result, value
 
     def _get_in_constraint(
         self,
@@ -153,19 +173,21 @@ class MaxPreciseQueryBuilder:
         inputs: list[DeclareConstOp],
     ) -> list[Operation]:
         result: list[Operation] = []
-        constant_i1 = ConstantOp.from_int_value(1, 1)
-        pair_op = PairOp(constant_i1.res, self._const_false.result)
-        pair_res_op = PairOp(pair_op.res, self._const_false.result)
-        for abstract_input, concrete_input in zip(abstract_inputs, inputs):
+        true_ops, true_value = self._poison_result_true()
+        for abstract_input, concrete_input, arg_is_i1 in zip(
+            abstract_inputs, inputs, self.arg_is_i1
+        ):
+            instance_constraint = self._instance_constraint(arg_is_i1)
+            payload_ops, concrete_payload = self._concrete_payload(concrete_input.res)
             call_op = CallOp(
-                self.instance_constraint.ret,
-                [abstract_input, concrete_input, self._const_false.result],
+                instance_constraint.ret,
+                [abstract_input, concrete_payload, self._const_false.result],
             )
-            eq_op = EqOp(pair_res_op.res, call_op.res[0])
+            eq_op = EqOp(true_value, call_op.res[0])
             assert_op = AssertOp(eq_op.res)
 
-            result += [call_op, eq_op, assert_op]
-        return [constant_i1, pair_op, pair_res_op] + result
+            result += payload_ops + [call_op, eq_op, assert_op]
+        return true_ops + result
 
     def build(self) -> ModuleOp:
         input_arguments = self._input_vars()
@@ -174,11 +196,13 @@ class MaxPreciseQueryBuilder:
         abstract_ops, abstract_inputs = self._abstract_values()
         op_constraint = self._get_op_constraint(input_arguments)
         concrete_call = CallOp(self.concrete_op.ret, input_arguments)
-        concrete_result = FirstOp(concrete_call.res[0])
+        concrete_result_ops, concrete_result = self._concrete_payload(
+            concrete_call.res[0]
+        )
 
-        result_var = DeclareConstOp(concrete_result.res.type)
+        result_var = DeclareConstOp(concrete_result.type)
         result_var.res.name_hint = "result"
-        result_eq = EqOp(result_var.res, concrete_result.res)
+        result_eq = EqOp(result_var.res, concrete_result)
         result_assert = AssertOp(result_eq.res)
 
         return ModuleOp(
@@ -187,21 +211,23 @@ class MaxPreciseQueryBuilder:
             + abstract_ops
             + op_constraint
             + self._get_in_constraint(abstract_inputs, input_arguments)
-            + [concrete_call, concrete_result, result_var, result_eq, result_assert]
+            + [concrete_call]
+            + concrete_result_ops
+            + [result_var, result_eq, result_assert]
         )
 
 
 @dataclass(frozen=True)
 class PreparedQuery:
     solver: IncrementalSolver
-    bitwidth: int
+    result_width: int
 
     @classmethod
     def from_module(
         cls,
         ctx: Context,
         smt_mod: ModuleOp,
-        bitwidth: int,
+        result_width: int,
         timeout: int,
         solver_kind: SolverKind,
     ) -> "PreparedQuery":
@@ -214,7 +240,7 @@ class PreparedQuery:
         print_to_smtlib(module, stream)
 
         solver = make_solver(solver_kind, stream.getvalue(), timeout)
-        return cls(solver=solver, bitwidth=bitwidth)
+        return cls(solver=solver, result_width=result_width)
 
     def is_sat(self) -> bool:
         result = self.solver.check()
@@ -235,7 +261,7 @@ class PreparedQuery:
         return result
 
     def bv_val(self, val: int) -> str:
-        return f"(_ bv{val % (2**self.bitwidth)} {self.bitwidth})"
+        return f"(_ bv{val % (2**self.result_width)} {self.result_width})"
 
 
 @dataclass(frozen=True)
@@ -375,6 +401,26 @@ def _get_max_precise_computer(
     raise NotImplementedError(f"Max precise not implemented for {domain}")
 
 
+def _concrete_width(ty: TransIntegerType | IntegerType, bw: int) -> int:
+    if isinstance(ty, TransIntegerType):
+        return bw
+    return ty.width.data
+
+
+def _lower_instance_constraint(
+    func_name: str,
+    instance_constraint: FuncOp,
+    width: int,
+    ctx: Context,
+) -> DefineFunOp:
+    func = instance_constraint.clone()
+    func.sym_name = StringAttr(func_name)
+    lower_to_smt_module(m := ModuleOp([func]), width, ctx)
+    lowered = next(iter(m.ops))
+    assert isinstance(lowered, DefineFunOp)
+    return lowered
+
+
 @dataclass(frozen=True)
 class RowTask:
     index: int
@@ -424,37 +470,54 @@ def compute_max_precise(
     ctx = _get_ctx()
 
     hlprs = HelperFuncs(pattern, domain)
-    parsed_args = [_get_abst_val(arg, domain, bw) for arg in args]
-    if any(arg is None for arg in parsed_args):
-        return "(bottom)"
-    abst_arg_values = [arg for arg in parsed_args if arg is not None]
-
     if len(hlprs.crt_func.args) != len(args):
         raise ValueError(
             f"arity of expression ({len(hlprs.crt_func.args)}) doesn't match number of args provided ({len(args)})"
         )
 
-    fns = [hlprs.instance_constraint_func, hlprs.crt_func, hlprs.op_constraint_func]
+    arg_widths = [_concrete_width(arg_ty, bw) for arg_ty in hlprs.conc_arg_ty]
+    arg_is_i1 = [arg_ty == i1 for arg_ty in hlprs.conc_arg_ty]
+    result_width = _concrete_width(hlprs.conc_ret_ty, bw)
+    parsed_args = [
+        _get_abst_val(arg, domain, arg_width) for arg, arg_width in zip(args, arg_widths)
+    ]
+    if any(arg is None for arg in parsed_args):
+        return "(bottom)"
+    abst_arg_values = [arg for arg in parsed_args if arg is not None]
+
+    fns = [hlprs.crt_func, hlprs.op_constraint_func]
     lower_to_smt_module(m := ModuleOp([x.clone() for x in fns if x is not None]), bw, ctx)
     m_ops = iter(m.ops)
-    instance_constraint = next(m_ops)
     concrete_op = next(m_ops)
     op_constraint = next(m_ops, None)
-    assert isinstance(instance_constraint, DefineFunOp)
     assert isinstance(concrete_op, DefineFunOp)
     assert isinstance(op_constraint, DefineFunOp) or op_constraint is None
 
+    instance_constraint_iN = _lower_instance_constraint(
+        "abstract_val_contains_iN", hlprs.instance_constraint_func, bw, ctx
+    )
+    instance_constraint_i1 = (
+        _lower_instance_constraint(
+            "abstract_val_contains_i1", hlprs.instance_constraint_func, 1, ctx
+        )
+        if any(arg_is_i1)
+        else None
+    )
+
     smt_mod = MaxPreciseQueryBuilder(
         domain=domain,
-        bitwidth=bw,
+        result_width=result_width,
+        arg_widths=arg_widths,
+        arg_is_i1=arg_is_i1,
         abstract_arg_values=abst_arg_values,
-        instance_constraint=instance_constraint,
+        instance_constraint_iN=instance_constraint_iN,
+        instance_constraint_i1=instance_constraint_i1,
         concrete_op=concrete_op,
         op_constraint=op_constraint,
     ).build()
 
-    query = PreparedQuery.from_module(ctx, smt_mod, bw, timeout, solver_kind)
-    computer = _get_max_precise_computer(domain, query, bw)
+    query = PreparedQuery.from_module(ctx, smt_mod, result_width, timeout, solver_kind)
+    computer = _get_max_precise_computer(domain, query, result_width)
     return computer.compute()
 
 

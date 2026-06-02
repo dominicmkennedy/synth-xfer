@@ -32,13 +32,13 @@ _COMMUTATIVE_OPS = {
     PatternOp.OrDisjoint,
     PatternOp.Smax,
     PatternOp.Smin,
+    PatternOp.SaddSat,
+    PatternOp.SmulSat,
     PatternOp.Umax,
     PatternOp.Umin,
+    PatternOp.UaddSat,
+    PatternOp.UmulSat,
     PatternOp.Xor,
-    # SaddSat = "SaddSat"  # TODO add to dialect
-    # UaddSat = "UaddSat"  # TODO add to dialect
-    # SmulSat = "SmulSat"  # TODO add to dialect
-    # UmulSat = "UmulSat"  # TODO add to dialect
 }
 
 _OP_FALLBACKS: dict[PatternOp, PatternOp] = {
@@ -61,7 +61,7 @@ _OP_FALLBACKS: dict[PatternOp, PatternOp] = {
     PatternOp.UdivExact: PatternOp.Udiv,
     PatternOp.CountLZeroUndef: PatternOp.CountLZero,
     PatternOp.CountRZeroUndef: PatternOp.CountRZero,
-    # PatternOp.AbsUndef: PatternOp.Abs, TODO add
+    PatternOp.AbsUndef: PatternOp.Abs,
 }
 
 
