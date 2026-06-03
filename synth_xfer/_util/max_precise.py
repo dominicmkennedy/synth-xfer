@@ -525,6 +525,7 @@ def compute_max_precise(
 class EdgeLossKind(StrEnum):
     incomplete = "incomplete"
     upstream_loss = "upstream-loss"
+    root_masked = "root-masked"
     complete = "complete"
 
 
@@ -674,9 +675,17 @@ def _edge_analyses(
             dest_seq_loss = dest_cut_seq != comp_values[dest]
             root_seq_loss = root_cut_seq != comp_values[root]
             if dest_rel_loss:
-                local_kind = EdgeLossKind.incomplete
+                local_kind = (
+                    EdgeLossKind.incomplete
+                    if root_rel_loss
+                    else EdgeLossKind.root_masked
+                )
             elif dest_seq_loss:
-                local_kind = EdgeLossKind.upstream_loss
+                local_kind = (
+                    EdgeLossKind.upstream_loss
+                    if root_seq_loss
+                    else EdgeLossKind.root_masked
+                )
             else:
                 local_kind = EdgeLossKind.complete
             result.append(
