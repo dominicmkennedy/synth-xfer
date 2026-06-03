@@ -15,6 +15,7 @@ from xdsl_smt.passes.transfer_inline import FunctionCallInline
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.pattern_dsl import (
     CONSTRAINT_HELPERS,
+    OP_HELPERS,
     PatternDag,
     lower_concrete_op,
     lower_op_constraint,
@@ -94,6 +95,13 @@ def lower_pattern_to_mlir(dag: PatternDag) -> ModuleOp:
     op_constraint, helper_names = lower_op_constraint(dag)
     if op_constraint is not None:
         ops.append(op_constraint)
+    op_helper_names = {
+        node.op.spec.impl_helper
+        for node in dag.nodes
+        if node.op.spec.impl_helper is not None
+    }
+    for helper in sorted(op_helper_names):
+        ops.append(parse_mlir_func(OP_HELPERS[helper]))
     for helper in sorted(helper_names):
         ops.append(parse_mlir_func(CONSTRAINT_HELPERS[helper]))
     return ModuleOp(ops)
