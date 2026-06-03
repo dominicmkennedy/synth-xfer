@@ -652,10 +652,22 @@ def _edge_analyses(
                     Cut(edge, value),
                 )
 
-            dest_cut_comp = eval_cut(dest, comp_values[source])
-            root_cut_comp = eval_cut(root, comp_values[source])
-            dest_cut_seq = eval_cut(dest, seq_values[source])
-            root_cut_seq = eval_cut(root, seq_values[source])
+            source_comp = comp_values[source]
+            source_seq = seq_values[source]
+
+            dest_cut_comp = eval_cut(dest, source_comp)
+            root_cut_comp = (
+                dest_cut_comp if dest == root else eval_cut(root, source_comp)
+            )
+
+            if source_seq == source_comp:
+                dest_cut_seq = dest_cut_comp
+                root_cut_seq = root_cut_comp
+            else:
+                dest_cut_seq = eval_cut(dest, source_seq)
+                root_cut_seq = (
+                    dest_cut_seq if dest == root else eval_cut(root, source_seq)
+                )
 
             dest_rel_loss = dest_cut_comp != comp_values[dest]
             root_rel_loss = root_cut_comp != comp_values[root]
