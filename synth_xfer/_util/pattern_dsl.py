@@ -139,6 +139,20 @@ class PatternDag:
     nodes: tuple[PatternNode, ...]
     result: NodeRef
 
+    @classmethod
+    def from_parts(
+        cls,
+        arg_types: tuple[Attribute, ...],
+        nodes: tuple[PatternNode, ...],
+        result: NodeRef,
+    ) -> "PatternDag":
+        dag = cls.__new__(cls)
+        dag.arg_types = arg_types
+        dag.nodes = nodes
+        dag.result = result
+        dag.num_args = len(arg_types)
+        return dag
+
     def is_op(self) -> bool:
         if len(self.nodes) == 1:
             node = self.nodes[self.result.index]
@@ -163,6 +177,76 @@ class PatternDag:
     def __init__(self, expr: str) -> None:
         self.arg_types, self.nodes, self.result = _PatternExprParser(expr).parse()
         self.num_args = len(self.arg_types)
+
+    @classmethod
+    def single_node(cls, op: PatternOp) -> "PatternDag":
+        return cls.from_parts(
+            op.spec.operand_types,
+            (
+                PatternNode(
+                    op,
+                    tuple(ArgRef(index) for index in range(len(op.spec.operand_types))),
+                ),
+            ),
+            NodeRef(0),
+        )
+
+    def subdag_with_cut(
+        self,
+        root: PatternRef,
+        cut: tuple[NodeRef, int] | None = None,
+    ) -> tuple["PatternDag", tuple[PatternRef, ...], int | None]:
+        arg_types: list[Attribute] = []
+        arg_sources: list[PatternRef] = []
+        arg_map: dict[ArgRef, ArgRef] = {}
+        node_map: dict[NodeRef, NodeRef] = {}
+        nodes: list[PatternNode] = []
+        cut_arg_index: int | None = None
+
+        def add_arg(source: PatternRef, ty: Attribute) -> ArgRef:
+            ref = ArgRef(len(arg_types))
+            arg_types.append(ty)
+            arg_sources.append(source)
+            return ref
+
+        def lower_ref(ref: PatternRef) -> PatternRef:
+            nonlocal cut_arg_index
+
+            if isinstance(ref, ArgRef):
+                lowered = arg_map.get(ref)
+                if lowered is None:
+                    lowered = add_arg(ref, self.arg_types[ref.index])
+                    arg_map[ref] = lowered
+                return lowered
+
+            lowered_node = node_map.get(ref)
+            if lowered_node is not None:
+                return lowered_node
+
+            node = self.nodes[ref.index]
+            lowered_operands: list[PatternRef] = []
+            for operand_index, operand in enumerate(node.operands):
+                if cut == (ref, operand_index):
+                    cut_arg = add_arg(operand, node.op.spec.operand_types[operand_index])
+                    cut_arg_index = cut_arg.index
+                    lowered_operands.append(cut_arg)
+                else:
+                    lowered_operands.append(lower_ref(operand))
+
+            lowered_node = NodeRef(len(nodes))
+            node_map[ref] = lowered_node
+            nodes.append(PatternNode(node.op, tuple(lowered_operands)))
+            return lowered_node
+
+        lowered_root = lower_ref(root)
+        if isinstance(lowered_root, ArgRef):
+            raise ValueError("sub-DAG root must be an operation result")
+
+        return (
+            PatternDag.from_parts(tuple(arg_types), tuple(nodes), lowered_root),
+            tuple(arg_sources),
+            cut_arg_index,
+        )
 
 
 @dataclass(frozen=True, slots=True)
