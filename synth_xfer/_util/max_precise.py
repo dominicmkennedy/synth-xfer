@@ -657,9 +657,7 @@ def _edge_analyses(
             source_seq = seq_values[source]
 
             dest_cut_comp = eval_cut(dest, source_comp)
-            root_cut_comp = (
-                dest_cut_comp if dest == root else eval_cut(root, source_comp)
-            )
+            root_cut_comp = dest_cut_comp if dest == root else eval_cut(root, source_comp)
 
             if source_seq == source_comp:
                 dest_cut_seq = dest_cut_comp
@@ -676,9 +674,7 @@ def _edge_analyses(
             root_seq_loss = root_cut_seq != comp_values[root]
             if dest_rel_loss:
                 local_kind = (
-                    EdgeLossKind.incomplete
-                    if root_rel_loss
-                    else EdgeLossKind.root_masked
+                    EdgeLossKind.incomplete if root_rel_loss else EdgeLossKind.root_masked
                 )
             elif dest_seq_loss:
                 local_kind = (

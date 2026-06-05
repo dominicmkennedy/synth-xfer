@@ -14,32 +14,14 @@ from synth_xfer._util.max_precise import (
     check_abs_op_constraint,
 )
 from synth_xfer._util.parse_mlir import HelperFuncs
-from synth_xfer._util.pattern_dsl import ArgRef, PatternDag, PatternOp
+from synth_xfer._util.pattern_dsl import (
+    COMMUTATIVE_OPS,
+    ArgRef,
+    PatternDag,
+    PatternOp,
+)
 from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.tsv import EnumData, EnumMetaData
-
-_COMMUTATIVE_OPS = {
-    PatternOp.Add,
-    PatternOp.AddNsw,
-    PatternOp.AddNswNuw,
-    PatternOp.AddNuw,
-    PatternOp.And,
-    PatternOp.Mul,
-    PatternOp.MulNsw,
-    PatternOp.MulNswNuw,
-    PatternOp.MulNuw,
-    PatternOp.Or,
-    PatternOp.OrDisjoint,
-    PatternOp.Smax,
-    PatternOp.Smin,
-    PatternOp.SaddSat,
-    PatternOp.SmulSat,
-    PatternOp.Umax,
-    PatternOp.Umin,
-    PatternOp.UaddSat,
-    PatternOp.UmulSat,
-    PatternOp.Xor,
-}
 
 _OP_FALLBACKS: dict[PatternOp, PatternOp] = {
     PatternOp.AddNsw: PatternOp.Add,
@@ -108,7 +90,7 @@ class PatternInputGenerator:
             for arg, positions in positions_by_arg.items():
                 if self._is_fully_free_node(node_idx):
                     operand_indices = tuple(positions)
-                elif node.op in _COMMUTATIVE_OPS:
+                elif node.op in COMMUTATIVE_OPS:
                     operand_indices = tuple(range(len(node.operands)))
                 else:
                     operand_indices = tuple(positions)

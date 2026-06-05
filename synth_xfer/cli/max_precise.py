@@ -14,8 +14,8 @@ from synth_xfer._util.max_precise import (
     RowProcessor,
     RowTask,
     SequentialMaxPreciseAnalysis,
-    sequential_max_precise,
     compute_max_precise,
+    sequential_max_precise,
 )
 from synth_xfer._util.pattern_dsl import (
     ArgRef,
