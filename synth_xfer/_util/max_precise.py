@@ -1,4 +1,5 @@
 from dataclasses import dataclass, field
+from enum import StrEnum
 from io import StringIO
 import re
 
@@ -27,7 +28,7 @@ from xdsl_smt.utils.transfer_function_util import get_argument_instances_with_ef
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.parse_mlir import HelperFuncs
-from synth_xfer._util.pattern_dsl import PatternDag
+from synth_xfer._util.pattern_dsl import ArgRef, NodeRef, PatternDag, PatternRef
 from synth_xfer._util.smt_solver import IncrementalSolver, SolverKind, make_solver
 from synth_xfer._util.verifier import lower_to_smt_module
 
@@ -519,6 +520,244 @@ def compute_max_precise(
     query = PreparedQuery.from_module(ctx, smt_mod, result_width, timeout, solver_kind)
     computer = _get_max_precise_computer(domain, query, result_width)
     return computer.compute()
+
+
+class EdgeLossKind(StrEnum):
+    incomplete = "incomplete"
+    upstream_loss = "upstream-loss"
+    root_masked = "root-masked"
+    complete = "complete"
+
+
+@dataclass(frozen=True)
+class SequentialEdgeAnalysis:
+    dest: NodeRef
+    source: PatternRef
+    dest_cut_comp: str
+    root_cut_comp: str
+    dest_cut_seq: str
+    root_cut_seq: str
+    dest_rel_loss: bool
+    root_rel_loss: bool
+    dest_seq_loss: bool
+    root_seq_loss: bool
+    local_kind: EdgeLossKind
+
+
+@dataclass(frozen=True)
+class SequentialDivergence:
+    ref: NodeRef
+    composite: str
+    sequential: str
+
+
+@dataclass(frozen=True)
+class SequentialMaxPreciseAnalysis:
+    composite: str
+    sequential: str
+    comp_values: dict[PatternRef, str]
+    seq_values: dict[PatternRef, str]
+    edges: tuple[SequentialEdgeAnalysis, ...]
+    minimal_divergences: tuple[SequentialDivergence, ...]
+
+
+@dataclass(frozen=True)
+class Cut:
+    edge: tuple[NodeRef, int]
+    value: str
+
+
+def _compute_subdag_max_precise(
+    pattern: PatternDag,
+    root: PatternRef,
+    value_map: dict[PatternRef, str],
+    domain: AbstractDomain,
+    bw: int,
+    timeout: int,
+    solver_kind: SolverKind,
+    cut: Cut | None = None,
+) -> str:
+    subdag, arg_sources, cut_arg_index = pattern.subdag_with_cut(
+        root, None if cut is None else cut.edge
+    )
+    subdag_args = tuple(
+        cut.value
+        if cut is not None and cut_arg_index is not None and index == cut_arg_index
+        else value_map[src]
+        for index, src in enumerate(arg_sources)
+    )
+    return compute_max_precise(subdag, domain, bw, subdag_args, timeout, solver_kind)
+
+
+def _compute_node_values(
+    pattern: PatternDag,
+    domain: AbstractDomain,
+    bw: int,
+    args: tuple[str, ...],
+    timeout: int,
+    solver_kind: SolverKind,
+    *,
+    sequential: bool,
+) -> dict[PatternRef, str]:
+    values: dict[PatternRef, str] = {ArgRef(index): arg for index, arg in enumerate(args)}
+    for node_index, node in enumerate(pattern.nodes):
+        node_ref = NodeRef(node_index)
+        if sequential:
+            node_args = tuple(values[operand] for operand in node.operands)
+            values[node_ref] = compute_max_precise(
+                PatternDag.single_node(node.op),
+                domain,
+                bw,
+                node_args,
+                timeout,
+                solver_kind,
+            )
+        else:
+            values[node_ref] = _compute_subdag_max_precise(
+                pattern,
+                node_ref,
+                values,
+                domain,
+                bw,
+                timeout,
+                solver_kind,
+            )
+    return values
+
+
+def _edge_analyses(
+    pattern: PatternDag,
+    comp_values: dict[PatternRef, str],
+    seq_values: dict[PatternRef, str],
+    domain: AbstractDomain,
+    bw: int,
+    timeout: int,
+    solver_kind: SolverKind,
+) -> tuple[SequentialEdgeAnalysis, ...]:
+    root = pattern.result
+    result: list[SequentialEdgeAnalysis] = []
+    for dest_index, node in enumerate(pattern.nodes):
+        dest = NodeRef(dest_index)
+        for operand_index, source in enumerate(node.operands):
+            edge = (dest, operand_index)
+
+            def eval_cut(cut_root: NodeRef, value: str) -> str:
+                return _compute_subdag_max_precise(
+                    pattern,
+                    cut_root,
+                    comp_values,
+                    domain,
+                    bw,
+                    timeout,
+                    solver_kind,
+                    Cut(edge, value),
+                )
+
+            source_comp = comp_values[source]
+            source_seq = seq_values[source]
+
+            dest_cut_comp = eval_cut(dest, source_comp)
+            root_cut_comp = dest_cut_comp if dest == root else eval_cut(root, source_comp)
+
+            if source_seq == source_comp:
+                dest_cut_seq = dest_cut_comp
+                root_cut_seq = root_cut_comp
+            else:
+                dest_cut_seq = eval_cut(dest, source_seq)
+                root_cut_seq = (
+                    dest_cut_seq if dest == root else eval_cut(root, source_seq)
+                )
+
+            dest_rel_loss = dest_cut_comp != comp_values[dest]
+            root_rel_loss = root_cut_comp != comp_values[root]
+            dest_seq_loss = dest_cut_seq != comp_values[dest]
+            root_seq_loss = root_cut_seq != comp_values[root]
+            if dest_rel_loss:
+                local_kind = (
+                    EdgeLossKind.incomplete if root_rel_loss else EdgeLossKind.root_masked
+                )
+            elif dest_seq_loss:
+                local_kind = (
+                    EdgeLossKind.upstream_loss
+                    if root_seq_loss
+                    else EdgeLossKind.root_masked
+                )
+            else:
+                local_kind = EdgeLossKind.complete
+            result.append(
+                SequentialEdgeAnalysis(
+                    dest=dest,
+                    source=source,
+                    dest_cut_comp=dest_cut_comp,
+                    root_cut_comp=root_cut_comp,
+                    dest_cut_seq=dest_cut_seq,
+                    root_cut_seq=root_cut_seq,
+                    dest_rel_loss=dest_rel_loss,
+                    root_rel_loss=root_rel_loss,
+                    dest_seq_loss=dest_seq_loss,
+                    root_seq_loss=root_seq_loss,
+                    local_kind=local_kind,
+                )
+            )
+    return tuple(result)
+
+
+def _minimal_divergences(
+    pattern: PatternDag,
+    comp_values: dict[PatternRef, str],
+    seq_values: dict[PatternRef, str],
+) -> tuple[SequentialDivergence, ...]:
+    divergent: set[NodeRef] = set()
+    for index, _ in enumerate(pattern.nodes):
+        ref = NodeRef(index)
+        if comp_values[ref] != seq_values[ref]:
+            divergent.add(ref)
+    result: list[SequentialDivergence] = []
+    for ref in sorted(divergent, key=lambda node_ref: node_ref.index):
+        if any(
+            isinstance(operand, NodeRef) and operand in divergent
+            for operand in pattern.nodes[ref.index].operands
+        ):
+            continue
+        result.append(
+            SequentialDivergence(
+                ref=ref,
+                composite=comp_values[ref],
+                sequential=seq_values[ref],
+            )
+        )
+    return tuple(result)
+
+
+def sequential_max_precise(
+    pattern: PatternDag,
+    domain: AbstractDomain,
+    bw: int,
+    args: tuple[str, ...],
+    timeout: int,
+    solver_kind: SolverKind,
+) -> SequentialMaxPreciseAnalysis:
+    if len(args) != pattern.num_args:
+        raise ValueError(
+            f"arity of expression ({pattern.num_args}) doesn't match number of args provided ({len(args)})"
+        )
+
+    seq_values = _compute_node_values(
+        pattern, domain, bw, args, timeout, solver_kind, sequential=True
+    )
+    comp_values = _compute_node_values(
+        pattern, domain, bw, args, timeout, solver_kind, sequential=False
+    )
+    return SequentialMaxPreciseAnalysis(
+        composite=comp_values[pattern.result],
+        sequential=seq_values[pattern.result],
+        comp_values=comp_values,
+        seq_values=seq_values,
+        edges=_edge_analyses(
+            pattern, comp_values, seq_values, domain, bw, timeout, solver_kind
+        ),
+        minimal_divergences=_minimal_divergences(pattern, comp_values, seq_values),
+    )
 
 
 @dataclass

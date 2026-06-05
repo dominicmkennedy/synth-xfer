@@ -1,6 +1,8 @@
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 import re
+from typing import cast
 
 from xdsl.dialects.arith import AndIOp
 from xdsl.dialects.builtin import i1
@@ -113,6 +115,55 @@ class PatternOp(StrEnum):
         return self.spec.build(operands)
 
 
+COMMUTATIVE_OPS: frozenset[PatternOp] = frozenset(
+    {
+        PatternOp.Add,
+        PatternOp.AddNsw,
+        PatternOp.AddNuw,
+        PatternOp.AddNswNuw,
+        PatternOp.And,
+        PatternOp.Mul,
+        PatternOp.MulNsw,
+        PatternOp.MulNuw,
+        PatternOp.MulNswNuw,
+        PatternOp.Or,
+        PatternOp.OrDisjoint,
+        PatternOp.SaddSat,
+        PatternOp.SmulSat,
+        PatternOp.UaddSat,
+        PatternOp.UmulSat,
+        PatternOp.Xor,
+        PatternOp.Umax,
+        PatternOp.Umin,
+        PatternOp.Smax,
+        PatternOp.Smin,
+        PatternOp.ICmpEq,
+        PatternOp.ICmpNe,
+    },
+)
+
+_CANONICAL_ICMP_SWAPS: dict[PatternOp, PatternOp] = {
+    PatternOp.ICmpSgt: PatternOp.ICmpSlt,
+    PatternOp.ICmpSge: PatternOp.ICmpSle,
+    PatternOp.ICmpUgt: PatternOp.ICmpUlt,
+    PatternOp.ICmpUge: PatternOp.ICmpUle,
+}
+
+
+def canonicalize_pattern_operands[T](
+    op: PatternOp,
+    operands: tuple[T, ...],
+    key: Callable[[T], str],
+) -> tuple[PatternOp, tuple[T, ...]]:
+    if op in COMMUTATIVE_OPS:
+        return op, tuple(sorted(operands, key=key))
+
+    if op in _CANONICAL_ICMP_SWAPS and len(operands) == 2:
+        return _CANONICAL_ICMP_SWAPS[op], (operands[1], operands[0])
+
+    return op, operands
+
+
 @dataclass(frozen=True, slots=True)
 class ArgRef:
     index: int
@@ -139,6 +190,20 @@ class PatternDag:
     nodes: tuple[PatternNode, ...]
     result: NodeRef
 
+    @classmethod
+    def from_parts(
+        cls,
+        arg_types: tuple[Attribute, ...],
+        nodes: tuple[PatternNode, ...],
+        result: NodeRef,
+    ) -> "PatternDag":
+        dag = cls.__new__(cls)
+        dag.arg_types = arg_types
+        dag.nodes = nodes
+        dag.result = result
+        dag.num_args = len(arg_types)
+        return dag
+
     def is_op(self) -> bool:
         if len(self.nodes) == 1:
             node = self.nodes[self.result.index]
@@ -151,18 +216,184 @@ class PatternDag:
         if self.is_op():
             return self.nodes[self.result.index].op.value
 
-        def render_ref(ref: PatternRef) -> str:
-            if isinstance(ref, ArgRef):
-                return f"arg{ref.index}"
-            node = self.nodes[ref.index]
-            operands = ", ".join(render_ref(operand) for operand in node.operands)
-            return f"{node.op.value}({operands})"
+        def render_key(node: object) -> str:
+            if isinstance(node, ArgRef):
+                return f"arg{node.index}"
+            node = cast(tuple[PatternOp, tuple[object, ...]], node)
+            op, operands = node
+            return f"{op.value}({', '.join(render_key(operand) for operand in operands)})"
 
-        return render_ref(self.result)
+        def canonicalize_ref(ref: PatternRef) -> object:
+            if isinstance(ref, ArgRef):
+                return ref
+            node = self.nodes[ref.index]
+            operands = tuple(canonicalize_ref(operand) for operand in node.operands)
+            op, operands = canonicalize_pattern_operands(
+                node.op,
+                operands,
+                key=render_key,
+            )
+
+            return op, operands
+
+        arg_map: dict[int, int] = {}
+
+        def render_canonical(node: object) -> str:
+            if isinstance(node, ArgRef):
+                return _format_alpha_pattern_ref(node, arg_map)
+
+            node = cast(tuple[PatternOp, tuple[object, ...]], node)
+            op, operands = node
+            return (
+                f"{op.value}"
+                f"({', '.join(render_canonical(operand) for operand in operands)})"
+            )
+
+        return render_canonical(canonicalize_ref(self.result))
+
+    def to_id(self) -> str:
+        expression = str(self)
+        reparsed = type(self)(expression)
+        if reparsed.is_op():
+            expression = str(reparsed)
+
+        ident = re.sub(r"[\s,()]+", "_", expression).strip("_")
+        if len(ident) > 251:
+            raise ValueError(
+                f"pattern too long to encode as a .inc filename "
+                f"({len(ident)} > 251 chars): {self!s}"
+            )
+        return ident
+
+    @classmethod
+    def from_id(cls, pattern_id: str) -> "PatternDag":
+        tokens = pattern_id.split("_")
+        pos = 0
+
+        if len(tokens) == 1 and re.fullmatch(r"arg\d+", tokens[0]) is None:
+            try:
+                return cls.single_node(PatternOp(tokens[0]))
+            except ValueError as exc:
+                raise ValueError(f"unknown op token {tokens[0]!r}") from exc
+
+        def build() -> str:
+            nonlocal pos
+
+            if pos >= len(tokens):
+                raise ValueError(f"truncated pattern id: {pattern_id!r}")
+
+            token = tokens[pos]
+            pos += 1
+
+            if re.fullmatch(r"arg\d+", token):
+                return token
+
+            try:
+                op = PatternOp(token)
+            except ValueError as exc:
+                raise ValueError(
+                    f"unknown op token {token!r} in pattern id {pattern_id!r}"
+                ) from exc
+
+            operands = [build() for _ in op.spec.operand_types]
+            return f"{op.value}({', '.join(operands)})"
+
+        expr = build()
+        if pos != len(tokens):
+            trailing = "_".join(tokens[pos:])
+            raise ValueError(
+                f"trailing tokens in pattern id {pattern_id!r}: {trailing!r}"
+            )
+        return cls(expr)
 
     def __init__(self, expr: str) -> None:
         self.arg_types, self.nodes, self.result = _PatternExprParser(expr).parse()
         self.num_args = len(self.arg_types)
+
+    @classmethod
+    def single_node(cls, op: PatternOp) -> "PatternDag":
+        return cls.from_parts(
+            op.spec.operand_types,
+            (
+                PatternNode(
+                    op,
+                    tuple(ArgRef(index) for index in range(len(op.spec.operand_types))),
+                ),
+            ),
+            NodeRef(0),
+        )
+
+    def arg_depths(self) -> dict[ArgRef, int]:
+        depths: dict[ArgRef, int] = {}
+
+        def visit(ref: PatternRef, level: int) -> None:
+            if isinstance(ref, ArgRef):
+                depths[ref] = min(depths.get(ref, level), level)
+                return
+
+            node = self.nodes[ref.index]
+            for operand in node.operands:
+                visit(operand, level + 1)
+
+        visit(self.result, 0)
+        return depths
+
+    def subdag_with_cut(
+        self,
+        root: PatternRef,
+        cut: tuple[NodeRef, int] | None = None,
+    ) -> tuple["PatternDag", tuple[PatternRef, ...], int | None]:
+        arg_types: list[Attribute] = []
+        arg_sources: list[PatternRef] = []
+        arg_map: dict[ArgRef, ArgRef] = {}
+        node_map: dict[NodeRef, NodeRef] = {}
+        nodes: list[PatternNode] = []
+        cut_arg_index: int | None = None
+
+        def add_arg(source: PatternRef, ty: Attribute) -> ArgRef:
+            ref = ArgRef(len(arg_types))
+            arg_types.append(ty)
+            arg_sources.append(source)
+            return ref
+
+        def lower_ref(ref: PatternRef) -> PatternRef:
+            nonlocal cut_arg_index
+
+            if isinstance(ref, ArgRef):
+                lowered = arg_map.get(ref)
+                if lowered is None:
+                    lowered = add_arg(ref, self.arg_types[ref.index])
+                    arg_map[ref] = lowered
+                return lowered
+
+            lowered_node = node_map.get(ref)
+            if lowered_node is not None:
+                return lowered_node
+
+            node = self.nodes[ref.index]
+            lowered_operands: list[PatternRef] = []
+            for operand_index, operand in enumerate(node.operands):
+                if cut == (ref, operand_index):
+                    cut_arg = add_arg(operand, node.op.spec.operand_types[operand_index])
+                    cut_arg_index = cut_arg.index
+                    lowered_operands.append(cut_arg)
+                else:
+                    lowered_operands.append(lower_ref(operand))
+
+            lowered_node = NodeRef(len(nodes))
+            node_map[ref] = lowered_node
+            nodes.append(PatternNode(node.op, tuple(lowered_operands)))
+            return lowered_node
+
+        lowered_root = lower_ref(root)
+        if isinstance(lowered_root, ArgRef):
+            raise ValueError("sub-DAG root must be an operation result")
+
+        return (
+            PatternDag.from_parts(tuple(arg_types), tuple(nodes), lowered_root),
+            tuple(arg_sources),
+            cut_arg_index,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -625,6 +856,17 @@ def format_pattern_ref(ref: PatternRef) -> str:
     if isinstance(ref, ArgRef):
         return f"arg{ref.index}"
     return f"n{ref.index}"
+
+
+def _format_alpha_pattern_ref(ref: PatternRef, arg_map: dict[int, int]) -> str:
+    if isinstance(ref, NodeRef):
+        return format_pattern_ref(ref)
+
+    index = arg_map.get(ref.index)
+    if index is None:
+        index = len(arg_map)
+        arg_map[ref.index] = index
+    return f"arg{index}"
 
 
 def _append_dag_ops(fn: FuncOp, dag: PatternDag) -> dict[PatternRef, SSAValue]:

@@ -8,7 +8,13 @@ from xdsl.printer import Printer
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.input_generation import generate_pattern_inputs
 from synth_xfer._util.parse_mlir import lower_pattern_to_mlir
-from synth_xfer._util.pattern import analyze_pattern, eval_pattern
+from synth_xfer._util.pattern import (
+    analyze_pattern,
+    eval_pattern,
+    format_pattern_report,
+    format_refined_patterns,
+    refine_pattern,
+)
 from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.tsv import EnumData
@@ -150,7 +156,17 @@ def main() -> None:
 
     args = p.parse_args()
     if args.command == "analyze":
-        print(analyze_pattern(args.op, AbstractDomain[args.domain]))
+        domain = AbstractDomain[args.domain]
+        report = analyze_pattern(args.op, domain)
+        refined_patterns = refine_pattern(args.op, domain)
+        sections = [format_pattern_report(report)]
+        if not report.coincides and tuple(
+            str(pattern) for pattern in refined_patterns
+        ) != (str(args.op),):
+            refined_section = format_refined_patterns(refined_patterns)
+            if refined_section:
+                sections.append(refined_section)
+        print("\n\n".join(sections))
 
     if args.command == "generate-input":
         rng = Random(SystemRandom().randrange(2**32) if args.seed is None else args.seed)
