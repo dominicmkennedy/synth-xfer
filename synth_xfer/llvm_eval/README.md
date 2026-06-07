@@ -97,3 +97,21 @@ python3 -m synth_xfer.llvm_eval.run_opt_benchmark \
     --opt-path $OPT \
     --stats outputs/test_stats.json
 ```
+
+## Cross-validation
+
+`cross_validate.sh` runs K-fold Cross-validation on llvm-opt-benchmark.
+
+`cv_split.py` partitions the benchmark dirs
+into K size-balanced folds (by `original/*.ll` bytes), then per fold
+it trains tables (phase 1) on the other folds and evals (phase 2) on the
+held-out fold.
+
+```bash
+PAT_LIST=tests/data/pattern/test_patterns.tsv \
+    ./synth_xfer/llvm_eval/cross_validate.sh
+```
+
+Requires `LLVM_DIR`, `BENCH_DIR`, `PAT_LIST`. Optional: `CV_DIR` (default
+`outputs/cv`), `K` (default `10`), `SUBSET` (restrict to comma-separated dirs).
+Per-fold outputs: `CV_DIR/fold_<i>/{dirs.txt, tables/, stats.json}`.
