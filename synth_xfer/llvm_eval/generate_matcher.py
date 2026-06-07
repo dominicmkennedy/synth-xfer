@@ -220,7 +220,12 @@ def _emit_pattern_function(spec: PatternSpec) -> str:
         out.append(f"  auto KBArg{i} = computeKnownBits(Arg{i}, Q, {depth_expr});\n")
     for i in r:
         out.append(f"  auto ArrArg{i} = kbToArr(KBArg{i});\n")
-    arg_list = ", ".join(f"ArrArg{i}" for i in r)
+    # Pass the matched value's result width so a pattern whose root changes width
+    # (Select, icmp, *ext-from-bool) returns a KnownBits sized to I, not to an
+    # operand. This is the same width VanillaKnown uses, so the meet in
+    # computeKnownBits never hits an APInt bit-width mismatch.
+    arg_list = ", ".join(["ResBW", *(f"ArrArg{i}" for i in r)])
+    out.append("  unsigned ResBW = getBitWidth(I->getType(), Q.DL);\n")
     out.append(f"  auto Out = arrToKB({spec.id}::solution({arg_list}));\n")
     inputs_init = ", ".join(f"KBArg{i}" for i in r)
     out.append(

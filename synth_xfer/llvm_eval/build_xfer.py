@@ -12,12 +12,19 @@ from synth_xfer._util.tsv import EnumData
 
 
 def render_kb_top(pid: str, arity: int) -> str:
-    """A stub KnownBits transformer whose solution() returns top."""
-    sig = ", ".join(f"std::array<APInt, 2> ssa_{i}" for i in range(arity))
+    """A stub KnownBits transformer whose solution() returns top.
+
+    `bw` is the *result* bit width, supplied by the dispatcher from the matched
+    instruction's result type. Deriving it from an operand would be wrong for
+    patterns whose root changes width (e.g. Select -- operand 0 is the i1
+    condition; icmp -- the result is i1; sext/zext-from-bool).
+    """
+    sig = ", ".join(
+        ["unsigned bw"] + [f"std::array<APInt, 2> ssa_{i}" for i in range(arity)]
+    )
     return (
         f"namespace {pid} {{\n"
         f"std::array<APInt, 2> solution({sig}) {{\n"
-        f"\tunsigned bw = ssa_0[0].getBitWidth();\n"
         f"\treturn std::array<APInt, 2>{{APInt(bw, 0), APInt(bw, 0)}};\n"
         f"}}\n}}\n"
     )
@@ -67,7 +74,11 @@ def build_stubs(pat_list: Path, out_dir: Path, domain_name: str) -> None:
 def _rows_from_tsv(path: Path) -> tuple[int, dict[int, list[tuple[list[str], str]]]]:
     """Returns (arity, {bw: [(args, ideal), ...]}) of non-bottom rows.
 
-    `args`/`ideal` are MSB-first '0'/'1'/'?' ternary strings.
+    `args`/`ideal` are MSB-first '0'/'1'/'?' ternary strings. `bw` is the
+    enumeration's operand-domain width, but any individual operand or the
+    result may instead be an i1 (width 1) -- e.g. a Select condition, an
+    i1 input to Sext/ZextBool, or the i1 result of an icmp-rooted pattern.
+    Each field is therefore validated at its own width (`bw` or 1), not `bw`.
     """
     with path.open() as f:
         data = EnumData.read_tsv(f)
@@ -86,8 +97,10 @@ def _rows_from_tsv(path: Path) -> tuple[int, dict[int, list[tuple[list[str], str
         if any(s == "(bottom)" for s in (*args, ideal)):
             continue
         for s in (*args, ideal):
-            if len(s) != bw or not re.fullmatch(r"[01?]+", s):
-                raise ValueError(f"{path}: bad ternary string {s!r} for bw={bw}")
+            if not re.fullmatch(r"[01?]+", s) or len(s) not in (bw, 1):
+                raise ValueError(
+                    f"{path}: bad ternary string {s!r}; expected width {bw} or 1"
+                )
         groups[bw].append((args, ideal))
     return arity, groups
 
@@ -95,7 +108,9 @@ def _rows_from_tsv(path: Path) -> tuple[int, dict[int, list[tuple[list[str], str
 def emit_inline(
     pid: str, arity: int, groups: dict[int, list[tuple[list[str], str]]]
 ) -> str:
-    sig = ", ".join(f"std::array<APInt, 2> ssa_{i}" for i in range(arity))
+    sig = ", ".join(
+        ["unsigned bw"] + [f"std::array<APInt, 2> ssa_{i}" for i in range(arity)]
+    )
     entries = []
     for bw in sorted(groups):
         for args, ideal in groups[bw]:
@@ -120,13 +135,13 @@ static constexpr Entry kEntries[] = {{
 }} // namespace
 
 std::array<APInt, 2> solution({sig}) {{
-  unsigned bw = ssa_0[0].getBitWidth();
-  if (bw > 64) return std::array<APInt, 2>{{APInt(bw, 0), APInt(bw, 0)}};
+  unsigned opbw = ssa_0[0].getBitWidth();
+  if (opbw > 64) return std::array<APInt, 2>{{APInt(bw, 0), APInt(bw, 0)}};
   uint64_t inZ[{arity}], inO[{arity}];
 {loads}
   uint64_t outZ = 0, outO = 0;
   for (const Entry &E : kEntries) {{
-    if (E.bw != bw) continue;
+    if (E.bw != opbw) continue;
     bool match = true;
     for (unsigned a = 0; a < {arity}; ++a)
       if ((E.argZ[a] & ~inZ[a]) | (E.argO[a] & ~inO[a])) {{ match = false; break; }}
@@ -146,7 +161,9 @@ BLOB_LIMIT = 60000
 def emit_blob(
     pid: str, arity: int, groups: dict[int, list[tuple[list[str], str]]]
 ) -> str:
-    sig = ", ".join(f"std::array<APInt, 2> ssa_{i}" for i in range(arity))
+    sig = ", ".join(
+        ["unsigned bw"] + [f"std::array<APInt, 2> ssa_{i}" for i in range(arity)]
+    )
     blobs, tables = [], []
     for bw in sorted(groups):
         mask_bytes = (bw + 7) // 8
@@ -182,7 +199,7 @@ static const ::KnownBitsPatterns::BwTable kTables[] = {{
 
 std::array<APInt, 2> solution({sig}) {{
   const std::array<APInt, 2> args[{arity}] = {{{arg_list}}};
-  return ::KnownBitsPatterns::lookupKB<{arity}>(args, kTables, std::size(kTables));
+  return ::KnownBitsPatterns::lookupKB<{arity}>(bw, args, kTables, std::size(kTables));
 }}
 }}
 """
@@ -190,9 +207,10 @@ std::array<APInt, 2> solution({sig}) {{
 
 def build_tables(table_dir: Path, out_dir: Path, inline_threshold: int) -> None:
     tsv_files = sorted(table_dir.glob("*.tsv"))
-    if not tsv_files:
-        sys.exit(f"No TSVs found in {table_dir}")
     prepare_inc_dir(out_dir)
+    if not tsv_files:
+        print(f"warning: no TSVs in {table_dir}; wrote 0 transformers (no-op dispatcher)")
+        return
 
     n_stub = n_inline = n_blob = n_rows = 0
     for path in tsv_files:
