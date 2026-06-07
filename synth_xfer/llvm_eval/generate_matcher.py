@@ -276,14 +276,14 @@ def _emit_pattern_impact_stats(specs: list[PatternSpec]) -> str:
 def main() -> None:
     ap = ArgumentParser(
         description="Generate KnownBitsPatternDispatch.inc from a transformer "
-        "folder (a subdir of expression-named <id>.inc files) and copy the "
+        "folder of expression-named <id>.inc files and copy the "
         ".inc files into the Generated tree."
     )
     ap.add_argument(
         "--input-dir",
         type=Path,
         required=True,
-        help="Transformer folder laid out as <input_dir>/inc/, holding one <id>.inc per pattern.",
+        help="Transformer folder holding one <id>.inc per pattern.",
     )
     ap.add_argument(
         "--llvm-dir",
@@ -299,7 +299,7 @@ def main() -> None:
     )
     args = ap.parse_args()
 
-    inc_files = sorted((Path(args.input_dir) / "inc").glob("*.inc"))
+    inc_files = sorted(Path(args.input_dir).glob("*.inc"))
     patterns = sorted({f.stem: PatternDag.from_id(f.stem) for f in inc_files}.items())
 
     # The numeric routing id is the pattern's position in sorted-id order.
@@ -329,7 +329,7 @@ def main() -> None:
     patterns_dst.mkdir(parents=True)
 
     for spec in specs:
-        src = Path(args.input_dir) / "inc" / f"{spec.id}.inc"
+        src = Path(args.input_dir) / f"{spec.id}.inc"
         if not src.is_file():
             raise ValueError(f"missing {src} for pattern {spec.id}")
         shutil.copyfile(src, patterns_dst / f"{spec.id}.inc")
