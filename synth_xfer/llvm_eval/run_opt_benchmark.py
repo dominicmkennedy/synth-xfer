@@ -91,7 +91,7 @@ def run_opt(input_file: Path) -> OptResult:
             input_file,
         ]
         if _MODE == "stats":
-            cmd += ["--stats", "--stats-json"]
+            cmd += ["--stats", "--stats-json", "-enable-pattern-off-baseline"]
         elif _MODE == "histogram":
             assert _HIST_DIR is not None
             hist_path = _HIST_DIR / "shards" / _rel_stem(input_file).with_suffix(".hist")
@@ -182,8 +182,12 @@ def _merge_histograms(hist_dir: Path, patterns_dir: Path) -> None:
         pattern = PatternDag.from_id(name)
         arity = max(len(a) for a in rows) if rows else 0
         ranked = sorted(rows.items(), key=lambda kv: -kv[1][0])
-        # distinct-row count per bitwidth (= ternary string length) for hbw.
-        bw_counts = collections.Counter(len(a[0]) for a in rows if a)
+        # distinct-row count per bitwidth for hbw. The instance width N is the
+        # width of the iN-typed operands; i1 operands (e.g. a select condition or
+        # an icmp result feeding another op) are always length 1, so taking the
+        # max across a row recovers N for width-heterogeneous patterns instead of
+        # latching onto a leading i1 arg.
+        bw_counts = collections.Counter(max(len(x) for x in a) for a in rows if a)
         out_path = hist_dir / f"{name}.tsv"
         metadata = EnumMetaData(
             domain=AbstractDomain.KnownBits,
@@ -196,7 +200,7 @@ def _merge_histograms(hist_dir: Path, patterns_dir: Path) -> None:
         )
         records: list[tuple[object, ...]] = []
         for rank, (args, (count, bits_added, conflict)) in enumerate(ranked, 1):
-            bw = len(args[0]) if args else 0
+            bw = max(len(a) for a in args) if args else 0
             records.append((bw, rank, count, *args, bits_added, conflict))
         columns = (
             ["bw", "rank", "count"]
