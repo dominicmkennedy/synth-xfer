@@ -113,21 +113,28 @@ def main() -> None:
     ap.add_argument("--tsv-dir", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, required=True)
     ap.add_argument(
-        "--drop-top", action=BooleanOptionalAction, default=True,
+        "--drop-top",
+        action=BooleanOptionalAction,
+        default=True,
         help="Drop rows whose ideal output is top (all '?'). Use "
-             "--no-drop-top to keep them.",
+        "--no-drop-top to keep them.",
     )
     ap.add_argument(
-        "--prune-subsumed", action=BooleanOptionalAction, default=True,
+        "--prune-subsumed",
+        action=BooleanOptionalAction,
+        default=True,
         help="Drop rows subsumed by a more-general row that already covers "
-             "their output (minimal-cover pruning). Use --no-prune-subsumed "
-             "to disable.",
+        "their output (minimal-cover pruning). Use --no-prune-subsumed "
+        "to disable.",
     )
     ap.add_argument(
-        "--max-rows-per-bw", type=int, default=0, metavar="N",
+        "--max-rows-per-bw",
+        type=int,
+        default=0,
+        metavar="N",
         help="Cap the number of kept rows per bitwidth: if a bitwidth has more "
-             "than N surviving rows, keep only the first N (in original "
-             "order). Default 0 (no cap); a common value is 200.",
+        "than N surviving rows, keep only the first N (in original "
+        "order). Default 0 (no cap); a common value is 200.",
     )
     args = ap.parse_args()
 
@@ -192,8 +199,10 @@ def main() -> None:
         top_bw, top_bw_rows = max(
             kept_by_bw.items(), key=lambda kv: kv[1], default=("-", 0)
         )
-        print(f"{path.name:<{name_width}}  rows: {len(frame):>6}   "
-              f"kept: {pattern_kept:>5}   largest: {top_bw_rows:>5} (bw={top_bw})")
+        print(
+            f"{path.name:<{name_width}}  rows: {len(frame):>6}   "
+            f"kept: {pattern_kept:>5}   largest: {top_bw_rows:>5} (bw={top_bw})"
+        )
 
         # Nothing survived -> no usable lookup rows, skip writing entirely.
         if pattern_kept == 0:
@@ -203,11 +212,15 @@ def main() -> None:
         kept_frame = frame.iloc[sorted(keep_positions)].reset_index(drop=True)
         EnumData(data.metadata, kept_frame).write_tsv(args.out_dir / path.name)
 
-    print(f"Optimized {len(tsv_files) - n_empty} TSVs -> {args.out_dir} "
-          f"({n_empty} empty patterns skipped)")
-    print(f"Rows seen: {n_seen}  kept: {n_kept}  dropped: {n_seen - n_kept} "
-          f"(top: {n_top}, bottom: {n_bottom}, subsumed: {n_subsumed}, "
-          f"capped: {n_capped})")
+    print(
+        f"Optimized {len(tsv_files) - n_empty} TSVs -> {args.out_dir} "
+        f"({n_empty} empty patterns skipped)"
+    )
+    print(
+        f"Rows seen: {n_seen}  kept: {n_kept}  dropped: {n_seen - n_kept} "
+        f"(top: {n_top}, bottom: {n_bottom}, subsumed: {n_subsumed}, "
+        f"capped: {n_capped})"
+    )
 
 
 if __name__ == "__main__":

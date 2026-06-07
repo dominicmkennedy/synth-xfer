@@ -26,8 +26,8 @@ Examples:
 """
 
 import argparse
-import csv
 from collections import defaultdict
+import csv
 from pathlib import Path
 import re
 import sys
@@ -118,7 +118,9 @@ def _rows_from_tsv(path: Path) -> tuple[int, dict[int, list[tuple[list[str], str
     return arity, groups
 
 
-def emit_inline(pid: str, arity: int, groups: dict[int, list[tuple[list[str], str]]]) -> str:
+def emit_inline(
+    pid: str, arity: int, groups: dict[int, list[tuple[list[str], str]]]
+) -> str:
     sig = ", ".join(f"std::array<APInt, 2> ssa_{i}" for i in range(arity))
     entries = []
     for bw in sorted(groups):
@@ -127,7 +129,9 @@ def emit_inline(pid: str, arity: int, groups: dict[int, list[tuple[list[str], st
             oz, oo = ternary_to_zo(ideal)
             argZ = ", ".join(f"0x{z:X}ULL" for z, _ in zo)
             argO = ", ".join(f"0x{o:X}ULL" for _, o in zo)
-            entries.append(f"  {{{bw}u, {{{argZ}}}, {{{argO}}}, 0x{oz:X}ULL, 0x{oo:X}ULL}},")
+            entries.append(
+                f"  {{{bw}u, {{{argZ}}}, {{{argO}}}, 0x{oz:X}ULL, 0x{oo:X}ULL}},"
+            )
     loads = "\n".join(
         f"  inZ[{i}] = ssa_{i}[0].getZExtValue();\n  inO[{i}] = ssa_{i}[1].getZExtValue();"
         for i in range(arity)
@@ -165,7 +169,9 @@ std::array<APInt, 2> solution({sig}) {{
 BLOB_LIMIT = 60000
 
 
-def emit_blob(pid: str, arity: int, groups: dict[int, list[tuple[list[str], str]]]) -> str:
+def emit_blob(
+    pid: str, arity: int, groups: dict[int, list[tuple[list[str], str]]]
+) -> str:
     sig = ", ".join(f"std::array<APInt, 2> ssa_{i}" for i in range(arity))
     blobs, tables = [], []
     for bw in sorted(groups):
@@ -180,9 +186,13 @@ def emit_blob(pid: str, arity: int, groups: dict[int, list[tuple[list[str], str]
                 row = bytearray()
                 for s in (*args, ideal):
                     z, o = ternary_to_zo(s)
-                    row += z.to_bytes(mask_bytes, "little") + o.to_bytes(mask_bytes, "little")
+                    row += z.to_bytes(mask_bytes, "little") + o.to_bytes(
+                        mask_bytes, "little"
+                    )
                 lits.append('    "' + "".join(f"\\x{b:02x}" for b in row) + '"')
-            blobs.append(f"static const unsigned char {name}[] =\n" + "\n".join(lits) + ";")
+            blobs.append(
+                f"static const unsigned char {name}[] =\n" + "\n".join(lits) + ";"
+            )
             tables.append(f"  {{{bw}u, {len(chunk)}u, {name}}},")
     arg_list = ", ".join(f"ssa_{i}" for i in range(arity))
     blob_block = "\n".join(blobs)
@@ -234,17 +244,33 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     src = ap.add_mutually_exclusive_group(required=True)
-    src.add_argument("--pat-list", type=Path,
-                     help="stubs: TSV with a `pattern` column of expression strings")
-    src.add_argument("--table-dir", type=Path,
-                     help="tables: directory of ideal-filled <id>.tsv files")
-    ap.add_argument("--output-dir", type=Path, required=True,
-                    help="Output dir: <id>.inc files are written here")
-    ap.add_argument("-d", "--domain", choices=[str(x) for x in AbstractDomain],
-                    help="stubs: abstract domain (required with --pat-list)")
-    ap.add_argument("--inline-threshold", type=int, default=16,
-                    help="tables: row count <= this AND max bw <= 64 -> inline "
-                         "constexpr Entry[]; otherwise byte-blob (default 16)")
+    src.add_argument(
+        "--pat-list",
+        type=Path,
+        help="stubs: TSV with a `pattern` column of expression strings",
+    )
+    src.add_argument(
+        "--table-dir", type=Path, help="tables: directory of ideal-filled <id>.tsv files"
+    )
+    ap.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Output dir: <id>.inc files are written here",
+    )
+    ap.add_argument(
+        "-d",
+        "--domain",
+        choices=[str(x) for x in AbstractDomain],
+        help="stubs: abstract domain (required with --pat-list)",
+    )
+    ap.add_argument(
+        "--inline-threshold",
+        type=int,
+        default=16,
+        help="tables: row count <= this AND max bw <= 64 -> inline "
+        "constexpr Entry[]; otherwise byte-blob (default 16)",
+    )
     args = ap.parse_args()
 
     if args.pat_list is not None:

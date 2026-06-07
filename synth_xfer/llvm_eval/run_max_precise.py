@@ -1,23 +1,18 @@
 import argparse
-import subprocess
-import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-
+import subprocess
+import sys
 
 # The max-precise console script lives next to the interpreter running us.
 MAX_PRECISE = str(Path(sys.executable).parent / "max-precise")
 
 
-def _run_one(
-    tsv: Path, timeout: int, output_dir: Path | None
-) -> tuple[Path, int, str]:
+def _run_one(tsv: Path, timeout: int, output_dir: Path | None) -> tuple[Path, int, str]:
     cmd = [MAX_PRECISE, "--input", str(tsv), "--timeout", str(timeout)]
     if output_dir is not None:
         cmd += ["--output", str(output_dir / tsv.name)]
-    proc = subprocess.run(
-        cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True
-    )
+    proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True)
     return tsv, proc.returncode, (proc.stdout + proc.stderr).strip()
 
 
@@ -47,7 +42,9 @@ def main() -> None:
 
     if args.output_dir is not None:
         args.output_dir.mkdir(parents=True, exist_ok=True)
-    print(f"running max-precise over {len(tsvs)} files (jobs={args.jobs}, timeout={args.timeout}s)")
+    print(
+        f"running max-precise over {len(tsvs)} files (jobs={args.jobs}, timeout={args.timeout}s)"
+    )
 
     failures = 0
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:
