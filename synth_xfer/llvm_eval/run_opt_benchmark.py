@@ -288,7 +288,7 @@ def main() -> None:
         sys.exit(f"error: opt binary {args.opt_path} not found or not executable")
 
     patterns_dir = (
-        args.opt_path.parent.parent.parent.parent
+        args.opt_path.parent.parent.parent
         / "llvm"
         / "lib"
         / "Analysis"
