@@ -30,7 +30,7 @@ export LLVM_DIR=~/path/to/llvm-project
 export BENCH_DIR=~/path/to/llvm-opt-benchmark
 
 # steps 1-5: histogram -> max-precise -> pruned tables (-> TABLE_DIR)
-PAT_LIST=tests/data/pattern/top_10_pattern.tsv \
+PAT_LIST=tests/data/pattern/test_patterns.tsv \
 TABLE_DIR=outputs/pruned \
     ./synth_xfer/llvm_eval/phase1_build_tables.sh
 
@@ -55,7 +55,7 @@ OPT=$LLVM_DIR/build/bin/opt
 ```bash
 # 1. stub transformers -> dispatcher
 python3 -m synth_xfer.llvm_eval.build_xfer \
-    --pat-list llvm_results/top_10_pattern.tsv \
+    --pat-list llvm_results/test_patterns.tsv \
     --output-dir outputs/test_pat/xfer \
     -d KnownBits
 python3 -m synth_xfer.llvm_eval.generate_matcher \
