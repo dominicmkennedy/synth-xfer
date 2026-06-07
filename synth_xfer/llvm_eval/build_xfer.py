@@ -4,6 +4,7 @@ import csv
 from pathlib import Path
 import re
 import sys
+from typing import cast
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.pattern_dsl import PatternDag
@@ -79,7 +80,7 @@ def _rows_from_tsv(path: Path) -> tuple[int, dict[int, list[tuple[list[str], str
     arg_cols = [f"arg_{a}" for a in range(arity)]
     groups: dict[int, list[tuple[list[str], str]]] = defaultdict(list)
     for _, row in data.enumdata.iterrows():
-        bw = int(row["bw"])
+        bw = int(cast(int, row["bw"]))
         args = [str(row[c]) for c in arg_cols]
         ideal = str(row["ideal"])
         if any(s == "(bottom)" for s in (*args, ideal)):

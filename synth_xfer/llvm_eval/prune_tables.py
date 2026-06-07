@@ -2,6 +2,7 @@ from argparse import ArgumentParser, BooleanOptionalAction
 from collections import defaultdict
 from pathlib import Path
 import sys
+from typing import cast
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.tsv import EnumData
@@ -152,7 +153,7 @@ def main() -> None:
             elif args.drop_top and is_top(ideal):
                 n_top += 1
             else:
-                groups[int(row["bw"])].append((pos, argvals, ideal))
+                groups[int(cast(int, row["bw"]))].append((pos, argvals, ideal))
 
         # Per bitwidth: subsumption-prune, then cap, collecting kept positions.
         cap = args.max_rows_per_bw
