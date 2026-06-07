@@ -1,30 +1,3 @@
-"""Generate per-pattern KnownBits transformer .inc files.
-
-The input selects which kind of transformer to emit (exactly one of):
-
-  --pat-list    stubs: one stub transformer (solution() returns top) per pattern
-                listed in a TSV's `pattern` column. Wires patterns into the
-                dispatcher without improving precision, enough to measure which
-                patterns fire.
-
-  --table-dir   tables: lookup-table transformers from the ideal-filled EnumData
-                TSVs produced by run_max_precise.py / prune_tables.py. A faithful
-                transcoder: every non-bottom row becomes a lookup row (run
-                prune_tables.py first to drop top rows). Per pattern: an inline
-                `constexpr Entry[]` for small/<=64-bit tables, otherwise a
-                byte-string blob calling KnownBitsPatterns::lookupKB<> from
-                table_helper.inc (so generate_matcher.py needs --include-helper).
-
-Both write one <id>.inc per pattern directly into the output dir (the flat
-layout generate_matcher.py consumes).
-
-Examples:
-    python3 -m synth_xfer.llvm_eval.build_xfer \\
-        --pat-list results/patterns.tsv --output-dir outputs/xfer -d KnownBits
-    python3 -m synth_xfer.llvm_eval.build_xfer \\
-        --table-dir outputs/test_pat/pruned --output-dir outputs/test_pat/xfer
-"""
-
 import argparse
 from collections import defaultdict
 import csv

@@ -1,25 +1,3 @@
-"""Optimize KnownBits pattern TSVs for lookup-table generation.
-
-Port of llvm-project/table_builder/prune_table.py, adapted to the EnumData
-TSVs produced by run_max_precise.py (e.g. outputs/test_pat/tables). Reads the
-ideal-filled per-pattern TSVs and writes optimized copies containing only the
-rows worth keeping for a sound + optimal meet-based lookup:
-
-  - Drop rows whose ideal output is top (all '?'); under meet semantics they
-    contribute nothing.
-  - Drop rows where any arg or the ideal is bottom (unreachable input); those
-    cannot be represented as ternary masks and carry no lookup value.
-  - Drop rows subsumed by a more-general row that already covers their output
-    (minimal-cover pruning), per bitwidth.
-
-The YAML header is preserved via EnumData round-tripping. Every input TSV must
-have an `ideal` column (run max-precise first).
-
-Example:
-    python3 -m synth_xfer.llvm_eval.prune_tables \\
-        --tsv-dir outputs/test_pat/tables --out-dir outputs/test_pat/pruned
-"""
-
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections import defaultdict
 from pathlib import Path
