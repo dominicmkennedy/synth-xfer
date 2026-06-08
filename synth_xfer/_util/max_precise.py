@@ -1,8 +1,10 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from io import StringIO
+from multiprocessing import Pool
 import re
 
+import pandas as pd
 from xdsl.context import Context
 from xdsl.dialects.arith import Arith
 from xdsl.dialects.builtin import Builtin, IntegerType, ModuleOp, StringAttr, i1
@@ -30,6 +32,7 @@ from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.pattern_dsl import ArgRef, NodeRef, PatternDag, PatternRef
 from synth_xfer._util.smt_solver import IncrementalSolver, SolverKind, make_solver
+from synth_xfer._util.tsv import EnumData
 from synth_xfer._util.verifier import lower_to_smt_module
 
 _CTX: Context | None = None
@@ -433,6 +436,7 @@ class RowTask:
 class RowResult:
     index: int
     ideal: str | None = None
+    sequential_ideal: str | None = None
     timed_out: bool = False
 
 
@@ -445,16 +449,18 @@ class RowProcessor:
 
     def __call__(self, task: RowTask) -> RowResult:
         try:
+            ideal, sequential_ideal = compute_max_pair(
+                self.pattern,
+                self.domain,
+                task.bw,
+                task.args,
+                self.timeout,
+                self.solver_kind,
+            )
             return RowResult(
                 index=task.index,
-                ideal=compute_max_precise(
-                    self.pattern,
-                    self.domain,
-                    task.bw,
-                    task.args,
-                    self.timeout,
-                    self.solver_kind,
-                ),
+                ideal=ideal,
+                sequential_ideal=sequential_ideal,
             )
         except TimeoutError:
             return RowResult(index=task.index, timed_out=True)
@@ -520,6 +526,114 @@ def compute_max_precise(
     query = PreparedQuery.from_module(ctx, smt_mod, result_width, timeout, solver_kind)
     computer = _get_max_precise_computer(domain, query, result_width)
     return computer.compute()
+
+
+def compute_sequential_root_max_precise(
+    pattern: PatternDag,
+    domain: AbstractDomain,
+    bw: int,
+    args: tuple[str, ...],
+    timeout: int,
+    solver_kind: SolverKind,
+) -> str:
+    values: dict[PatternRef, str] = {ArgRef(index): arg for index, arg in enumerate(args)}
+    for node_index, node in enumerate(pattern.nodes):
+        node_args = tuple(values[operand] for operand in node.operands)
+        values[NodeRef(node_index)] = compute_max_precise(
+            PatternDag.single_node(node.op),
+            domain,
+            bw,
+            node_args,
+            timeout,
+            solver_kind,
+        )
+    return values[pattern.result]
+
+
+def compute_max_pair(
+    pattern: PatternDag,
+    domain: AbstractDomain,
+    bw: int,
+    args: tuple[str, ...],
+    timeout: int,
+    solver_kind: SolverKind,
+) -> tuple[str, str]:
+    composite = compute_max_precise(pattern, domain, bw, args, timeout, solver_kind)
+    if pattern.is_op():
+        return composite, composite
+    sequential = compute_sequential_root_max_precise(
+        pattern,
+        domain,
+        bw,
+        args,
+        timeout,
+        solver_kind,
+    )
+    return composite, sequential
+
+
+def _comment_row(row: pd.Series, columns: list[str]) -> str:
+    return "# " + "\t".join(str(row[column]) for column in columns)
+
+
+def fill_hbw_rows(
+    data: EnumData,
+    timeout: int,
+    solver_kind: SolverKind,
+) -> tuple[EnumData, list[str]]:
+    hbw_bws = {bw for bw, _, _ in data.metadata.hbw}
+    arg_cols = [f"arg_{i}" for i in range(data.metadata.arity)]
+    tasks = [
+        RowTask(
+            index=int(index),  # type: ignore
+            bw=int(row["bw"]),  # type: ignore
+            args=tuple(str(row[col]) for col in arg_cols),
+        )
+        for index, row in data.enumdata.iterrows()
+        if int(row["bw"]) in hbw_bws  # type: ignore
+    ]
+
+    processor = RowProcessor(data.metadata.op, data.metadata.domain, timeout, solver_kind)
+    if len(tasks) <= 1:
+        results = [processor(task) for task in tasks]
+    else:
+        with Pool() as pool:
+            results = pool.map(processor, tasks)
+
+    df = data.enumdata.copy()
+    columns = list(df.columns)
+    commented_rows: list[str] = []
+    timed_out_indexes: list[int] = []
+
+    for result in results:
+        if result.timed_out:
+            row = df.loc[result.index]
+            print(
+                f"timeout: row={result.index + 2} bw={row['bw']} args="
+                + ",".join(str(row[col]) for col in arg_cols)
+            )
+            commented_rows.append(_comment_row(row, columns))
+            timed_out_indexes.append(result.index)
+            continue
+
+        assert result.ideal is not None
+        assert result.sequential_ideal is not None
+        df.at[result.index, "ideal"] = result.ideal
+        df.at[result.index, "sequential_ideal"] = result.sequential_ideal
+
+    if timed_out_indexes:
+        df = df.drop(index=timed_out_indexes).reset_index(drop=True)
+
+    completed_hbw = sorted(hbw_bws)
+    preserved_mbw = [entry for entry in data.metadata.mbw if entry[0] not in hbw_bws]
+    generated_mbw = [(bw, int((df["bw"] == bw).sum())) for bw in completed_hbw]
+    metadata = replace(
+        data.metadata,
+        mbw=preserved_mbw + generated_mbw,
+        hbw=[],
+    )
+
+    return EnumData(metadata, df), commented_rows
 
 
 class EdgeLossKind(StrEnum):

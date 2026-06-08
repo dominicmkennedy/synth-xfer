@@ -100,6 +100,8 @@ class EnumData:
         ordered.extend(col for _, col in arg_cols)
         if "ideal" in frame.columns:
             ordered.append("ideal")
+        if "sequential_ideal" in frame.columns:
+            ordered.append("sequential_ideal")
         if "count" in frame.columns:
             ordered.append("count")
         if "weight" in frame.columns:

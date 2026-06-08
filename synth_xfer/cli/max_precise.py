@@ -3,18 +3,13 @@ from argparse import (
     ArgumentParser,
     Namespace,
 )
-from dataclasses import replace
-from multiprocessing import Pool
 from pathlib import Path
-
-import pandas as pd
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.max_precise import (
-    RowProcessor,
-    RowTask,
     SequentialMaxPreciseAnalysis,
     compute_max_precise,
+    fill_hbw_rows,
     sequential_max_precise,
 )
 from synth_xfer._util.pattern_dsl import (
@@ -88,10 +83,6 @@ def _get_args() -> Namespace:
     if args.output is not None:
         p.error("--output can only be used with --input")
     return args
-
-
-def _comment_row(row: pd.Series, columns: list[str]) -> str:
-    return "# " + "\t".join(str(row[column]) for column in columns)
 
 
 def _format_node(
@@ -176,70 +167,13 @@ def _format_seq_analysis(
     return "\n".join(lines)
 
 
-def _fill_hbw_rows(
-    data: EnumData,
-    timeout: int,
-    solver_kind: SolverKind,
-) -> tuple[EnumData, list[str]]:
-    hbw_bws = {bw for bw, _, _ in data.metadata.hbw}
-    arg_cols = [f"arg_{i}" for i in range(data.metadata.arity)]
-    tasks = [
-        RowTask(
-            index=int(index),  # type: ignore
-            bw=int(row["bw"]),  # type: ignore
-            args=tuple(str(row[col]) for col in arg_cols),
-        )
-        for index, row in data.enumdata.iterrows()
-        if int(row["bw"]) in hbw_bws  # type: ignore
-    ]
-
-    with Pool() as pool:
-        results = pool.map(
-            RowProcessor(data.metadata.op, data.metadata.domain, timeout, solver_kind),
-            tasks,
-        )
-
-    df = data.enumdata.copy()
-    columns = list(df.columns)
-    commented_rows: list[str] = []
-    timed_out_indexes: list[int] = []
-
-    for result in results:
-        if result.timed_out:
-            row = df.loc[result.index]
-            print(
-                f"timeout: row={result.index + 2} bw={row['bw']} args="
-                + ",".join(str(row[col]) for col in arg_cols)
-            )
-            commented_rows.append(_comment_row(row, columns))
-            timed_out_indexes.append(result.index)
-            continue
-
-        assert result.ideal is not None
-        df.at[result.index, "ideal"] = result.ideal
-
-    if timed_out_indexes:
-        df = df.drop(index=timed_out_indexes).reset_index(drop=True)
-
-    completed_hbw = sorted(hbw_bws)
-    preserved_mbw = [entry for entry in data.metadata.mbw if entry[0] not in hbw_bws]
-    generated_mbw = [(bw, int((df["bw"] == bw).sum())) for bw in completed_hbw]
-    metadata = replace(
-        data.metadata,
-        mbw=preserved_mbw + generated_mbw,
-        hbw=[],
-    )
-
-    return EnumData(metadata, df), commented_rows
-
-
 def main() -> None:
     args = _get_args()
     if args.input is not None:
         with args.input.open() as f:
             data = EnumData.read_tsv(f)
 
-        updated, commented_rows = _fill_hbw_rows(data, args.timeout, args.solver)
+        updated, commented_rows = fill_hbw_rows(data, args.timeout, args.solver)
         output_path = args.input if args.output is None else args.output
         updated.write_tsv_with_comments(output_path, commented_rows)
     else:

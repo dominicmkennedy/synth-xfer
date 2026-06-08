@@ -1,30 +1,62 @@
 import argparse
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass
 from pathlib import Path
-import subprocess
 import sys
 
-# The max-precise console script lives next to the interpreter running us.
-MAX_PRECISE = str(Path(sys.executable).parent / "max-precise")
+from synth_xfer._util.max_precise import fill_hbw_rows
+from synth_xfer._util.smt_solver import SolverKind
+from synth_xfer._util.tsv import EnumData
 
 
-def _run_one(tsv: Path, timeout: int, output_dir: Path | None) -> tuple[Path, int, str]:
-    cmd = [MAX_PRECISE, "--input", str(tsv), "--timeout", str(timeout)]
-    if output_dir is not None:
-        cmd += ["--output", str(output_dir / tsv.name)]
-    proc = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True)
-    return tsv, proc.returncode, (proc.stdout + proc.stderr).strip()
+@dataclass(frozen=True)
+class FileResult:
+    path: Path
+    ok: bool
+    message: str = ""
+
+
+def _run_one(
+    tsv: Path,
+    timeout: int,
+    solver_kind: SolverKind,
+    output_dir: Path | None,
+) -> FileResult:
+    try:
+        with tsv.open() as f:
+            data = EnumData.read_tsv(f)
+
+        updated, commented_rows = fill_hbw_rows(data, timeout, solver_kind)
+        output_path = tsv if output_dir is None else output_dir / tsv.name
+        updated.write_tsv_with_comments(output_path, commented_rows)
+    except Exception as exc:
+        return FileResult(tsv, False, f"{type(exc).__name__}: {exc}")
+
+    return FileResult(tsv, True)
+
+
+def _print_result(result: FileResult) -> bool:
+    tag = "[done]   " if result.ok else "[FAIL]  "
+    print(f"{tag} {result.path.stem}")
+    if result.message:
+        print("\n".join(f"    {line}" for line in result.message.splitlines()))
+    return not result.ok
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
-    )
+    p = argparse.ArgumentParser(formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("src_dir", type=Path, help="Folder of histogram TSVs")
-    # max-precise already parallelizes across the rows of a single file, so total
-    # worker processes ~= jobs * cpu_count(); keep --jobs small.
-    p.add_argument("--jobs", type=int, default=4, help="Parallel file workers")
-    p.add_argument("--timeout", type=int, default=10, help="Per-query solver timeout (s)")
+    # fill_hbw_rows parallelizes across the high-bitwidth rows in each file, so
+    # total workers can be roughly jobs * cpu_count(); keep --jobs small.
+    p.add_argument("--jobs", type=int, default=1, help="Parallel file workers")
+    p.add_argument("--timeout", type=int, default=30, help="Per-query solver timeout (s)")
+    p.add_argument(
+        "--solver",
+        type=SolverKind,
+        choices=list(SolverKind),
+        default=SolverKind.bitwuzla,
+        help="SMT solver backend",
+    )
     p.add_argument(
         "--output-dir",
         type=Path,
@@ -47,15 +79,18 @@ def main() -> None:
     )
 
     failures = 0
-    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        for tsv, rc, log in pool.map(
-            lambda t: _run_one(t, args.timeout, args.output_dir), tsvs
-        ):
-            tag = "[done]   " if rc == 0 else f"[FAIL {rc}]"
-            failures += rc != 0
-            print(f"{tag} {tsv.stem}")
-            if log:
-                print("\n".join(f"    {line}" for line in log.splitlines()))
+    if args.jobs == 1:
+        for tsv in tsvs:
+            result = _run_one(tsv, args.timeout, args.solver, args.output_dir)
+            failures += _print_result(result)
+    else:
+        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            futures = [
+                pool.submit(_run_one, tsv, args.timeout, args.solver, args.output_dir)
+                for tsv in tsvs
+            ]
+            for future in as_completed(futures):
+                failures += _print_result(future.result())
 
     print(f"done: {len(tsvs) - failures} ok, {failures} failed")
     sys.exit(1 if failures else 0)
