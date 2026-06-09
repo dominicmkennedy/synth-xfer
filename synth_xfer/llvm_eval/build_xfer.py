@@ -125,6 +125,11 @@ def emit_inline(
         f"  inZ[{i}] = ssa_{i}[0].getZExtValue();\n  inO[{i}] = ssa_{i}[1].getZExtValue();"
         for i in range(arity)
     )
+    # The uint64 fast path is only valid if EVERY operand fits in a word. Width
+    # is heterogeneous across operands (e.g. mixed-width icmp+select), so guard
+    # on all of them, not just ssa_0 -- a wide operand in any position must fall
+    # to top here instead of asserting in getZExtValue() below.
+    width_guard = " || ".join(f"ssa_{i}[0].getBitWidth() > 64" for i in range(arity))
     entries_block = "\n".join(entries)
     return f"""namespace {pid} {{
 namespace {{
@@ -136,7 +141,7 @@ static constexpr Entry kEntries[] = {{
 
 std::array<APInt, 2> solution({sig}) {{
   unsigned opbw = ssa_0[0].getBitWidth();
-  if (opbw > 64) return std::array<APInt, 2>{{APInt(bw, 0), APInt(bw, 0)}};
+  if ({width_guard}) return std::array<APInt, 2>{{APInt(bw, 0), APInt(bw, 0)}};
   uint64_t inZ[{arity}], inO[{arity}];
 {loads}
   uint64_t outZ = 0, outO = 0;
