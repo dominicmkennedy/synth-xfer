@@ -183,6 +183,12 @@ class PatternNode:
     operands: tuple[PatternRef, ...]
 
 
+_SSA_OP_ALIASES: dict[str, PatternOp] = {
+    "Srem": PatternOp.Mods,
+    "Urem": PatternOp.Modu,
+}
+
+
 @dataclass(slots=True)
 class PatternDag:
     num_args: int
@@ -305,6 +311,230 @@ class PatternDag:
                 f"trailing tokens in pattern id {pattern_id!r}: {trailing!r}"
             )
         return cls(expr)
+
+    def to_ssa(self) -> str:
+        """Flat, single-line, sharing-preserving serialization.
+
+        ``;``-joined ``%I = Op(ref, ...)`` statements, whitespace-insensitive.
+        ``%0`` is the result and statements are written root-first, so a node's
+        operands always reference a *higher* index (``%K`` with K > I) or a
+        boundary input (``argJ``). Arg types are recovered from use on parse, so
+        they are not written. Unlike ``str(self)`` this keeps interior sharing
+        explicit (each node written once) and round-trips exactly through
+        :meth:`from_ssa`.
+        """
+        n = len(self.nodes)
+        assert all(
+            isinstance(operand, ArgRef) or operand.index < i
+            for i, node in enumerate(self.nodes)
+            for operand in node.operands
+        ), "to_ssa expects forward-topological nodes (operands precede their node)"
+
+        def fmt(operand: PatternRef) -> str:
+            if isinstance(operand, ArgRef):
+                return f"arg{operand.index}"
+            return f"%{n - 1 - operand.index}"  # forward index -> root-first index
+
+        stmts = []
+        for i in range(n):
+            node = self.nodes[n - 1 - i]
+            args = ", ".join(fmt(o) for o in node.operands)
+            stmts.append(f"%{i} = {node.op.value}({args})")
+        return "; ".join(stmts)
+
+    @staticmethod
+    def _resolve_op(name: str) -> PatternOp:
+        """Resolve an op token in an SSA statement, honouring _SSA_OP_ALIASES."""
+        op = _SSA_OP_ALIASES.get(name)
+        if op is not None:
+            return op
+        try:
+            return PatternOp(name)
+        except ValueError as exc:
+            raise ValueError(f"unknown pattern operation '{name}'") from exc
+
+    @staticmethod
+    def _parse_ssa_operands(body: str, sigil: str, stmt_id: int) -> list[PatternRef]:
+        """Parse a comma-separated operand list of ``argJ`` and ``<sigil>K`` refs
+        (``sigil`` is ``%`` or ``n``). Node refs come back as NodeRef in the
+        statement's own index space; the caller remaps if needed."""
+        body = body.strip()
+        if not body:
+            return []
+        node_re = re.compile(re.escape(sigil) + r"(\d+)")
+        out: list[PatternRef] = []
+        for tok in body.split(","):
+            tok = tok.strip()
+            arg_match = re.fullmatch(r"arg(\d+)", tok)
+            node_match = node_re.fullmatch(tok)
+            if arg_match is not None:
+                out.append(ArgRef(int(arg_match.group(1))))
+            elif node_match is not None:
+                out.append(NodeRef(int(node_match.group(1))))
+            else:
+                raise ValueError(f"malformed operand {tok!r} in {sigil}{stmt_id}")
+        return out
+
+    @classmethod
+    def _assemble_forward(
+        cls,
+        forward_nodes: list[tuple[PatternOp, tuple[PatternRef, ...]]],
+        result: NodeRef,
+    ) -> "PatternDag":
+        """Validate and assemble forward-topological SSA nodes into a PatternDag.
+
+        ``forward_nodes[i]`` is ``(op, operands)`` with operands already as
+        ArgRef/NodeRef; a NodeRef operand must reference an earlier node
+        (index < i), which guarantees acyclicity. Boundary args are typed by
+        use. Shared by :meth:`from_ssa` and :meth:`from_ssa_fwd`."""
+        n = len(forward_nodes)
+        if n == 0:
+            raise ValueError("empty SSA expression")
+        if not (0 <= result.index < n):
+            raise ValueError(f"return references undefined node n{result.index}")
+        arg_types: dict[int, Attribute] = {}
+        for i, (op, operands) in enumerate(forward_nodes):
+            expected_types = op.spec.operand_types
+            if len(operands) != len(expected_types):
+                raise ValueError(
+                    f"n{i}: {op.value} expects {len(expected_types)} operands, "
+                    f"got {len(operands)}"
+                )
+            for operand, expected in zip(operands, expected_types):
+                if isinstance(operand, ArgRef):
+                    existing = arg_types.get(operand.index)
+                    if existing is not None and existing != expected:
+                        raise ValueError(
+                            f"arg{operand.index} used as both {existing} and {expected}"
+                        )
+                    arg_types[operand.index] = expected
+                    actual: Attribute = expected
+                else:
+                    if not (0 <= operand.index < i):
+                        raise ValueError(
+                            f"n{i} references n{operand.index}; an operand must be a "
+                            f"boundary arg or an earlier node"
+                        )
+                    actual = forward_nodes[operand.index][0].spec.result_type
+                if actual != expected:
+                    raise ValueError(
+                        f"n{i}: {op.value} expected {expected} operand, got {actual}"
+                    )
+        max_arg = max(arg_types, default=-1)
+        missing = set(range(max_arg + 1)) - set(arg_types)
+        if missing:
+            raise ValueError(
+                f"pattern arguments must be contiguous; missing {sorted(missing)}"
+            )
+        return cls.from_parts(
+            tuple(arg_types[k] for k in range(max_arg + 1)),
+            tuple(PatternNode(op, operands) for op, operands in forward_nodes),
+            result,
+        )
+
+    @classmethod
+    def from_ssa(cls, text: str) -> "PatternDag":
+        """Inverse of :meth:`to_ssa` (root-first ``%`` form). Rebuilds the DAG
+        with sharing exactly as written (no interning). Validates op names,
+        arities, operand types, contiguous args, and the root-first ``%K > %I``
+        ordering (which guarantees acyclicity)."""
+        stmt_re = re.compile(r"%(\d+)\s*=\s*([A-Za-z_]\w*)\s*\((.*)\)")
+        raw: dict[int, tuple[PatternOp, list[PatternRef]]] = {}  # %-index space
+        for stmt in text.split(";"):
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+            match = stmt_re.fullmatch(stmt)
+            if match is None:
+                raise ValueError(f"malformed SSA statement: {stmt!r}")
+            idx = int(match.group(1))
+            if idx in raw:
+                raise ValueError(f"duplicate node %{idx}")
+            raw[idx] = (
+                cls._resolve_op(match.group(2)),
+                cls._parse_ssa_operands(match.group(3), "%", idx),
+            )
+
+        n = len(raw)
+        if n == 0:
+            raise ValueError("empty SSA expression")
+        if set(raw) != set(range(n)):
+            raise ValueError(
+                f"node indices must be contiguous 0..{n - 1}; got {sorted(raw)}"
+            )
+
+        # Map root-first %-space to forward space: %K -> NodeRef(n-1-K).
+        def remap(operand: PatternRef) -> PatternRef:
+            if isinstance(operand, ArgRef):
+                return operand
+            return NodeRef(n - 1 - operand.index)
+
+        forward = [
+            (raw[n - 1 - i][0], tuple(remap(o) for o in raw[n - 1 - i][1]))
+            for i in range(n)
+        ]
+        return cls._assemble_forward(forward, NodeRef(n - 1))
+
+    def to_ssa_fwd(self) -> str:
+        """Forward, return-terminated single-line serialization.
+
+        ``;``-joined ``nI = Op(ref, ...)`` statements in definition order (each
+        node's operands are earlier ``nK`` or ``argJ``), ending with
+        ``return nR``. Mirrors the internal node order and round-trips through
+        :meth:`from_ssa_fwd`. Unlike :meth:`to_ssa` it is not root-first and
+        names the result explicitly."""
+        assert all(
+            isinstance(operand, ArgRef) or operand.index < i
+            for i, node in enumerate(self.nodes)
+            for operand in node.operands
+        ), "to_ssa_fwd expects forward-topological nodes (operands precede their node)"
+        stmts = [
+            f"n{i} = {node.op.value}"
+            f"({', '.join(format_pattern_ref(o) for o in node.operands)})"
+            for i, node in enumerate(self.nodes)
+        ]
+        stmts.append(f"return n{self.result.index}")
+        return "; ".join(stmts)
+
+    @classmethod
+    def from_ssa_fwd(cls, text: str) -> "PatternDag":
+        """Inverse of :meth:`to_ssa_fwd`. ``;``-joined ``nI = Op(ref, ...)``
+        statements in definition order (operands reference earlier ``nK`` or
+        ``argJ``) plus one ``return nR`` naming the result. Whitespace-
+        insensitive; accepts the same op aliases as :meth:`from_ssa`. Rebuilds
+        sharing exactly (no interning)."""
+        stmt_re = re.compile(r"n(\d+)\s*=\s*([A-Za-z_]\w*)\s*\((.*)\)")
+        ret_re = re.compile(r"return\s+n(\d+)")
+        forward: list[tuple[PatternOp, tuple[PatternRef, ...]]] = []
+        result: NodeRef | None = None
+        for stmt in text.split(";"):
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+            ret_match = ret_re.fullmatch(stmt)
+            if ret_match is not None:
+                if result is not None:
+                    raise ValueError("multiple 'return' statements")
+                result = NodeRef(int(ret_match.group(1)))
+                continue
+            match = stmt_re.fullmatch(stmt)
+            if match is None:
+                raise ValueError(f"malformed SSA statement: {stmt!r}")
+            idx = int(match.group(1))
+            if idx != len(forward):
+                raise ValueError(
+                    f"expected n{len(forward)}, got n{idx} "
+                    f"(statements must be sequential, defined before use)"
+                )
+            forward.append(
+                (
+                    cls._resolve_op(match.group(2)),
+                    tuple(cls._parse_ssa_operands(match.group(3), "n", idx)),
+                )
+            )
+        if result is None:
+            raise ValueError("missing 'return' statement")
+        return cls._assemble_forward(forward, result)
 
     def __init__(self, expr: str) -> None:
         self.arg_types, self.nodes, self.result = _PatternExprParser(expr).parse()

@@ -18,6 +18,9 @@ import pandas as pd
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.tsv import EnumData, EnumMetaData
+from synth_xfer.llvm_eval import dag_log
+
+sys.setrecursionlimit(100000)
 
 # Counters whose values vary run-to-run; excluded from the aggregate so repeated
 # runs are comparable.
@@ -98,7 +101,9 @@ def run_opt(input_file: Path) -> OptResult:
             hist_path.parent.mkdir(parents=True, exist_ok=True)
             cmd += [f"-value-tracking-pattern-histogram={hist_path}"]
         elif _MODE == "slice-kb":
-            cmd += ["-debug-only=dag-slicer", "-enable-knownbits-pattern-mining"]
+            # One SSA-line truncated-DAG record per computeKnownBits visit;
+            # aggregated into dags.tsv after the run.
+            cmd += ["-debug-only=dag-slicer-graph", "-enable-knownbits-dag-logging"]
         elif _MODE == "slice-cr":
             cmd += ["-debug-only=dag-slicer", "-enable-constantrange-pattern-mining"]
 
@@ -110,9 +115,8 @@ def run_opt(input_file: Path) -> OptResult:
 
         if _MODE in ("slice-kb", "slice-cr"):
             assert _SLICE_DIR is not None
-            debug_output = _SLICE_DIR / _rel_stem(input_file).with_suffix(
-                ".dag-slicer.log"
-            )
+            suffix = ".dag" if _MODE == "slice-kb" else ".dag-slicer.log"
+            debug_output = _SLICE_DIR / _rel_stem(input_file).with_suffix(suffix)
             debug_output.parent.mkdir(parents=True, exist_ok=True)
             debug_output.write_bytes(ret.stderr)
             return (input_file, "success", {}, "")
@@ -143,6 +147,73 @@ def _format_benchmark_rel(input_file: Path, bench_dir: Path) -> str:
     if "original" in parts:
         parts.remove("original")
     return str(Path(*parts))
+
+
+def _render_blocks(
+    items: list[tuple[str, int]],
+) -> tuple[collections.Counter, dict[str, int], int]:
+    """Parse, validate and canonically render a chunk of (record_line, count)
+    pairs. Returns (counts, size, bad) keyed by ``str(dag)``. Top-level so it
+    pickles for multiprocessing."""
+    counts: collections.Counter = collections.Counter()
+    size: dict[str, int] = {}
+    bad = 0
+    for line, cnt in items:
+        dag = dag_log.parse_record(line)
+        if dag is None:
+            bad += cnt
+            continue
+        key = str(dag)
+        counts[key] += cnt
+        size[key] = len(dag.nodes)
+    return counts, size, bad
+
+
+def _aggregate_dags(slice_dir: Path, jobs: int) -> None:
+    """Collapse the per-file .dag logs under ``slice_dir`` into distinct full
+    DAGs and write ``slice_dir/dags.tsv`` (count, size, pattern).
+
+    Two-pass for speed: a pure string-level pass counts records by raw line
+    text (hundreds of millions of mostly-duplicate records collapse cheaply),
+    then only the few distinct lines are parsed/validated and canonically
+    rendered to PatternDag strings. ``str(dag)`` additionally normalizes
+    commutative/icmp variants the serializer leaves distinct, so the line count
+    over-counts distinct DAGs and the render pass merges them. The canonical
+    ``pattern`` string is the full encoding -- subdags.py reconstructs each DAG
+    by re-parsing it.
+    """
+    dag_files = [str(p) for p in slice_dir.rglob("*.dag")]
+    print(f"aggregating {len(dag_files)} .dag logs with {jobs} workers ...")
+
+    raw: collections.Counter = collections.Counter()
+    with Pool(jobs) as pool:
+        for local in pool.imap_unordered(dag_log.count_blocks, dag_files, chunksize=16):
+            raw.update(local)
+    print(f"counted {sum(raw.values())} records, {len(raw)} distinct DAG lines")
+
+    dag_counts: collections.Counter = collections.Counter()
+    dag_size: dict[str, int] = {}
+    bad = 0
+    items = list(raw.items())
+    chunk = max(1, len(items) // (jobs * 8) + 1)
+    chunks = [items[i : i + chunk] for i in range(0, len(items), chunk)]
+    with Pool(jobs) as pool:
+        for counts, size, b in pool.imap_unordered(_render_blocks, chunks):
+            dag_counts.update(counts)
+            dag_size.update(size)
+            bad += b
+    if bad:
+        print(
+            f"skipped {bad} malformed record(s) "
+            f"(truncated / interleaved / polluted stderr / cyclic / unknown op)"
+        )
+
+    out = slice_dir / "dags.tsv"
+    with out.open("w") as o:
+        o.write("count\tsize\tpattern\n")
+        for pat, n in sorted(dag_counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            o.write(f"{n}\t{dag_size[pat]}\t{pat}\n")
+    print(f"wrote {out} ({len(dag_counts)} distinct DAGs)")
 
 
 def _merge_histograms(hist_dir: Path, patterns_dir: Path) -> None:
@@ -241,7 +312,9 @@ def main() -> None:
     p.add_argument(
         "--slice-kb",
         action="store_true",
-        help="Run pattern slicer over computeKnownBits",
+        help="Log truncated computeKnownBits DAGs to per-file .dag logs, then "
+        "aggregate them into <out>/dags.tsv (count, size, pattern). Feed that to "
+        "subdags.py to mine sub-patterns.",
     )
     p.add_argument(
         "--slice-cr",
@@ -375,6 +448,10 @@ def main() -> None:
 
     if n_timeout:
         print(f"note: {n_timeout} file(s) timed out (non-fatal)", file=sys.stderr)
+
+    if mode == "slice-kb":
+        assert slice_dir is not None
+        _aggregate_dags(slice_dir, args.jobs)
 
     sys.exit(1 if fail else 0)
 

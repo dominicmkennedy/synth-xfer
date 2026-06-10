@@ -98,6 +98,21 @@ python3 -m synth_xfer.llvm_eval.run_opt_benchmark \
     --stats outputs/test_stats.json
 ```
 
+## DAG / sub-pattern mining (`--slice-kb`)
+
+Work in progress, but run the following 2 commands to test slicing and enumeration on a small project (cvc5).
+```bash
+python3 -m synth_xfer.llvm_eval.run_opt_benchmark \
+    --bench-path $BENCH_DIR \
+    --opt-path $OPT$ \
+    --slice-kb \
+    --filter cvc5
+
+python3 -m synth_xfer.llvm_eval.enum_subpatterns \
+    synth_xfer/llvm_eval/outputs/slice-kb/dags.tsv \
+    --out synth_xfer/llvm_eval/outputs/slice-kb/subdags_aggregated.tsv
+```
+
 ## Cross-validation
 
 `cross_validate.sh` runs K-fold Cross-validation on llvm-opt-benchmark.

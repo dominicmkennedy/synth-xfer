@@ -1,9 +1,9 @@
 import argparse
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 import sys
+import time
 
 from synth_xfer._util.max_precise import fill_hbw_rows
 from synth_xfer._util.smt_solver import SolverKind
@@ -43,10 +43,7 @@ def _run_one(
 
 def _print_result(result: FileResult) -> bool:
     tag = "[done]   " if result.ok else "[FAIL]  "
-    print(
-        f"{tag} {result.path.stem} "
-        f"({result.n_rows} rows, {result.elapsed:.1f}s)"
-    )
+    print(f"{tag} {result.path.stem} ({result.n_rows} rows, {result.elapsed:.1f}s)")
     if result.message:
         print("\n".join(f"    {line}" for line in result.message.splitlines()))
     return not result.ok
