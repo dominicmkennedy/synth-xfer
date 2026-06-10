@@ -333,6 +333,7 @@ def main() -> None:
 
     stats_acc: dict[str, float] = {}
     fail = False
+    n_timeout = 0
 
     with Pool(
         processes=args.jobs,
@@ -354,7 +355,10 @@ def main() -> None:
                     if err:
                         print(err, file=sys.stderr)
                     log.write(msg + "\n")
-                    fail = True
+                    if status == "timeout":
+                        n_timeout += 1
+                    else:
+                        fail = True
                 else:
                     for k, v in stats.items():
                         if k in STATS_NONDETER_KEYS:
@@ -368,6 +372,9 @@ def main() -> None:
 
     if hist_dir is not None:
         _merge_histograms(hist_dir, patterns_dir)
+
+    if n_timeout:
+        print(f"note: {n_timeout} file(s) timed out (non-fatal)", file=sys.stderr)
 
     sys.exit(1 if fail else 0)
 

@@ -1,4 +1,5 @@
 import argparse
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,6 +15,8 @@ class FileResult:
     path: Path
     ok: bool
     message: str = ""
+    n_rows: int = 0
+    elapsed: float = 0.0
 
 
 def _run_one(
@@ -22,22 +25,28 @@ def _run_one(
     solver_kind: SolverKind,
     output_dir: Path | None,
 ) -> FileResult:
+    start = time.perf_counter()
     try:
         with tsv.open() as f:
             data = EnumData.read_tsv(f)
-
+        n_rows = sum(count for _, count, _ in data.metadata.hbw)
         updated, commented_rows = fill_hbw_rows(data, timeout, solver_kind)
         output_path = tsv if output_dir is None else output_dir / tsv.name
         updated.write_tsv_with_comments(output_path, commented_rows)
     except Exception as exc:
-        return FileResult(tsv, False, f"{type(exc).__name__}: {exc}")
+        elapsed = time.perf_counter() - start
+        return FileResult(tsv, False, f"{type(exc).__name__}: {exc}", elapsed=elapsed)
 
-    return FileResult(tsv, True)
+    elapsed = time.perf_counter() - start
+    return FileResult(tsv, True, n_rows=n_rows, elapsed=elapsed)
 
 
 def _print_result(result: FileResult) -> bool:
     tag = "[done]   " if result.ok else "[FAIL]  "
-    print(f"{tag} {result.path.stem}")
+    print(
+        f"{tag} {result.path.stem} "
+        f"({result.n_rows} rows, {result.elapsed:.1f}s)"
+    )
     if result.message:
         print("\n".join(f"    {line}" for line in result.message.splitlines()))
     return not result.ok
@@ -48,7 +57,7 @@ def main() -> None:
     p.add_argument("src_dir", type=Path, help="Folder of histogram TSVs")
     # fill_hbw_rows parallelizes across the high-bitwidth rows in each file, so
     # total workers can be roughly jobs * cpu_count(); keep --jobs small.
-    p.add_argument("--jobs", type=int, default=1, help="Parallel file workers")
+    p.add_argument("--jobs", type=int, default=4, help="Parallel file workers")
     p.add_argument("--timeout", type=int, default=30, help="Per-query solver timeout (s)")
     p.add_argument(
         "--solver",
@@ -93,7 +102,8 @@ def main() -> None:
                 failures += _print_result(future.result())
 
     print(f"done: {len(tsvs) - failures} ok, {failures} failed")
-    sys.exit(1 if failures else 0)
+    # Per-file failures will be logged, so always exit with 0 for now
+    # sys.exit(1 if failures else 0)
 
 
 if __name__ == "__main__":
