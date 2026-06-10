@@ -19,6 +19,8 @@ from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.tsv import EnumData, EnumMetaData
 
+sys.setrecursionlimit(100000)
+
 # Counters whose values vary run-to-run; excluded from the aggregate so repeated
 # runs are comparable.
 STATS_NONDETER_KEYS = {
@@ -110,9 +112,7 @@ def run_opt(input_file: Path) -> OptResult:
 
         if _MODE in ("slice-kb", "slice-cr"):
             assert _SLICE_DIR is not None
-            debug_output = _SLICE_DIR / _rel_stem(input_file).with_suffix(
-                ".dag-slicer.log"
-            )
+            debug_output = _SLICE_DIR / _rel_stem(input_file).with_suffix(".dag")
             debug_output.parent.mkdir(parents=True, exist_ok=True)
             debug_output.write_bytes(ret.stderr)
             return (input_file, "success", {}, "")
@@ -143,6 +143,64 @@ def _format_benchmark_rel(input_file: Path, bench_dir: Path) -> str:
     if "original" in parts:
         parts.remove("original")
     return str(Path(*parts))
+
+
+def _render_blocks(
+    items: list[tuple[str, int]],
+) -> tuple[collections.Counter, dict[str, int]]:
+    counts: collections.Counter = collections.Counter()
+    size: dict[str, int] = {}
+    for line, cnt in items:
+        dag = PatternDag.from_ssa(line)
+        key = str(dag)
+        counts[key] += cnt
+        size[key] = len(dag.nodes)
+
+    return counts, size
+
+
+def _count_blocks(path: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    with open(path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("%0"):
+                counts[line] = counts.get(line, 0) + 1
+    return counts
+
+
+def _aggregate_dags(slice_dir: Path, jobs: int) -> None:
+    """Collapse the per-file .dag logs under `slice_dir` into distinct DAGs and write dags.tsv
+
+    Two-pass for speed
+    1) count records by raw line text (count_blocks)
+    2) cannoncal renderings (render_blocks)
+    """
+    dag_files = [str(p) for p in slice_dir.rglob("*.dag")]
+    print(f"aggregating {len(dag_files)} .dag logs with {jobs} workers ...")
+
+    raw: collections.Counter = collections.Counter()
+    with Pool(jobs) as pool:
+        for local in pool.imap_unordered(_count_blocks, dag_files, chunksize=16):
+            raw.update(local)
+    print(f"counted {sum(raw.values())} records, {len(raw)} distinct DAG lines")
+
+    dag_counts: collections.Counter = collections.Counter()
+    dag_size: dict[str, int] = {}
+    items = list(raw.items())
+    chunk = max(1, len(items) // (jobs * 8) + 1)
+    chunks = [items[i : i + chunk] for i in range(0, len(items), chunk)]
+    with Pool(jobs) as pool:
+        for counts, size in pool.imap_unordered(_render_blocks, chunks):
+            dag_counts.update(counts)
+            dag_size.update(size)
+
+    out = slice_dir / "dags.tsv"
+    with out.open("w") as o:
+        o.write("count\tsize\tpattern\n")
+        for pat, n in sorted(dag_counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            o.write(f"{n}\t{dag_size[pat]}\t{pat}\n")
+    print(f"wrote {out} ({len(dag_counts)} distinct DAGs)")
 
 
 def _merge_histograms(hist_dir: Path, patterns_dir: Path) -> None:
@@ -375,6 +433,10 @@ def main() -> None:
 
     if n_timeout:
         print(f"note: {n_timeout} file(s) timed out (non-fatal)", file=sys.stderr)
+
+    if mode in ("slice-kb", "slice-cr"):
+        assert slice_dir is not None
+        _aggregate_dags(slice_dir, args.jobs)
 
     sys.exit(1 if fail else 0)
 
