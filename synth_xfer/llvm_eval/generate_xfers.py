@@ -152,9 +152,7 @@ def build_stub_transformers(
 
     if domain == AbstractDomain.KnownBits:
         return {dag.to_id(): render_kb_top(dag.to_id(), dag.num_args) for dag in dags}
-    return {
-        dag.to_id(): render_cr_top(dag.to_id(), dag.num_args, domain) for dag in dags
-    }
+    return {dag.to_id(): render_cr_top(dag.to_id(), dag.num_args, domain) for dag in dags}
 
 
 def _rows_from_tsv(path: Path) -> tuple[int, dict[int, list[tuple[list[str], str]]]]:
@@ -660,7 +658,7 @@ class DispatcherEmitter:
                 )
                 out.append(
                     f"  auto CRArg{i} = computeConstantRange(Arg{i}, {for_signed}, UseInstrInfo, AC, CtxI, DT, {depth_expr});\n"
-            )
+                )
             arg_list = ", ".join(["ResBW", *(f"CRArg{i}" for i in r)])
             out.append(
                 f"  auto Out = {_symbol_id(self.domain, spec.id)}::solution({arg_list});\n"

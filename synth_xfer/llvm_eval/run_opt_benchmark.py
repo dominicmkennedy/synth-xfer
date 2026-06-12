@@ -208,49 +208,65 @@ def _aggregate_dags(slice_dir: Path, jobs: int) -> None:
 def _merge_histograms(hist_dir: Path, patterns_dir: Path) -> None:
     """Merge per-input .hist shards into ranked per-pattern TSVs.
 
-    Each shard line is: <id> <arg_0> <arg_1> ... <count> <bits_added> <conflict>
-    (tab-separated). We sum count/bits_added/conflict across shards per
-    (id, args), then per id emit pattern_<name>.tsv ranked by count desc.
+    Each shard line is: <domain> <id> <bw> <arg_0> <arg_1> ... <count> <bits_added> <bottom>
+    (tab-separated). We sum count/bits_added/bottom across shards per
+    (domain, id, bw, args), then per domain/id emit <name>.tsv ranked by count desc.
     """
-    names = dict(enumerate(sorted(p.stem for p in patterns_dir.glob("*.inc"))))
-    # id -> {args-tuple -> [count, bits_added, conflict]}
-    acc: dict[int, dict[tuple[str, ...], list[int]]] = collections.defaultdict(dict)
+    domain_meta = {
+        "kb": ("", AbstractDomain.KnownBits),
+        "scr": ("SCR", AbstractDomain.SConstRange),
+        "ucr": ("UCR", AbstractDomain.UConstRange),
+    }
+    names: dict[str, dict[int, tuple[str, str]]] = {}
+    for domain, (prefix, _) in domain_meta.items():
+        if prefix:
+            stems = sorted(p.stem for p in patterns_dir.glob(f"{prefix}*.inc"))
+            names[domain] = {
+                i: (stem, stem.removeprefix(prefix)) for i, stem in enumerate(stems)
+            }
+        else:
+            stems = sorted(
+                p.stem
+                for p in patterns_dir.glob("*.inc")
+                if not p.stem.startswith(("SCR", "UCR"))
+            )
+            names[domain] = {i: (stem, stem) for i, stem in enumerate(stems)}
+
+    # (domain, id) -> {(bw, args-tuple) -> [count, bits_added, bottom]}
+    acc: dict[tuple[str, int], dict[tuple[int, tuple[str, ...]], list[int]]] = (
+        collections.defaultdict(dict)
+    )
     shards = sorted((hist_dir / "shards").rglob("*.hist"))
     for shard in shards:
         with shard.open() as f:
             for line in f:
                 parts = line.rstrip("\n").split("\t")
-                if len(parts) < 4:
-                    continue
-                pid = int(parts[0])
-                count, bits_added, conflict = (
+                domain = parts[0]
+                pid = int(parts[1])
+                bw = int(parts[2])
+                count, bits_added, bottom = (
                     int(parts[-3]),
                     int(parts[-2]),
                     int(parts[-1]),
                 )
-                args = tuple(parts[1:-3])
-                row = acc[pid].setdefault(args, [0, 0, 0])
+                args = tuple(parts[3:-3])
+                row = acc[(domain, pid)].setdefault((bw, args), [0, 0, 0])
                 row[0] += count
                 row[1] += bits_added
-                row[2] += conflict
+                row[2] += bottom
 
     n_tables = 0
-    for pid, rows in acc.items():
+    for (domain, pid), rows in acc.items():
         # The filename is the bare pattern id (no `pattern_` prefix); the YAML
         # header's `op` field carries the decoded expression for readability.
-        name = names.get(pid, f"{pid:03d}")
-        pattern = PatternDag.from_id(name)
-        arity = max(len(a) for a in rows) if rows else 0
+        name, pattern_id = names[domain].get(pid, (f"{domain}_{pid:03d}", f"{pid:03d}"))
+        pattern = PatternDag.from_id(pattern_id)
+        arity = max(len(args) for _, args in rows) if rows else 0
         ranked = sorted(rows.items(), key=lambda kv: -kv[1][0])
-        # distinct-row count per bitwidth for hbw. The instance width N is the
-        # width of the iN-typed operands; i1 operands (e.g. a select condition or
-        # an icmp result feeding another op) are always length 1, so taking the
-        # max across a row recovers N for width-heterogeneous patterns instead of
-        # latching onto a leading i1 arg.
-        bw_counts = collections.Counter(max(len(x) for x in a) for a in rows if a)
+        bw_counts = collections.Counter(bw for bw, _ in rows)
         out_path = hist_dir / f"{name}.tsv"
         metadata = EnumMetaData(
-            domain=AbstractDomain.KnownBits,
+            domain=domain_meta[domain][1],
             op=pattern,
             arity=arity,
             seed=None,
@@ -259,13 +275,12 @@ def _merge_histograms(hist_dir: Path, patterns_dir: Path) -> None:
             hbw=[(bw, count, 0) for bw, count in sorted(bw_counts.items())],
         )
         records: list[tuple[object, ...]] = []
-        for rank, (args, (count, bits_added, conflict)) in enumerate(ranked, 1):
-            bw = max(len(a) for a in args) if args else 0
-            records.append((bw, rank, count, *args, bits_added, conflict))
+        for rank, ((bw, args), (count, bits_added, bottom)) in enumerate(ranked, 1):
+            records.append((bw, rank, count, *args, bits_added, bottom))
         columns = (
             ["bw", "rank", "count"]
             + [f"arg_{i}" for i in range(arity)]
-            + ["bits_added", "conflict"]
+            + ["bits_added", "bottom"]
         )
         frame = pd.DataFrame.from_records(records, columns=columns)
         EnumData(metadata, frame).write_tsv(out_path)
@@ -318,9 +333,9 @@ def main() -> None:
         type=Path,
         default=None,
         help="If set, have opt accumulate a per-input histogram of pattern "
-        "inputs (id + operand known bits, summed bits_added/conflict) and "
+        "inputs (domain + id + width + operands, summed bits_added/bottom) and "
         "write shards under <dir>/shards/, then merge them into per-pattern "
-        "<dir>/pattern_<id>.tsv. Avoids the giant raw [pNNN] logs entirely.",
+        "<dir>/<id>.tsv. Avoids the giant raw [pNNN] logs entirely.",
     )
     p.add_argument(
         "--jobs",
