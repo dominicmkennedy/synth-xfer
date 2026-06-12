@@ -38,7 +38,7 @@ STATS_NONDETER_KEYS = {
     "simplifycfg.NumSimpl",
 }
 
-RunMode = Literal["stats", "histogram", "slice-kb", "slice-cr"]
+RunMode = Literal["stats", "histogram", "slice-kb", "slice-ucr", "slice-scr"]
 RunStatus = Literal["success", "fail", "timeout", "crash"]
 OptResult = tuple[Path, RunStatus, dict[str, float], str]
 
@@ -101,8 +101,10 @@ def run_opt(input_file: Path) -> OptResult:
             cmd += [f"-value-tracking-pattern-histogram={hist_path}"]
         elif _MODE == "slice-kb":
             cmd += ["-debug-only=dag-slicer", "-enable-knownbits-pattern-mining"]
-        elif _MODE == "slice-cr":
-            cmd += ["-debug-only=dag-slicer", "-enable-constantrange-pattern-mining"]
+        elif _MODE == "slice-ucr":
+            cmd += ["-debug-only=dag-slicer", "-enable-uconstrange-pattern-mining"]
+        elif _MODE == "slice-scr":
+            cmd += ["-debug-only=dag-slicer", "-enable-sconstrange-pattern-mining"]
 
         ret = subprocess.run(
             cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=600.0, env={}
@@ -302,7 +304,12 @@ def main() -> None:
         help="Run pattern slicer over computeKnownBits",
     )
     p.add_argument(
-        "--slice-cr",
+        "--slice-ucr",
+        action="store_true",
+        help="Run pattern slicer over computeConstantRange",
+    )
+    p.add_argument(
+        "--slice-scr",
         action="store_true",
         help="Run pattern slicer over computeConstantRange",
     )
@@ -340,8 +347,12 @@ def main() -> None:
         mode = "histogram"
     elif args.slice_kb:
         mode = "slice-kb"
+    elif args.slice_ucr:
+        mode = "slice-ucr"
+    elif args.slice_scr:
+        mode = "slice-scr"
     else:
-        mode = "slice-cr"
+        assert False
 
     bench_dir = args.bench_path / "bench"
     if not bench_dir.is_dir():
@@ -434,7 +445,7 @@ def main() -> None:
     if n_timeout:
         print(f"note: {n_timeout} file(s) timed out (non-fatal)", file=sys.stderr)
 
-    if mode in ("slice-kb", "slice-cr"):
+    if mode in ("slice-kb", "slice-ucr", "slice-scr"):
         assert slice_dir is not None
         _aggregate_dags(slice_dir, args.jobs)
 
