@@ -112,7 +112,7 @@ def run_opt(input_file: Path) -> OptResult:
         if ret.returncode != 0:
             return (input_file, "fail", {}, ret.stderr.decode())
 
-        if _MODE in ("slice-kb", "slice-cr"):
+        if _MODE in ("slice-kb", "slice-ucr", "slice-scr"):
             assert _SLICE_DIR is not None
             debug_output = _SLICE_DIR / _rel_stem(input_file).with_suffix(".dag")
             debug_output.parent.mkdir(parents=True, exist_ok=True)
@@ -334,11 +334,12 @@ def main() -> None:
         args.stats is not None,
         args.pattern_hist is not None,
         args.slice_kb,
-        args.slice_cr,
+        args.slice_ucr,
+        args.slice_scr,
     ]
     if sum(selected_modes) != 1:
         p.error(
-            "exactly one of --stats, --pattern-hist, --slice-kb, or --slice-cr is required"
+            "exactly one of --stats, --pattern-hist, --slice-kb, --slice-ucr, or --slice-scr is required"
         )
 
     if args.stats is not None:
@@ -397,7 +398,7 @@ def main() -> None:
     else:
         output_dir = Path(__file__).resolve().parent / "outputs" / mode
     output_dir.mkdir(parents=True, exist_ok=True)
-    slice_dir = output_dir if mode in ("slice-kb", "slice-cr") else None
+    slice_dir = output_dir if mode in ("slice-kb", "slice-ucr", "slice-scr") else None
     test_log_path = output_dir / "test.log"
 
     stats_acc: dict[str, float] = {}
