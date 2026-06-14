@@ -88,6 +88,24 @@ OP_MATCHER: dict[PatternOp, str] = {
 
 BLOB_LIMIT = 60000
 
+WIDTH_CHANGING_OPS = frozenset(
+    {
+        PatternOp.ICmpEq,
+        PatternOp.ICmpNe,
+        PatternOp.ICmpSlt,
+        PatternOp.ICmpSle,
+        PatternOp.ICmpSgt,
+        PatternOp.ICmpSge,
+        PatternOp.ICmpUlt,
+        PatternOp.ICmpUle,
+        PatternOp.ICmpUgt,
+        PatternOp.ICmpUge,
+        PatternOp.TruncToBool,
+        PatternOp.ZextBool,
+        PatternOp.SextBool,
+    }
+)
+
 
 def _cr_prefix(domain: AbstractDomain) -> str:
     if domain == AbstractDomain.SConstRange:
@@ -394,6 +412,26 @@ def _emit_guard(matcher: str) -> str:
     return "".join(out)
 
 
+def _emit_bw_guard(arity: int) -> str:
+    value_bw = "V->getType()->getScalarSizeInBits()"
+
+    arg_checks = " || ".join(f"!CheckBW(Arg{i})" for i in range(arity))
+    return f"""  unsigned MatchBW = ResBW == 1 ? 0 : ResBW;
+  auto CheckBW = [&](const Value *V) {{
+    unsigned BW = {value_bw};
+    if (BW == 1)
+      return true;
+    if (MatchBW == 0) {{
+      MatchBW = BW;
+      return true;
+    }}
+    return BW == MatchBW;
+  }};
+  if ({arg_checks})
+    return std::nullopt;
+"""
+
+
 def _emit_match_expr(
     dag: PatternDag,
     ref: PatternRef,
@@ -625,6 +663,9 @@ class DispatcherEmitter:
         )
         out.append(f"  {arg_decl}\n")
         out.append(_emit_guard(matcher))
+        out.append("  unsigned ResBW = I->getType()->getScalarSizeInBits();\n")
+        if any(node.op in WIDTH_CHANGING_OPS for node in spec.dag.nodes):
+            out.append(_emit_bw_guard(spec.dag.num_args))
         out.append(f"  ++Num{_symbol_id(self.domain, spec.id)}Matches;\n")
         if self.domain == AbstractDomain.KnownBits:
             for i in r:
@@ -642,14 +683,12 @@ class DispatcherEmitter:
             # operand. This is the same width VanillaKnown uses, so the meet in
             # computeKnownBits never hits an APInt bit-width mismatch.
             arg_list = ", ".join(["ResBW", *(f"ArrArg{i}" for i in r)])
-            out.append("  unsigned ResBW = getBitWidth(I->getType(), Q.DL);\n")
             out.append(f"  auto Out = arrToKB({spec.id}::solution({arg_list}));\n")
             inputs_init = ", ".join(f"KBArg{i}" for i in r)
             out.append(
                 f"  return PatternMatchKB{{{pid_int}u, std::move(Out), {{{inputs_init}}}}};\n"
             )
         else:
-            out.append("  unsigned ResBW = I->getType()->getScalarSizeInBits();\n")
             for i in r:
                 offset = depths[ArgRef(i)] - 1
                 depth_expr = "Depth" if offset == 0 else f"Depth + {offset}"
