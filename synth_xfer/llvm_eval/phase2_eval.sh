@@ -3,8 +3,7 @@
 # produced by phase1_build_tables.sh, wire them into opt, rebuild, and run the
 # benchmark to collect optimization stats.
 #
-# Deliverable: the stats JSON at STATS. The transformer .inc files are an
-# intermediate, written to a temp dir that is removed on exit.
+# Deliverable: the stats JSON at STATS.
 #
 # Run from the synth-xfer repo root, inside the venv. LLVM_DIR and BENCH_DIR are
 # required; the rest have defaults. Point TABLE_DIR at phase 1's output. e.g.
@@ -29,14 +28,10 @@ filter_arg=()
 [[ -n "$FILTER" ]] && filter_arg=(--filter "$FILTER")
 
 mkdir -p "$(dirname "$STATS")"
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
 
 echo ">>> [1/3] table transformers -> dispatcher (--include-helper)"
-python3 -m synth_xfer.llvm_eval.build_xfer \
-    --table-dir "$TABLE_DIR" --output-dir "$TMP/xfer"
-python3 -m synth_xfer.llvm_eval.generate_matcher \
-    --input-dir "$TMP/xfer" --llvm-dir "$LLVM_DIR" --include-helper
+python3 -m synth_xfer.llvm_eval.generate_xfers tables \
+    --table-dir "$TABLE_DIR" --llvm-dir "$LLVM_DIR"
 
 echo ">>> [2/3] rebuild opt"
 ninja -C "$LLVM_DIR/build" opt

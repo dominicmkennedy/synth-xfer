@@ -306,6 +306,72 @@ class PatternDag:
             )
         return cls(expr)
 
+    @staticmethod
+    def _parse_ssa_operands(body: str, stmt_id: int) -> list[PatternRef]:
+        node_re = re.compile(r"%(\d+)")
+        out: list[PatternRef] = []
+        for tok in body.split(","):
+            tok = tok.strip()
+            arg_match = re.fullmatch(r"arg(\d+)", tok)
+            node_match = node_re.fullmatch(tok)
+            if arg_match is not None:
+                out.append(ArgRef(int(arg_match.group(1))))
+            elif node_match is not None:
+                out.append(NodeRef(int(node_match.group(1))))
+            else:
+                raise ValueError(f"malformed operand {tok!r} in %{stmt_id}")
+        return out
+
+    @classmethod
+    def _from_forward_nodes(
+        cls,
+        forward_nodes: list[tuple[PatternOp, tuple[PatternRef, ...]]],
+        result: NodeRef,
+    ) -> "PatternDag":
+        """Validate and assemble forward-topological SSA nodes into a PatternDag."""
+
+        arg_types: dict[int, Attribute] = {}
+        for op, operands in forward_nodes:
+            for operand, expected in zip(operands, op.spec.operand_types):
+                if isinstance(operand, ArgRef):
+                    arg_types[operand.index] = expected
+
+        max_arg = max(arg_types, default=-1)
+        return cls.from_parts(
+            tuple(arg_types[k] for k in range(max_arg + 1)),
+            tuple(PatternNode(op, operands) for op, operands in forward_nodes),
+            result,
+        )
+
+    @classmethod
+    def from_ssa(cls, text: str) -> "PatternDag":
+        """Rebuilds the DAG with sharing exactly as written (no interning)."""
+        stmt_re = re.compile(r"%(\d+)\s*=\s*([A-Za-z_]\w*)\s*\((.*)\)")
+        raw: dict[int, tuple[PatternOp, list[PatternRef]]] = {}
+        for stmt in text.split(";"):
+            stmt = stmt.strip()
+            match = stmt_re.fullmatch(stmt)
+            if match is None:
+                raise ValueError(f"malformed SSA statement: {stmt!r}")
+            idx = int(match.group(1))
+            raw[idx] = (
+                PatternOp(match.group(2)),
+                cls._parse_ssa_operands(match.group(3).strip(), idx),
+            )
+
+        n = len(raw)
+
+        def remap(operand: PatternRef) -> PatternRef:
+            if isinstance(operand, ArgRef):
+                return operand
+            return NodeRef(n - 1 - operand.index)
+
+        forward = [
+            (raw[n - 1 - i][0], tuple(remap(o) for o in raw[n - 1 - i][1]))
+            for i in range(n)
+        ]
+        return cls._from_forward_nodes(forward, NodeRef(n - 1))
+
     def __init__(self, expr: str) -> None:
         self.arg_types, self.nodes, self.result = _PatternExprParser(expr).parse()
         self.num_args = len(self.arg_types)
