@@ -2,7 +2,6 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from io import StringIO
 from multiprocessing import Pool
-import re
 
 import pandas as pd
 from xdsl.context import Context
@@ -28,7 +27,7 @@ from xdsl_smt.passes.transfer_inline import FunctionCallInline
 from xdsl_smt.traits.smt_printer import print_to_smtlib
 from xdsl_smt.utils.transfer_function_util import get_argument_instances_with_effect
 
-from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.domain import AbstractDomain, get_bvs_from_abst
 from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.pattern_dsl import ArgRef, NodeRef, PatternDag, PatternRef
 from synth_xfer._util.smt_solver import IncrementalSolver, SolverKind, make_solver
@@ -48,55 +47,6 @@ def _get_ctx() -> Context:
         ctx.load_dialect(Transfer)
         _CTX = ctx
     return _CTX
-
-
-def _get_abst_val(arg: str, domain: AbstractDomain, bw: int) -> tuple[int, int] | None:
-    if arg == "(bottom)":
-        return None
-
-    def kb_str_to_vals(arg: str) -> tuple[int, int]:
-        known_z, known_o = 0, 0
-
-        for ch in arg:
-            if ch == "0":
-                known_z |= 1
-            elif ch == "1":
-                known_o |= 1
-            known_z <<= 1
-            known_o <<= 1
-
-        known_z >>= 1
-        known_o >>= 1
-        return known_z, known_o
-
-    if domain == AbstractDomain.KnownBits:
-        if len(arg) != bw:
-            raise ValueError(f"arg len: {len(arg)} != bitwidth: {bw}")
-
-        return kb_str_to_vals(arg)
-    if domain == AbstractDomain.UConstRange:
-        m = re.match(r"^\[(\d+), (\d+)\]$", arg)
-        if not m or not m.group(1).isnumeric() or not m.group(2).isnumeric():
-            raise ValueError(f"arg: {arg} is malformed")
-        else:
-            lb, ub = int(m.group(1)), int(m.group(2))
-            if lb < 0 or lb >= 2**bw or ub < 0 or ub >= 2**bw or lb > ub:
-                raise ValueError(f"arg: {arg} out of range")
-
-        return lb, ub
-    if domain == AbstractDomain.SConstRange:
-        imin = -(2**bw // 2)
-        imax = (2**bw // 2) - 1
-        m = re.match(r"^\[(-?\d+), (-?\d+)\]$", arg)
-        if not m:
-            raise ValueError(f"arg: {arg} is malformed")
-        else:
-            lb, ub = int(m.group(1)), int(m.group(2))
-            if lb < imin or lb > imax or ub < imin or ub > imax or lb > ub:
-                raise ValueError(f"arg: {arg} out of range")
-        return lb, ub
-
-    raise NotImplementedError(f"Max precise not implemented for {domain} yet")
 
 
 @dataclass
@@ -486,7 +436,8 @@ def compute_max_precise(
     arg_is_i1 = [arg_ty == i1 for arg_ty in hlprs.conc_arg_ty]
     result_width = _concrete_width(hlprs.conc_ret_ty, bw)
     parsed_args = [
-        _get_abst_val(arg, domain, arg_width) for arg, arg_width in zip(args, arg_widths)
+        get_bvs_from_abst(arg, domain, arg_width)
+        for arg, arg_width in zip(args, arg_widths)
     ]
     if any(arg is None for arg in parsed_args):
         return "(bottom)"
@@ -936,7 +887,7 @@ def check_abs_op_constraint(
         return True
 
     try:
-        parsed_args = [_get_abst_val(arg, domain, bw) for arg in args]
+        parsed_args = [get_bvs_from_abst(arg, domain, bw) for arg in args]
     except ValueError:
         return False
     if any(arg is None for arg in parsed_args):

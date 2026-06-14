@@ -1,90 +1,269 @@
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 import sys
-from typing import cast
+from typing import Any, Callable, Hashable, cast
 
-from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.domain import AbstractDomain, get_bvs_from_abst, is_top
 from synth_xfer._util.tsv import EnumData
 
-
-def is_top(s: str) -> bool:
-    return s != "" and all(c == "?" for c in s)
-
-
-def ternary_masks(s: str) -> tuple[int, int]:
-    """Convert a ternary string to (zero_mask, one_mask). Bit position is
-    irrelevant for the subset comparisons below, as long as it is consistent
-    across rows of the same width -- so we just walk LSB-first."""
-    z = o = 0
-    for i, ch in enumerate(reversed(s)):
-        if ch == "0":
-            z |= 1 << i
-        elif ch == "1":
-            o |= 1 << i
-    return z, o
+Row = tuple[tuple[str, ...], str]
+Interval = tuple[int, int]
+AbsValue = Interval | None
+KBFeature = tuple[int, int, AbsValue, int]
+CRFeature = tuple[tuple[Interval, ...], AbsValue]
 
 
-def prune_group(rows: list[tuple[tuple[str, ...], str]]) -> list[bool]:
-    """Minimal-cover pruning for rows of one bitwidth under OR/meet semantics.
+@dataclass(frozen=True)
+class PruneOptions:
+    drop_top: bool
+    drop_bottom: bool
+    drop_locally_complete: bool
+    prune_subsumed: bool
+    max_rows_per_bw: int
 
-    A row matches an input iff its known arg bits are a subset of (and agree
-    with) the input's known bits; the lookup ORs the outputs of every matching
-    row. So row B is redundant if some other row A is strictly more general
-    (A's arg constraints are a subset of B's) AND A's output already covers
-    B's output bits: whenever B matches, A matches too and contributes at least
-    everything B would. Dropping B leaves the transfer function unchanged.
 
-    Returns a keep-flag per input row (original order preserved).
+@dataclass(frozen=True)
+class FileStats:
+    rows_seen: int
+    rows_kept: int
+    top: int
+    bottom: int
+    sequential: int
+    subsumed: int
+    capped: int
+    empty: bool
+    largest_bw: int | None
+    largest_bw_rows: int
+
+    @classmethod
+    def zero(cls) -> "FileStats":
+        return cls(
+            rows_seen=0,
+            rows_kept=0,
+            top=0,
+            bottom=0,
+            sequential=0,
+            subsumed=0,
+            capped=0,
+            empty=True,
+            largest_bw=None,
+            largest_bw_rows=0,
+        )
+
+    def __add__(self, other: "FileStats") -> "FileStats":
+        largest_bw = self.largest_bw
+        largest_bw_rows = self.largest_bw_rows
+        if other.largest_bw_rows > largest_bw_rows:
+            largest_bw = other.largest_bw
+            largest_bw_rows = other.largest_bw_rows
+        return FileStats(
+            rows_seen=self.rows_seen + other.rows_seen,
+            rows_kept=self.rows_kept + other.rows_kept,
+            top=self.top + other.top,
+            bottom=self.bottom + other.bottom,
+            sequential=self.sequential + other.sequential,
+            subsumed=self.subsumed + other.subsumed,
+            capped=self.capped + other.capped,
+            empty=self.empty and other.empty,
+            largest_bw=largest_bw,
+            largest_bw_rows=largest_bw_rows,
+        )
+
+
+def prune_group(rows: list[Row], domain: AbstractDomain, bw: int) -> list[bool]:
+    """Minimal-cover pruning for rows of one bitwidth.
+    Row B is redundant if another row A matches every query B matches, and A's
+    ideal is at least as precise as B's ideal under the domain's meet semantics.
     """
-    n = len(rows)
+    if domain == AbstractDomain.KnownBits:
+        return _prune_knownbits_group(rows, domain, bw)
+    if domain in (AbstractDomain.UConstRange, AbstractDomain.SConstRange):
+        return _prune_const_range_group(rows, domain, bw)
+    raise NotImplementedError(f"{domain} not supported yet")
+
+
+def prune_by_dominance[T](
+    features: list[T],
+    dominates: Callable[[T, T], bool],
+    key: Callable[[T], Hashable] | None = None,
+) -> list[bool]:
+    keep = [True] * len(features)
+    key_fn = key if key is not None else lambda feat: feat
+    seen: set[object] = set()
+    for i, feat in enumerate(features):
+        feat_key = key_fn(feat)
+        if feat_key in seen:
+            keep[i] = False
+        else:
+            seen.add(feat_key)
+
+    order = [i for i in range(len(features)) if keep[i]]
+    for B in order:
+        for A in order:
+            if A != B and dominates(features[A], features[B]):
+                keep[B] = False
+                break
+    return keep
+
+
+def row_int(row: Any, col: str) -> int:
+    return int(cast(int, row[col]))
+
+
+def _prune_knownbits_group(
+    rows: list[Row], domain: AbstractDomain, bw: int
+) -> list[bool]:
     # Per-row masks: combined arg (zero/one) masks, ideal (zero/one) masks, and
     # the count of known arg bits (a dominator can only have <= as many).
-    feats = []
+    feats: list[KBFeature] = []
     for args, ideal in rows:
         aZ = aO = shift = 0
         for s in args:
-            z, o = ternary_masks(s)
+            z, o = cast(tuple[int, int], get_bvs_from_abst(s, domain, bw))
             aZ |= z << shift
             aO |= o << shift
             shift += len(s)
-        oZ, oO = ternary_masks(ideal)
-        feats.append((aZ, aO, oZ, oO, bin(aZ | aO).count("1")))
+        output = get_bvs_from_abst(ideal, domain, bw)
+        feats.append((aZ, aO, output, bin(aZ | aO).count("1")))
 
-    keep = [True] * n
-    # Drop exact duplicates first (identical args AND ideal). This is the only
-    # way two rows could mutually dominate, so removing the extras up front
-    # makes the dominance relation below a strict partial order -- safe to apply
-    # in a single pass.
-    seen: set = set()
-    for i in range(n):
-        key = feats[i][:4]
-        if key in seen:
-            keep[i] = False
+    def dominates(a: KBFeature, b: KBFeature) -> bool:
+        aZ, aO, a_out, akc = a
+        bZ, bO, b_out, bkc = b
+        if a_out is None:
+            output_covers = True
+        elif b_out is None:
+            output_covers = False
         else:
-            seen.add(key)
+            aoZ, aoO = a_out
+            boZ, boO = b_out
+            output_covers = not (boZ & ~aoZ) and not (boO & ~aoO)
+        return akc <= bkc and not (aZ & ~bZ) and not (aO & ~bO) and output_covers
 
-    # Survivors ordered by known-arg-bit count ascending: a dominator A of B has
-    # akc <= bkc, so once akc > bkc the rest (also larger) cannot dominate B.
-    order = sorted((i for i in range(n) if keep[i]), key=lambda i: feats[i][4])
-    for B in order:
-        bZ, bO, boZ, boO, bkc = feats[B]
-        for A in order:
-            if A == B:
+    return prune_by_dominance(feats, dominates, key=lambda feat: feat[:3])
+
+
+def _prune_const_range_group(
+    rows: list[Row], domain: AbstractDomain, bw: int
+) -> list[bool]:
+    def contains(outer: AbsValue, inner: AbsValue) -> bool:
+        if inner is None:
+            return True
+        if outer is None:
+            return False
+        return outer[0] <= inner[0] and inner[1] <= outer[1]
+
+    feats: list[CRFeature] = []
+    for args, ideal in rows:
+        arg_ranges = tuple(
+            cast(Interval, get_bvs_from_abst(arg, domain, bw)) for arg in args
+        )
+        ideal_range = get_bvs_from_abst(ideal, domain, bw)
+        feats.append((arg_ranges, ideal_range))
+
+    def dominates(a: CRFeature, b: CRFeature) -> bool:
+        a_args, a_out = a
+        b_args, b_out = b
+        return all(
+            contains(a_arg, b_arg) for a_arg, b_arg in zip(a_args, b_args)
+        ) and contains(b_out, a_out)
+
+    return prune_by_dominance(feats, dominates)
+
+
+def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
+    with path.open() as f:
+        data = EnumData.read_tsv(f)
+    frame = data.enumdata
+
+    if "ideal" not in frame.columns:
+        sys.exit(f"{path.name}: no 'ideal' column; run max-precise first")
+
+    arg_cols = [f"arg_{a}" for a in range(data.metadata.arity)]
+
+    if options.drop_locally_complete and "sequential_ideal" not in frame.columns:
+        sys.exit(f"{path.name}: no 'sequential_ideal' column")
+
+    n_seen = n_top = n_bottom = n_sequential = n_subsumed = n_capped = 0
+    # Drop top/bottom rows and bucket survivors by bitwidth (rows of
+    # different widths never match the same query, so pruning is per-width).
+    # Each entry keeps its original row position to slice the frame later.
+    groups: dict[int, list[tuple[int, tuple[str, ...], str]]] = defaultdict(list)
+    for pos, (_, row) in enumerate(frame.iterrows()):
+        argvals = tuple(str(row[c]) for c in arg_cols)
+        ideal = str(row["ideal"])
+        sequential_ideal = (
+            str(row["sequential_ideal"]) if "sequential_ideal" in frame.columns else None
+        )
+        bw = row_int(row, "bw")
+        n_seen += 1
+        if sequential_ideal is not None and ideal == sequential_ideal:
+            n_sequential += 1
+        if any(v == "(bottom)" for v in argvals):
+            n_bottom += 1
+        else:
+            if ideal == "(bottom)":
+                n_bottom += 1
+            if ideal == "(bottom)" and options.drop_bottom:
                 continue
-            aZ, aO, _, _, akc = feats[A]
-            if akc > bkc:
-                break
-            # A's arg constraints subset of B's (A more general / agrees)?
-            if (aZ & ~bZ) or (aO & ~bO):
+            if options.drop_locally_complete and ideal == sequential_ideal:
                 continue
-            # A's output covers B's (B's known output bits subset of A's)?
-            _, _, aoZ, aoO, _ = feats[A]
-            if (boZ & ~aoZ) or (boO & ~aoO):
+            if options.drop_top and is_top(ideal, data.metadata.domain, bw):
+                n_top += 1
                 continue
-            keep[B] = False
-            break
-    return keep
+            groups[bw].append((pos, argvals, ideal))
+
+    # Per bitwidth: subsumption-prune, then cap, collecting kept positions.
+    cap = options.max_rows_per_bw
+    keep_positions: list[int] = []
+    kept_by_bw: dict[int, int] = {}
+    for bw, grp in groups.items():
+        flags = (
+            prune_group([(a, d) for _, a, d in grp], data.metadata.domain, bw)
+            if options.prune_subsumed
+            else [True] * len(grp)
+        )
+        kept = [pos for (pos, _, _), keep in zip(grp, flags) if keep]
+        n_subsumed += len(grp) - len(kept)
+        if cap and len(kept) > cap:
+            n_capped += len(kept) - cap
+            kept = kept[:cap]
+        kept_by_bw[bw] = len(kept)
+        keep_positions.extend(kept)
+
+    pattern_kept = len(keep_positions)
+    top_bw, top_bw_rows = max(kept_by_bw.items(), key=lambda kv: kv[1], default=(None, 0))
+
+    if pattern_kept == 0:
+        return FileStats(
+            rows_seen=n_seen,
+            rows_kept=0,
+            top=n_top,
+            bottom=n_bottom,
+            sequential=n_sequential,
+            subsumed=n_subsumed,
+            capped=n_capped,
+            empty=True,
+            largest_bw=top_bw,
+            largest_bw_rows=top_bw_rows,
+        )
+
+    kept_frame = frame.iloc[sorted(keep_positions)].reset_index(drop=True)
+    EnumData(data.metadata, kept_frame).write_tsv(out_dir / path.name)
+
+    return FileStats(
+        rows_seen=n_seen,
+        rows_kept=pattern_kept,
+        top=n_top,
+        bottom=n_bottom,
+        sequential=n_sequential,
+        subsumed=n_subsumed,
+        capped=n_capped,
+        empty=False,
+        largest_bw=top_bw,
+        largest_bw_rows=top_bw_rows,
+    )
 
 
 def main() -> None:
@@ -95,110 +274,69 @@ def main() -> None:
         "--drop-top",
         action=BooleanOptionalAction,
         default=True,
-        help="Drop rows whose ideal output is top (all '?'). Use "
-        "--no-drop-top to keep them.",
+        help="Drop rows whose ideal output is top",
+    )
+    ap.add_argument(
+        "--drop-bottom",
+        action=BooleanOptionalAction,
+        default=True,
+        help="Drop rows whose ideal output is bottom. Rows with bottom args are always dropped.",
+    )
+    ap.add_argument(
+        "--drop-locally-complete",
+        action=BooleanOptionalAction,
+        default=False,
+        help="Drop rows whose ideal output equals sequential_ideal",
     )
     ap.add_argument(
         "--prune-subsumed",
         action=BooleanOptionalAction,
         default=True,
-        help="Drop rows subsumed by a more-general row that already covers "
-        "their output (minimal-cover pruning). Use --no-prune-subsumed "
-        "to disable.",
+        help="Drop rows subsumed by a more-general row that covers that output",
     )
     ap.add_argument(
         "--max-rows-per-bw",
         type=int,
         default=0,
         metavar="N",
-        help="Cap the number of kept rows per bitwidth: if a bitwidth has more "
-        "than N surviving rows, keep only the first N (in original "
-        "order). Default 0 (no cap); a common value is 200.",
+        help="Cap the number of kept rows per bitwidth",
     )
     args = ap.parse_args()
 
     tsv_files = sorted(args.tsv_dir.glob("*.tsv"))
-    if not tsv_files:
-        sys.exit(f"No TSVs found in {args.tsv_dir}")
     args.out_dir.mkdir(parents=True, exist_ok=True)
     name_width = max(len(p.name) for p in tsv_files)
+    options = PruneOptions(
+        drop_top=args.drop_top,
+        drop_bottom=args.drop_bottom,
+        drop_locally_complete=args.drop_locally_complete,
+        prune_subsumed=args.prune_subsumed,
+        max_rows_per_bw=args.max_rows_per_bw,
+    )
 
-    n_seen = n_kept = n_top = n_bottom = n_subsumed = n_capped = n_empty = 0
+    total = FileStats.zero()
+    n_empty = 0
     for path in tsv_files:
-        with path.open() as f:
-            data = EnumData.read_tsv(f)
-        frame = data.enumdata
-
-        # The ternary mask / meet-subset pruning is KnownBits-specific; ConstRange
-        # domains use [lb, ub] intervals and need different semantics (not yet).
-        if data.metadata.domain != AbstractDomain.KnownBits:
-            raise NotImplementedError(
-                f"{path.name}: {data.metadata.domain} not supported yet"
-            )
-        if "ideal" not in frame.columns:
-            sys.exit(f"{path.name}: no 'ideal' column; run max-precise first")
-
-        arg_cols = [f"arg_{a}" for a in range(data.metadata.arity)]
-
-        # Drop top/bottom rows and bucket survivors by bitwidth (rows of
-        # different widths never match the same query, so pruning is per-width).
-        # Each entry keeps its original row position to slice the frame later.
-        groups: dict[int, list[tuple[int, tuple[str, ...], str]]] = defaultdict(list)
-        for pos, (_, row) in enumerate(frame.iterrows()):
-            argvals = tuple(str(row[c]) for c in arg_cols)
-            ideal = str(row["ideal"])
-            n_seen += 1
-            if any(v == "(bottom)" for v in argvals + (ideal,)):
-                n_bottom += 1
-            elif args.drop_top and is_top(ideal):
-                n_top += 1
-            else:
-                groups[int(cast(int, row["bw"]))].append((pos, argvals, ideal))
-
-        # Per bitwidth: subsumption-prune, then cap, collecting kept positions.
-        cap = args.max_rows_per_bw
-        keep_positions: list[int] = []
-        kept_by_bw: dict[int, int] = {}
-        for bw, grp in groups.items():
-            flags = (
-                prune_group([(a, d) for _, a, d in grp])
-                if args.prune_subsumed
-                else [True] * len(grp)
-            )
-            kept = [pos for (pos, _, _), keep in zip(grp, flags) if keep]
-            n_subsumed += len(grp) - len(kept)
-            if cap and len(kept) > cap:
-                n_capped += len(kept) - cap
-                kept = kept[:cap]
-            kept_by_bw[bw] = len(kept)
-            keep_positions.extend(kept)
-            n_kept += len(kept)
-
-        pattern_kept = len(keep_positions)
-        top_bw, top_bw_rows = max(
-            kept_by_bw.items(), key=lambda kv: kv[1], default=("-", 0)
-        )
+        stats = prune_file(path, args.out_dir, options)
+        bw_label = "-" if stats.largest_bw is None else str(stats.largest_bw)
         print(
-            f"{path.name:<{name_width}}  rows: {len(frame):>6}   "
-            f"kept: {pattern_kept:>5}   largest: {top_bw_rows:>5} (bw={top_bw})"
+            f"{path.name:<{name_width}}  rows: {stats.rows_seen:>6}   "
+            f"kept: {stats.rows_kept:>5}   "
+            f"largest: {stats.largest_bw_rows:>5} (bw={bw_label})"
         )
-
-        # Nothing survived -> no usable lookup rows, skip writing entirely.
-        if pattern_kept == 0:
-            n_empty += 1
-            continue
-
-        kept_frame = frame.iloc[sorted(keep_positions)].reset_index(drop=True)
-        EnumData(data.metadata, kept_frame).write_tsv(args.out_dir / path.name)
+        total += stats
+        n_empty += int(stats.empty)
 
     print(
         f"Optimized {len(tsv_files) - n_empty} TSVs -> {args.out_dir} "
         f"({n_empty} empty patterns skipped)"
     )
     print(
-        f"Rows seen: {n_seen}  kept: {n_kept}  dropped: {n_seen - n_kept} "
-        f"(top: {n_top}, bottom: {n_bottom}, subsumed: {n_subsumed}, "
-        f"capped: {n_capped})"
+        f"Rows seen: {total.rows_seen}  kept: {total.rows_kept}  "
+        f"dropped: {total.rows_seen - total.rows_kept} "
+        f"(top: {total.top}, bottom: {total.bottom}, "
+        f"sequential: {total.sequential}, subsumed: {total.subsumed}, "
+        f"capped: {total.capped})"
     )
 
 
