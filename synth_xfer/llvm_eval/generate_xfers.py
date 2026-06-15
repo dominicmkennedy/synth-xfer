@@ -275,9 +275,7 @@ def emit_kb_blob(
                         mask_bytes, "little"
                     )
                 z, o = _kb_masks(ideal, bw)
-                row += z.to_bytes(mask_bytes, "little") + o.to_bytes(
-                    mask_bytes, "little"
-                )
+                row += z.to_bytes(mask_bytes, "little") + o.to_bytes(mask_bytes, "little")
                 lits.append('    "' + "".join(f"\\x{b:02x}" for b in row) + '"')
             blobs.append(
                 f"static const unsigned char {name}[] =\n" + "\n".join(lits) + ";"
@@ -323,10 +321,7 @@ def _cr_expr(s: str, domain: AbstractDomain, bw: int) -> str:
     else:
         raise NotImplementedError(domain)
 
-    return (
-        f'ConstantRange(APInt({bw}, "{lo}", 10), '
-        f'APInt({bw}, "{upper}", 10))'
-    )
+    return f'ConstantRange(APInt({bw}, "{lo}", 10), APInt({bw}, "{upper}", 10))'
 
 
 def emit_cr_table(
