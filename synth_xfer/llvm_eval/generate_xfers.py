@@ -3,11 +3,10 @@ from collections import defaultdict
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-import re
 import sys
 from typing import cast
 
-from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.domain import AbstractDomain, get_bvs_from_abst
 from synth_xfer._util.pattern_dsl import ArgRef, PatternDag, PatternOp, PatternRef
 from synth_xfer._util.tsv import EnumData
 
@@ -18,6 +17,9 @@ class PatternSpec:
     dag: PatternDag
     root: PatternOp
     index: int
+
+
+TableRows = dict[int, list[tuple[list[str], str]]]
 
 
 NSW = "OverflowingBinaryOperator::NoSignedWrap"
@@ -88,6 +90,7 @@ OP_MATCHER: dict[PatternOp, str] = {
 
 BLOB_LIMIT = 60000
 
+
 WIDTH_CHANGING_OPS = frozenset(
     {
         PatternOp.ICmpEq,
@@ -121,10 +124,6 @@ def _symbol_id(domain: AbstractDomain, pid: str) -> str:
     return f"{_cr_prefix(domain)}{pid}"
 
 
-def _cr_impact_fn(domain: AbstractDomain) -> str:
-    return f"record{_cr_prefix(domain)}PatternImpact"
-
-
 def render_cr_top(pid: str, arity: int, domain: AbstractDomain) -> str:
     args = [f"const ConstantRange &ssa_{i}" for i in range(arity)]
     sig = ", ".join(["unsigned bw", *args])
@@ -147,15 +146,14 @@ def render_kb_top(pid: str, arity: int) -> str:
     )
 
 
-def ternary_to_zo(s: str) -> tuple[int, int]:
-    """Convert ternary string (MSB-first) to (zero_mask, one_mask)."""
-    zero = one = 0
-    for i, ch in enumerate(reversed(s)):
-        if ch == "0":
-            zero |= 1 << i
-        elif ch == "1":
-            one |= 1 << i
-    return zero, one
+def _kb_masks(s: str, bw: int) -> tuple[int, int]:
+    parsed = get_bvs_from_abst(
+        s, AbstractDomain.KnownBits, bw if s == "(bottom)" else len(s)
+    )
+    if parsed is None:
+        mask = (1 << bw) - 1
+        return mask, mask
+    return parsed
 
 
 def build_stub_transformers(
@@ -173,39 +171,38 @@ def build_stub_transformers(
     return {dag.to_id(): render_cr_top(dag.to_id(), dag.num_args, domain) for dag in dags}
 
 
-def _rows_from_tsv(path: Path) -> tuple[int, dict[int, list[tuple[list[str], str]]]]:
-    """Returns (arity, {bw: [(args, ideal), ...]}) of non-bottom rows."""
-
+def _read_table_tsv(path: Path) -> tuple[str, AbstractDomain, int, TableRows]:
+    """Returns (pattern id, domain, arity, {bw: [(args, ideal), ...]})."""
     with path.open() as f:
         data = EnumData.read_tsv(f)
-    if data.metadata.domain != AbstractDomain.KnownBits:
-        raise NotImplementedError(f"{path.name}: {data.metadata.domain} not supported")
     if "ideal" not in data.enumdata.columns:
         sys.exit(f"{path.name}: no 'ideal' column; run max-precise first")
 
+    domain = data.metadata.domain
     arity = data.metadata.arity
     arg_cols = [f"arg_{a}" for a in range(arity)]
-    groups: dict[int, list[tuple[list[str], str]]] = defaultdict(list)
+    groups: TableRows = defaultdict(list)
     for _, row in data.enumdata.iterrows():
         bw = int(cast(int, row["bw"]))
         args = [str(row[c]) for c in arg_cols]
         ideal = str(row["ideal"])
-        if any(s == "(bottom)" for s in (*args, ideal)):
+        if domain not in (
+            AbstractDomain.KnownBits,
+            AbstractDomain.SConstRange,
+            AbstractDomain.UConstRange,
+        ):
+            raise NotImplementedError(f"{path.name}: {domain} not supported")
+        if "(bottom)" in args:
             continue
-        for s in (*args, ideal):
-            if not re.fullmatch(r"[01?]+", s) or len(s) not in (bw, 1):
-                raise ValueError(
-                    f"{path}: bad ternary string {s!r}; expected width {bw} or 1"
-                )
         groups[bw].append((args, ideal))
 
-    return arity, groups
+    return data.metadata.op.to_id(), domain, arity, groups
 
 
-def emit_inline(
+def emit_kb_inline(
     pid: str,
     arity: int,
-    groups: dict[int, list[tuple[list[str], str]]],
+    groups: TableRows,
 ) -> str:
     sig = ", ".join(
         ["unsigned bw"] + [f"std::array<APInt, 2> ssa_{i}" for i in range(arity)]
@@ -213,8 +210,8 @@ def emit_inline(
     entries = []
     for bw in sorted(groups):
         for args, ideal in groups[bw]:
-            zo = [ternary_to_zo(s) for s in args]
-            oz, oo = ternary_to_zo(ideal)
+            zo = [_kb_masks(s, bw) for s in args]
+            oz, oo = _kb_masks(ideal, bw)
             arg_z = ", ".join(f"0x{z:X}ULL" for z, _ in zo)
             arg_o = ", ".join(f"0x{o:X}ULL" for _, o in zo)
             entries.append(
@@ -253,10 +250,10 @@ std::array<APInt, 2> solution({sig}) {{
 """
 
 
-def emit_blob(
+def emit_kb_blob(
     pid: str,
     arity: int,
-    groups: dict[int, list[tuple[list[str], str]]],
+    groups: TableRows,
 ) -> str:
     sig = ", ".join(
         ["unsigned bw"] + [f"std::array<APInt, 2> ssa_{i}" for i in range(arity)]
@@ -272,11 +269,15 @@ def emit_blob(
             lits = []
             for args, ideal in chunk:
                 row = bytearray()
-                for s in (*args, ideal):
-                    z, o = ternary_to_zo(s)
+                for s in args:
+                    z, o = _kb_masks(s, bw)
                     row += z.to_bytes(mask_bytes, "little") + o.to_bytes(
                         mask_bytes, "little"
                     )
+                z, o = _kb_masks(ideal, bw)
+                row += z.to_bytes(mask_bytes, "little") + o.to_bytes(
+                    mask_bytes, "little"
+                )
                 lits.append('    "' + "".join(f"\\x{b:02x}" for b in row) + '"')
             blobs.append(
                 f"static const unsigned char {name}[] =\n" + "\n".join(lits) + ";"
@@ -302,29 +303,123 @@ std::array<APInt, 2> solution({sig}) {{
 """
 
 
+def _cr_expr(s: str, domain: AbstractDomain, bw: int) -> str:
+    interval = get_bvs_from_abst(s, domain, bw)
+    if interval is None:
+        return f"ConstantRange::getEmpty({bw})"
+
+    lo, hi = interval
+    if domain == AbstractDomain.UConstRange:
+        umax = (1 << bw) - 1
+        if lo == 0 and hi == umax:
+            return f"ConstantRange::getFull({bw})"
+        upper = 0 if hi == umax else hi + 1
+    elif domain == AbstractDomain.SConstRange:
+        smin = -(1 << (bw - 1))
+        smax = (1 << (bw - 1)) - 1
+        if lo == smin and hi == smax:
+            return f"ConstantRange::getFull({bw})"
+        upper = smin if hi == smax else hi + 1
+    else:
+        raise NotImplementedError(domain)
+
+    return (
+        f'ConstantRange(APInt({bw}, "{lo}", 10), '
+        f'APInt({bw}, "{upper}", 10))'
+    )
+
+
+def emit_cr_table(
+    pid: str,
+    arity: int,
+    groups: TableRows,
+    domain: AbstractDomain,
+) -> str:
+    args = [f"const ConstantRange &ssa_{i}" for i in range(arity)]
+    sig = ", ".join(["unsigned bw", *args])
+    symbol = _symbol_id(domain, pid)
+    row_ty = f"::ConstantRangePatterns::CRRow<{arity}>"
+    lookup = f"lookup{_cr_prefix(domain)}<{arity}>"
+
+    tables: list[str] = []
+    cases: list[str] = []
+    for bw in sorted(groups):
+        rows = groups[bw]
+        table_name = f"kTableBW{bw}"
+        entries = []
+        for row_args, ideal in rows:
+            arg_exprs = ", ".join(_cr_expr(arg, domain, bw) for arg in row_args)
+            out_expr = _cr_expr(ideal, domain, bw)
+            entries.append(f"    {{{{{{{arg_exprs}}}}}, {out_expr}}},")
+        tables.append(
+            f"static const std::array<{row_ty}, {len(rows)}> {table_name} = {{{{\n"
+            + "\n".join(entries)
+            + "\n}};"
+        )
+        cases.append(
+            f"  case {bw}:\n"
+            f"    return ::ConstantRangePatterns::{lookup}(args, {table_name});\n"
+        )
+
+    arg_list = ", ".join(f"ssa_{i}" for i in range(arity))
+    table_block = "\n\n".join(tables)
+    case_block = "".join(cases)
+    return f"""namespace {symbol} {{
+namespace {{
+{table_block}
+}} // namespace
+
+ConstantRange solution({sig}) {{
+  const std::array<ConstantRange, {arity}> args = {{{arg_list}}};
+  switch (bw) {{
+{case_block}  default:
+    return ConstantRange::getFull(bw);
+  }}
+}}
+}}
+"""
+
+
 def build_table_transformers(
     table_dir: Path,
     inline_threshold: int,
-) -> dict[str, str]:
-    transformers: dict[str, str] = {}
+) -> dict[AbstractDomain, dict[str, str]]:
+    transformers: dict[AbstractDomain, dict[str, str]] = defaultdict(dict)
     tsv_files = sorted(table_dir.glob("*.tsv"))
 
-    n_stub = n_inline = n_blob = n_rows = 0
+    stats: dict[AbstractDomain, dict[str, int]] = defaultdict(
+        lambda: {"stub": 0, "inline": 0, "blob": 0, "cr_table": 0, "rows": 0}
+    )
     for path in tsv_files:
-        pid = path.stem
-        arity, groups = _rows_from_tsv(path)
+        pid, domain, arity, groups = _read_table_tsv(path)
         total = sum(map(len, groups.values()))
-        n_rows += total
+        stats[domain]["rows"] += total
 
-        if not groups:
-            transformers[pid], n_stub = render_kb_top(pid, arity), n_stub + 1
-        elif max(groups) <= 64 and total <= inline_threshold:
-            transformers[pid], n_inline = emit_inline(pid, arity, groups), n_inline + 1
+        if domain == AbstractDomain.KnownBits:
+            if not groups:
+                transformers[domain][pid] = render_kb_top(pid, arity)
+                stats[domain]["stub"] += 1
+            elif max(groups) <= 64 and total <= inline_threshold:
+                transformers[domain][pid] = emit_kb_inline(pid, arity, groups)
+                stats[domain]["inline"] += 1
+            else:
+                transformers[domain][pid] = emit_kb_blob(pid, arity, groups)
+                stats[domain]["blob"] += 1
         else:
-            transformers[pid], n_blob = emit_blob(pid, arity, groups), n_blob + 1
+            if not groups:
+                transformers[domain][pid] = render_cr_top(pid, arity, domain)
+                stats[domain]["stub"] += 1
+            else:
+                transformers[domain][pid] = emit_cr_table(pid, arity, groups, domain)
+                stats[domain]["cr_table"] += 1
 
     print(f"Processed {len(tsv_files)} TSVs from {table_dir}:")
-    print(f"  stub: {n_stub}  inline: {n_inline}  blob: {n_blob}  (rows: {n_rows})")
+    for domain in sorted(stats.keys(), key=str):
+        s = stats[domain]
+        print(
+            f"  {domain}: stub: {s['stub']}  inline: {s['inline']}  "
+            f"blob: {s['blob']}  cr_table: {s['cr_table']}  (rows: {s['rows']})"
+        )
 
     return transformers
 
@@ -509,7 +604,7 @@ def _emit_pattern_impact_stats(specs: list[PatternSpec], domain: AbstractDomain)
         )
     elif domain in (AbstractDomain.SConstRange, AbstractDomain.UConstRange):
         out.append(
-            f"static void {_cr_impact_fn(domain)}(unsigned ID, uint64_t Log2Reduced,\n"
+            f"static void record{_cr_prefix(domain)}PatternImpact(unsigned ID, uint64_t Log2Reduced,\n"
             "                                  uint64_t RelativeReduced, bool Bottom) {\n"
         )
     else:
@@ -545,14 +640,10 @@ def _emit_pattern_impact_stats(specs: list[PatternSpec], domain: AbstractDomain)
 class DispatcherEmitter:
     specs: list[PatternSpec]
     domain: AbstractDomain
-    include_helper: bool
 
     @classmethod
     def from_transformers(
-        cls,
-        transformers: dict[str, str],
-        domain: AbstractDomain,
-        include_helper: bool,
+        cls, transformers: dict[str, str], domain: AbstractDomain
     ) -> "DispatcherEmitter":
         patterns = sorted((pid, PatternDag.from_id(pid)) for pid in transformers)
         specs = [
@@ -564,7 +655,7 @@ class DispatcherEmitter:
             )
             for i, (pid, dag) in enumerate(patterns)
         ]
-        return cls(specs, domain, include_helper)
+        return cls(specs, domain)
 
     @property
     def roots(self) -> dict[PatternOp, list[PatternSpec]]:
@@ -616,8 +707,6 @@ class DispatcherEmitter:
     def emit(self) -> str:
         out: list[str] = []
         out.append("// Auto-generated by generate_xfers.py. Do not edit.\n")
-        if self.include_helper:
-            out.append('#include "table_helper.inc"\n')
         out.extend(
             f'#include "patterns/{_symbol_id(self.domain, spec.id)}.inc" // {spec.dag}\n'
             for spec in self.specs
@@ -714,12 +803,12 @@ def wire_transformers(
     llvm_dir: Path,
     transformers: dict[str, str],
     domain: AbstractDomain,
-    include_helper: bool,
 ) -> None:
     # write transformers into Generated/patterns, clearing any stale ones first
     # An empty pattern set is valid: it yields a no-op dispatcher
-    emitter = DispatcherEmitter.from_transformers(transformers, domain, include_helper)
+    emitter = DispatcherEmitter.from_transformers(transformers, domain)
     generated_dir = llvm_dir / "llvm/lib/Analysis/Generated"
+    generated_dir.mkdir(parents=True, exist_ok=True)
 
     patterns_dst = generated_dir / "patterns"
     patterns_dst.mkdir(parents=True, exist_ok=True)
@@ -746,7 +835,7 @@ def wire_transformers(
     dispatch_out.write_text(emitter.emit())
 
     print(f"wrote {len(emitter.specs)} pattern .inc -> {patterns_dst}")
-    print(f"wrote dispatcher -> {dispatch_out} (include helper: {include_helper})")
+    print(f"wrote dispatcher -> {dispatch_out}")
 
 
 def main() -> None:
@@ -793,12 +882,13 @@ def main() -> None:
     if args.mode == "stubs":
         d = AbstractDomain[args.domain]
         transformers = build_stub_transformers(args.patterns, d)
-        wire_transformers(args.llvm_dir, transformers, d, include_helper=False)
+        wire_transformers(args.llvm_dir, transformers, d)
     else:
-        # TODO add real domain here
-        d = AbstractDomain.KnownBits
-        transformers = build_table_transformers(args.table_dir, args.inline_threshold)
-        wire_transformers(args.llvm_dir, transformers, d, include_helper=True)
+        transformers_by_domain = build_table_transformers(
+            args.table_dir, args.inline_threshold
+        )
+        for domain, transformers in sorted(transformers_by_domain.items(), key=str):
+            wire_transformers(args.llvm_dir, transformers, domain)
 
 
 if __name__ == "__main__":
