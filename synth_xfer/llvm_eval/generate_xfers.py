@@ -615,7 +615,7 @@ def _emit_pattern_impact_stats(specs: list[PatternSpec], domain: AbstractDomain)
         )
     elif domain in (AbstractDomain.SConstRange, AbstractDomain.UConstRange):
         out.append(
-            f"static void record{_cr_prefix(domain)}PatternImpact(unsigned ID, uint64_t Log2Reduced,\n"
+            f"static void record{_cr_prefix(domain)}PatternImpact(unsigned ID, uint64_t PrecisionBitsAdded,\n"
             "                                  uint64_t RelativeReduced, bool Bottom) {\n"
         )
     else:
@@ -634,9 +634,9 @@ def _emit_pattern_impact_stats(specs: list[PatternSpec], domain: AbstractDomain)
         else:
             symbol = _symbol_id(domain, spec.id)
             out.append(
-                f"    if (Log2Reduced > 0 || RelativeReduced > 0) ++Num{symbol}ImprovedQueries;\n"
+                f"    if (PrecisionBitsAdded > 0 || RelativeReduced > 0) ++Num{symbol}ImprovedQueries;\n"
             )
-            out.append(f"    {symbol}Log2Reduced += Log2Reduced;\n")
+            out.append(f"    {symbol}PrecisionBitsAdded += PrecisionBitsAdded;\n")
             out.append(f"    {symbol}RelativeReduced += RelativeReduced;\n")
             out.append(f"    if (Bottom) ++Num{symbol}Bottom;\n")
         out.append("    return;\n")
@@ -698,8 +698,8 @@ class DispatcherEmitter:
             ("Num{id}Matches", "matches"),
             ("Num{id}ImprovedQueries", "improved queries against vanilla analysis"),
             (
-                "{id}Log2Reduced",
-                "total log2 set-size reduction against vanilla analysis",
+                "{id}PrecisionBitsAdded",
+                "total precision bits added against vanilla analysis",
             ),
             (
                 "{id}RelativeReduced",
