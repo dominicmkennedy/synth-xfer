@@ -301,30 +301,44 @@ std::array<APInt, 2> solution({sig}) {{
 """
 
 
-def _cr_expr(s: str, domain: AbstractDomain, bw: int) -> str:
+def _word_bytes(bw: int) -> int:
+    return (bw + 7) // 8
+
+
+def _le_bytes(value: int, bw: int) -> bytes:
+    return (value % (1 << bw)).to_bytes(_word_bytes(bw), "little")
+
+
+def _cr_bounds(s: str, domain: AbstractDomain, bw: int) -> tuple[int, int]:
     interval = get_bvs_from_abst(s, domain, bw)
     if interval is None:
-        return f"ConstantRange::getEmpty({bw})"
+        return 0, 0
 
     lo, hi = interval
     if domain == AbstractDomain.UConstRange:
         umax = (1 << bw) - 1
         if lo == 0 and hi == umax:
-            return f"ConstantRange::getFull({bw})"
+            return umax, umax
         upper = 0 if hi == umax else hi + 1
     elif domain == AbstractDomain.SConstRange:
         smin = -(1 << (bw - 1))
         smax = (1 << (bw - 1)) - 1
         if lo == smin and hi == smax:
-            return f"ConstantRange::getFull({bw})"
+            umax = (1 << bw) - 1
+            return umax, umax
         upper = smin if hi == smax else hi + 1
     else:
         raise NotImplementedError(domain)
 
-    return f'ConstantRange(APInt({bw}, "{lo}", 10), APInt({bw}, "{upper}", 10))'
+    return lo, upper
 
 
-def emit_cr_table(
+def _cr_range_bytes(s: str, domain: AbstractDomain, bw: int) -> bytes:
+    lower, upper = _cr_bounds(s, domain, bw)
+    return _le_bytes(lower, bw) + _le_bytes(upper, bw)
+
+
+def emit_cr_blob(
     pid: str,
     arity: int,
     groups: TableRows,
@@ -333,43 +347,45 @@ def emit_cr_table(
     args = [f"const ConstantRange &ssa_{i}" for i in range(arity)]
     sig = ", ".join(["unsigned bw", *args])
     symbol = _symbol_id(domain, pid)
-    row_ty = f"::ConstantRangePatterns::CRRow<{arity}>"
     lookup = f"lookup{_cr_prefix(domain)}<{arity}>"
 
+    blobs: list[str] = []
     tables: list[str] = []
-    cases: list[str] = []
     for bw in sorted(groups):
+        mask_bytes = _word_bytes(bw)
+        row_bytes = 2 * (arity + 1) * mask_bytes
+        per_chunk = max(1, BLOB_LIMIT // row_bytes)
         rows = groups[bw]
-        table_name = f"kTableBW{bw}"
-        entries = []
-        for row_args, ideal in rows:
-            arg_exprs = ", ".join(_cr_expr(arg, domain, bw) for arg in row_args)
-            out_expr = _cr_expr(ideal, domain, bw)
-            entries.append(f"    {{{{{{{arg_exprs}}}}}, {out_expr}}},")
-        tables.append(
-            f"static const std::array<{row_ty}, {len(rows)}> {table_name} = {{{{\n"
-            + "\n".join(entries)
-            + "\n}};"
-        )
-        cases.append(
-            f"  case {bw}:\n"
-            f"    return ::ConstantRangePatterns::{lookup}(args, {table_name});\n"
-        )
+        for ci, start in enumerate(range(0, len(rows), per_chunk)):
+            chunk = rows[start : start + per_chunk]
+            name = f"kBlob_bw{bw}_{ci}"
+            lits: list[str] = []
+            for row_args, ideal in chunk:
+                row = bytearray()
+                for arg in row_args:
+                    row += _cr_range_bytes(arg, domain, bw)
+                row += _cr_range_bytes(ideal, domain, bw)
+                lits.append('    "' + "".join(f"\\x{b:02x}" for b in row) + '"')
+            blobs.append(
+                f"static const unsigned char {name}[] =\n" + "\n".join(lits) + ";"
+            )
+            tables.append(f"  {{{bw}u, {len(chunk)}u, {name}}},")
 
     arg_list = ", ".join(f"ssa_{i}" for i in range(arity))
-    table_block = "\n\n".join(tables)
-    case_block = "".join(cases)
+    blob_block = "\n".join(blobs)
+    table_block = "\n".join(tables)
     return f"""namespace {symbol} {{
 namespace {{
+{blob_block}
+
+static const ::ConstantRangePatterns::CRTable kTables[] = {{
 {table_block}
+}};
 }} // namespace
 
 ConstantRange solution({sig}) {{
   const std::array<ConstantRange, {arity}> args = {{{arg_list}}};
-  switch (bw) {{
-{case_block}  default:
-    return ConstantRange::getFull(bw);
-  }}
+  return ::ConstantRangePatterns::{lookup}(bw, args, kTables, std::size(kTables));
 }}
 }}
 """
@@ -383,7 +399,7 @@ def build_table_transformers(
     tsv_files = sorted(table_dir.glob("*.tsv"))
 
     stats: dict[AbstractDomain, dict[str, int]] = defaultdict(
-        lambda: {"stub": 0, "inline": 0, "blob": 0, "cr_table": 0, "rows": 0}
+        lambda: {"stub": 0, "inline": 0, "blob": 0, "rows": 0}
     )
     for path in tsv_files:
         pid, domain, arity, groups = _read_table_tsv(path)
@@ -405,15 +421,15 @@ def build_table_transformers(
                 transformers[domain][pid] = render_cr_top(pid, arity, domain)
                 stats[domain]["stub"] += 1
             else:
-                transformers[domain][pid] = emit_cr_table(pid, arity, groups, domain)
-                stats[domain]["cr_table"] += 1
+                transformers[domain][pid] = emit_cr_blob(pid, arity, groups, domain)
+                stats[domain]["blob"] += 1
 
     print(f"Processed {len(tsv_files)} TSVs from {table_dir}:")
     for domain in sorted(stats.keys(), key=str):
         s = stats[domain]
         print(
             f"  {domain}: stub: {s['stub']}  inline: {s['inline']}  "
-            f"blob: {s['blob']}  cr_table: {s['cr_table']}  (rows: {s['rows']})"
+            f"blob: {s['blob']}  (rows: {s['rows']})"
         )
 
     return transformers
