@@ -206,23 +206,28 @@ def _aggregate_dags(slice_dir: Path, jobs: int) -> None:
 
 
 def _merge_histograms(hist_dir: Path, patterns_dir: Path) -> None:
-    """Merge per-input .hist shards into ranked per-pattern TSVs.
+    """Merge per-input .hist shards into per-pattern TSVs.
 
-    Each shard line is: <domain> <id> <bw> <arg_0> <arg_1> ... <count> <bits_added> <bottom>
-    (tab-separated). We sum count/bits_added/bottom across shards per
-    (domain, id, bw, args), then per domain/id emit <name>.tsv ranked by count desc.
+    Each shard line is: <domain> <id> <bw> <arg_0> <arg_1> ... <count>
+    followed by optional ignored fields. Counts are summed across shards per
+    (domain, id, bw, args), then emitted sorted by count desc.
     """
     domain_meta = {
         "kb": ("", AbstractDomain.KnownBits),
         "scr": ("SCR", AbstractDomain.SConstRange),
         "ucr": ("UCR", AbstractDomain.UConstRange),
     }
-    names: dict[str, dict[int, tuple[str, str]]] = {}
+    names: dict[str, dict[int, tuple[str, str, int]]] = {}
     for domain, (prefix, _) in domain_meta.items():
         if prefix:
             stems = sorted(p.stem for p in patterns_dir.glob(f"{prefix}*.inc"))
             names[domain] = {
-                i: (stem, stem.removeprefix(prefix)) for i, stem in enumerate(stems)
+                i: (
+                    stem,
+                    stem.removeprefix(prefix),
+                    PatternDag.from_id(stem.removeprefix(prefix)).num_args,
+                )
+                for i, stem in enumerate(stems)
             }
         else:
             stems = sorted(
@@ -230,10 +235,13 @@ def _merge_histograms(hist_dir: Path, patterns_dir: Path) -> None:
                 for p in patterns_dir.glob("*.inc")
                 if not p.stem.startswith(("SCR", "UCR"))
             )
-            names[domain] = {i: (stem, stem) for i, stem in enumerate(stems)}
+            names[domain] = {
+                i: (stem, stem, PatternDag.from_id(stem).num_args)
+                for i, stem in enumerate(stems)
+            }
 
-    # (domain, id) -> {(bw, args-tuple) -> [count, bits_added, bottom]}
-    acc: dict[tuple[str, int], dict[tuple[int, tuple[str, ...]], list[int]]] = (
+    # (domain, id) -> {(bw, args-tuple) -> count}
+    acc: dict[tuple[str, int], dict[tuple[int, tuple[str, ...]], int]] = (
         collections.defaultdict(dict)
     )
     shards = sorted((hist_dir / "shards").rglob("*.hist"))
@@ -244,25 +252,21 @@ def _merge_histograms(hist_dir: Path, patterns_dir: Path) -> None:
                 domain = parts[0]
                 pid = int(parts[1])
                 bw = int(parts[2])
-                count, bits_added, bottom = (
-                    int(parts[-3]),
-                    int(parts[-2]),
-                    int(parts[-1]),
-                )
-                args = tuple(parts[3:-3])
-                row = acc[(domain, pid)].setdefault((bw, args), [0, 0, 0])
-                row[0] += count
-                row[1] += bits_added
-                row[2] += bottom
+                arity = names[domain][pid][2]
+                args = tuple(parts[3 : 3 + arity])
+                count = int(parts[3 + arity])
+                key = (bw, args)
+                acc[(domain, pid)][key] = acc[(domain, pid)].get(key, 0) + count
 
     n_tables = 0
     for (domain, pid), rows in acc.items():
         # The filename is the bare pattern id (no `pattern_` prefix); the YAML
         # header's `op` field carries the decoded expression for readability.
-        name, pattern_id = names[domain].get(pid, (f"{domain}_{pid:03d}", f"{pid:03d}"))
+        name, pattern_id, arity = names[domain].get(
+            pid, (f"{domain}_{pid:03d}", f"{pid:03d}", 0)
+        )
         pattern = PatternDag.from_id(pattern_id)
-        arity = max(len(args) for _, args in rows) if rows else 0
-        ranked = sorted(rows.items(), key=lambda kv: -kv[1][0])
+        ranked = sorted(rows.items(), key=lambda kv: -kv[1])
         bw_counts = collections.Counter(bw for bw, _ in rows)
         out_path = hist_dir / f"{name}.tsv"
         metadata = EnumMetaData(
@@ -275,13 +279,9 @@ def _merge_histograms(hist_dir: Path, patterns_dir: Path) -> None:
             hbw=[(bw, count, 0) for bw, count in sorted(bw_counts.items())],
         )
         records: list[tuple[object, ...]] = []
-        for rank, ((bw, args), (count, bits_added, bottom)) in enumerate(ranked, 1):
-            records.append((bw, rank, count, *args, bits_added, bottom))
-        columns = (
-            ["bw", "rank", "count"]
-            + [f"arg_{i}" for i in range(arity)]
-            + ["bits_added", "bottom"]
-        )
+        for (bw, args), count in ranked:
+            records.append((bw, count, *args))
+        columns = ["bw", "count"] + [f"arg_{i}" for i in range(arity)]
         frame = pd.DataFrame.from_records(records, columns=columns)
         EnumData(metadata, frame).write_tsv(out_path)
         n_tables += 1

@@ -72,10 +72,12 @@ class FileStats:
         )
 
 
-def prune_group(rows: list[Row], domain: AbstractDomain, bw: int) -> list[bool]:
+def prune_group(rows: list[Row], domain: AbstractDomain, bw: int) -> list[int]:
     """Minimal-cover pruning for rows of one bitwidth.
     Row B is redundant if another row A matches every query B matches, and A's
     ideal is at least as precise as B's ideal under the domain's meet semantics.
+    The returned list maps each input row to the row that should receive its
+    count; kept rows map to themselves.
     """
     if domain == AbstractDomain.KnownBits:
         return _prune_knownbits_group(rows, domain, bw)
@@ -88,24 +90,30 @@ def prune_by_dominance[T](
     features: list[T],
     dominates: Callable[[T, T], bool],
     key: Callable[[T], Hashable] | None = None,
-) -> list[bool]:
-    keep = [True] * len(features)
+) -> list[int]:
+    target = list(range(len(features)))
     key_fn = key if key is not None else lambda feat: feat
-    seen: set[object] = set()
+    seen: dict[object, int] = {}
     for i, feat in enumerate(features):
         feat_key = key_fn(feat)
         if feat_key in seen:
-            keep[i] = False
+            target[i] = seen[feat_key]
         else:
-            seen.add(feat_key)
+            seen[feat_key] = i
 
-    order = [i for i in range(len(features)) if keep[i]]
+    order = [i for i, dst in enumerate(target) if dst == i]
     for B in order:
         for A in order:
             if A != B and dominates(features[A], features[B]):
-                keep[B] = False
+                target[B] = A
                 break
-    return keep
+
+    def resolve(i: int) -> int:
+        while target[i] != i:
+            i = target[i]
+        return i
+
+    return [resolve(i) for i in range(len(features))]
 
 
 def row_int(row: Any, col: str) -> int:
@@ -114,7 +122,7 @@ def row_int(row: Any, col: str) -> int:
 
 def _prune_knownbits_group(
     rows: list[Row], domain: AbstractDomain, bw: int
-) -> list[bool]:
+) -> list[int]:
     # Per-row masks: combined arg (zero/one) masks, ideal (zero/one) masks, and
     # the count of known arg bits (a dominator can only have <= as many).
     feats: list[KBFeature] = []
@@ -146,7 +154,7 @@ def _prune_knownbits_group(
 
 def _prune_const_range_group(
     rows: list[Row], domain: AbstractDomain, bw: int
-) -> list[bool]:
+) -> list[int]:
     def contains(outer: AbsValue, inner: AbsValue) -> bool:
         if inner is None:
             return True
@@ -218,13 +226,24 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
     cap = options.max_rows_per_bw
     keep_positions: list[int] = []
     kept_by_bw: dict[int, int] = {}
+    merged_counts: dict[int, int] = {}
+    has_count = "count" in frame.columns
     for bw, grp in groups.items():
-        flags = (
+        targets = (
             prune_group([(a, d) for _, a, d in grp], data.metadata.domain, bw)
             if options.prune_subsumed
-            else [True] * len(grp)
+            else list(range(len(grp)))
         )
-        kept = [pos for (pos, _, _), keep in zip(grp, flags) if keep]
+        if has_count:
+            for local_idx, target_idx in enumerate(targets):
+                if local_idx == target_idx:
+                    continue
+                dst_pos = grp[target_idx][0]
+                src_pos = grp[local_idx][0]
+                if dst_pos not in merged_counts:
+                    merged_counts[dst_pos] = row_int(frame.iloc[dst_pos], "count")
+                merged_counts[dst_pos] += row_int(frame.iloc[src_pos], "count")
+        kept = [pos for i, (pos, _, _) in enumerate(grp) if targets[i] == i]
         n_subsumed += len(grp) - len(kept)
         if cap and len(kept) > cap:
             n_capped += len(kept) - cap
@@ -248,6 +267,11 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
             largest_bw=top_bw,
             largest_bw_rows=top_bw_rows,
         )
+
+    if merged_counts:
+        frame = frame.copy()
+        for pos, count in merged_counts.items():
+            frame.at[pos, "count"] = count
 
     kept_frame = frame.iloc[sorted(keep_positions)].reset_index(drop=True)
     EnumData(data.metadata, kept_frame).write_tsv(out_dir / path.name)
