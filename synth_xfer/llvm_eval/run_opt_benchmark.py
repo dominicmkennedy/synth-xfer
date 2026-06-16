@@ -19,6 +19,8 @@ from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer._util.tsv import EnumData, EnumMetaData
 
+sys.setrecursionlimit(100000)
+
 # Counters whose values vary run-to-run; excluded from the aggregate so repeated
 # runs are comparable.
 STATS_NONDETER_KEYS = {
@@ -36,7 +38,7 @@ STATS_NONDETER_KEYS = {
     "simplifycfg.NumSimpl",
 }
 
-RunMode = Literal["stats", "histogram", "slice-kb", "slice-cr"]
+RunMode = Literal["stats", "histogram", "slice-kb", "slice-ucr", "slice-scr"]
 RunStatus = Literal["success", "fail", "timeout", "crash"]
 OptResult = tuple[Path, RunStatus, dict[str, float], str]
 
@@ -99,8 +101,10 @@ def run_opt(input_file: Path) -> OptResult:
             cmd += [f"-value-tracking-pattern-histogram={hist_path}"]
         elif _MODE == "slice-kb":
             cmd += ["-debug-only=dag-slicer", "-enable-knownbits-pattern-mining"]
-        elif _MODE == "slice-cr":
-            cmd += ["-debug-only=dag-slicer", "-enable-constantrange-pattern-mining"]
+        elif _MODE == "slice-ucr":
+            cmd += ["-debug-only=dag-slicer", "-enable-uconstrange-pattern-mining"]
+        elif _MODE == "slice-scr":
+            cmd += ["-debug-only=dag-slicer", "-enable-sconstrange-pattern-mining"]
 
         ret = subprocess.run(
             cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=600.0, env={}
@@ -108,11 +112,9 @@ def run_opt(input_file: Path) -> OptResult:
         if ret.returncode != 0:
             return (input_file, "fail", {}, ret.stderr.decode())
 
-        if _MODE in ("slice-kb", "slice-cr"):
+        if _MODE in ("slice-kb", "slice-ucr", "slice-scr"):
             assert _SLICE_DIR is not None
-            debug_output = _SLICE_DIR / _rel_stem(input_file).with_suffix(
-                ".dag-slicer.log"
-            )
+            debug_output = _SLICE_DIR / _rel_stem(input_file).with_suffix(".dag")
             debug_output.parent.mkdir(parents=True, exist_ok=True)
             debug_output.write_bytes(ret.stderr)
             return (input_file, "success", {}, "")
@@ -145,52 +147,126 @@ def _format_benchmark_rel(input_file: Path, bench_dir: Path) -> str:
     return str(Path(*parts))
 
 
+def _render_blocks(
+    items: list[tuple[str, int]],
+) -> tuple[collections.Counter, dict[str, int]]:
+    counts: collections.Counter = collections.Counter()
+    size: dict[str, int] = {}
+    for line, cnt in items:
+        dag = PatternDag.from_ssa(line)
+        key = str(dag)
+        counts[key] += cnt
+        size[key] = len(dag.nodes)
+
+    return counts, size
+
+
+def _count_blocks(path: str) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    with open(path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("%0"):
+                counts[line] = counts.get(line, 0) + 1
+    return counts
+
+
+def _aggregate_dags(slice_dir: Path, jobs: int) -> None:
+    """Collapse the per-file .dag logs under `slice_dir` into distinct DAGs and write dags.tsv
+
+    Two-pass for speed
+    1) count records by raw line text (count_blocks)
+    2) cannoncal renderings (render_blocks)
+    """
+    dag_files = [str(p) for p in slice_dir.rglob("*.dag")]
+    print(f"aggregating {len(dag_files)} .dag logs with {jobs} workers ...")
+
+    raw: collections.Counter = collections.Counter()
+    with Pool(jobs) as pool:
+        for local in pool.imap_unordered(_count_blocks, dag_files, chunksize=16):
+            raw.update(local)
+    print(f"counted {sum(raw.values())} records, {len(raw)} distinct DAG lines")
+
+    dag_counts: collections.Counter = collections.Counter()
+    dag_size: dict[str, int] = {}
+    items = list(raw.items())
+    chunk = max(1, len(items) // (jobs * 8) + 1)
+    chunks = [items[i : i + chunk] for i in range(0, len(items), chunk)]
+    with Pool(jobs) as pool:
+        for counts, size in pool.imap_unordered(_render_blocks, chunks):
+            dag_counts.update(counts)
+            dag_size.update(size)
+
+    out = slice_dir / "dags.tsv"
+    with out.open("w") as o:
+        o.write("count\tsize\tpattern\n")
+        for pat, n in sorted(dag_counts.items(), key=lambda kv: (-kv[1], kv[0])):
+            o.write(f"{n}\t{dag_size[pat]}\t{pat}\n")
+    print(f"wrote {out} ({len(dag_counts)} distinct DAGs)")
+
+
 def _merge_histograms(hist_dir: Path, patterns_dir: Path) -> None:
     """Merge per-input .hist shards into ranked per-pattern TSVs.
 
-    Each shard line is: <id> <arg_0> <arg_1> ... <count> <bits_added> <conflict>
-    (tab-separated). We sum count/bits_added/conflict across shards per
-    (id, args), then per id emit pattern_<name>.tsv ranked by count desc.
+    Each shard line is: <domain> <id> <bw> <arg_0> <arg_1> ... <count> <bits_added> <bottom>
+    (tab-separated). We sum count/bits_added/bottom across shards per
+    (domain, id, bw, args), then per domain/id emit <name>.tsv ranked by count desc.
     """
-    names = dict(enumerate(sorted(p.stem for p in patterns_dir.glob("*.inc"))))
-    # id -> {args-tuple -> [count, bits_added, conflict]}
-    acc: dict[int, dict[tuple[str, ...], list[int]]] = collections.defaultdict(dict)
+    domain_meta = {
+        "kb": ("", AbstractDomain.KnownBits),
+        "scr": ("SCR", AbstractDomain.SConstRange),
+        "ucr": ("UCR", AbstractDomain.UConstRange),
+    }
+    names: dict[str, dict[int, tuple[str, str]]] = {}
+    for domain, (prefix, _) in domain_meta.items():
+        if prefix:
+            stems = sorted(p.stem for p in patterns_dir.glob(f"{prefix}*.inc"))
+            names[domain] = {
+                i: (stem, stem.removeprefix(prefix)) for i, stem in enumerate(stems)
+            }
+        else:
+            stems = sorted(
+                p.stem
+                for p in patterns_dir.glob("*.inc")
+                if not p.stem.startswith(("SCR", "UCR"))
+            )
+            names[domain] = {i: (stem, stem) for i, stem in enumerate(stems)}
+
+    # (domain, id) -> {(bw, args-tuple) -> [count, bits_added, bottom]}
+    acc: dict[tuple[str, int], dict[tuple[int, tuple[str, ...]], list[int]]] = (
+        collections.defaultdict(dict)
+    )
     shards = sorted((hist_dir / "shards").rglob("*.hist"))
     for shard in shards:
         with shard.open() as f:
             for line in f:
                 parts = line.rstrip("\n").split("\t")
-                if len(parts) < 4:
-                    continue
-                pid = int(parts[0])
-                count, bits_added, conflict = (
+                domain = parts[0]
+                pid = int(parts[1])
+                bw = int(parts[2])
+                count, bits_added, bottom = (
                     int(parts[-3]),
                     int(parts[-2]),
                     int(parts[-1]),
                 )
-                args = tuple(parts[1:-3])
-                row = acc[pid].setdefault(args, [0, 0, 0])
+                args = tuple(parts[3:-3])
+                row = acc[(domain, pid)].setdefault((bw, args), [0, 0, 0])
                 row[0] += count
                 row[1] += bits_added
-                row[2] += conflict
+                row[2] += bottom
 
     n_tables = 0
-    for pid, rows in acc.items():
+    for (domain, pid), rows in acc.items():
         # The filename is the bare pattern id (no `pattern_` prefix); the YAML
         # header's `op` field carries the decoded expression for readability.
-        name = names.get(pid, f"{pid:03d}")
-        pattern = PatternDag.from_id(name)
-        arity = max(len(a) for a in rows) if rows else 0
+        name, pattern_id = names[domain].get(pid, (f"{domain}_{pid:03d}", f"{pid:03d}"))
+        pattern = PatternDag.from_id(pattern_id)
+        arity = max(len(args) for _, args in rows) if rows else 0
         ranked = sorted(rows.items(), key=lambda kv: -kv[1][0])
-        # distinct-row count per bitwidth for hbw. The instance width N is the
-        # width of the iN-typed operands; i1 operands (e.g. a select condition or
-        # an icmp result feeding another op) are always length 1, so taking the
-        # max across a row recovers N for width-heterogeneous patterns instead of
-        # latching onto a leading i1 arg.
-        bw_counts = collections.Counter(max(len(x) for x in a) for a in rows if a)
+        bw_counts = collections.Counter(bw for bw, _ in rows)
         out_path = hist_dir / f"{name}.tsv"
         metadata = EnumMetaData(
-            domain=AbstractDomain.KnownBits,
+            domain=domain_meta[domain][1],
             op=pattern,
             arity=arity,
             seed=None,
@@ -199,13 +275,12 @@ def _merge_histograms(hist_dir: Path, patterns_dir: Path) -> None:
             hbw=[(bw, count, 0) for bw, count in sorted(bw_counts.items())],
         )
         records: list[tuple[object, ...]] = []
-        for rank, (args, (count, bits_added, conflict)) in enumerate(ranked, 1):
-            bw = max(len(a) for a in args) if args else 0
-            records.append((bw, rank, count, *args, bits_added, conflict))
+        for rank, ((bw, args), (count, bits_added, bottom)) in enumerate(ranked, 1):
+            records.append((bw, rank, count, *args, bits_added, bottom))
         columns = (
             ["bw", "rank", "count"]
             + [f"arg_{i}" for i in range(arity)]
-            + ["bits_added", "conflict"]
+            + ["bits_added", "bottom"]
         )
         frame = pd.DataFrame.from_records(records, columns=columns)
         EnumData(metadata, frame).write_tsv(out_path)
@@ -244,7 +319,12 @@ def main() -> None:
         help="Run pattern slicer over computeKnownBits",
     )
     p.add_argument(
-        "--slice-cr",
+        "--slice-ucr",
+        action="store_true",
+        help="Run pattern slicer over computeConstantRange",
+    )
+    p.add_argument(
+        "--slice-scr",
         action="store_true",
         help="Run pattern slicer over computeConstantRange",
     )
@@ -253,9 +333,9 @@ def main() -> None:
         type=Path,
         default=None,
         help="If set, have opt accumulate a per-input histogram of pattern "
-        "inputs (id + operand known bits, summed bits_added/conflict) and "
+        "inputs (domain + id + width + operands, summed bits_added/bottom) and "
         "write shards under <dir>/shards/, then merge them into per-pattern "
-        "<dir>/pattern_<id>.tsv. Avoids the giant raw [pNNN] logs entirely.",
+        "<dir>/<id>.tsv. Avoids the giant raw [pNNN] logs entirely.",
     )
     p.add_argument(
         "--jobs",
@@ -269,11 +349,12 @@ def main() -> None:
         args.stats is not None,
         args.pattern_hist is not None,
         args.slice_kb,
-        args.slice_cr,
+        args.slice_ucr,
+        args.slice_scr,
     ]
     if sum(selected_modes) != 1:
         p.error(
-            "exactly one of --stats, --pattern-hist, --slice-kb, or --slice-cr is required"
+            "exactly one of --stats, --pattern-hist, --slice-kb, --slice-ucr, or --slice-scr is required"
         )
 
     if args.stats is not None:
@@ -282,8 +363,12 @@ def main() -> None:
         mode = "histogram"
     elif args.slice_kb:
         mode = "slice-kb"
+    elif args.slice_ucr:
+        mode = "slice-ucr"
+    elif args.slice_scr:
+        mode = "slice-scr"
     else:
-        mode = "slice-cr"
+        assert False
 
     bench_dir = args.bench_path / "bench"
     if not bench_dir.is_dir():
@@ -328,7 +413,7 @@ def main() -> None:
     else:
         output_dir = Path(__file__).resolve().parent / "outputs" / mode
     output_dir.mkdir(parents=True, exist_ok=True)
-    slice_dir = output_dir if mode in ("slice-kb", "slice-cr") else None
+    slice_dir = output_dir if mode in ("slice-kb", "slice-ucr", "slice-scr") else None
     test_log_path = output_dir / "test.log"
 
     stats_acc: dict[str, float] = {}
@@ -375,6 +460,10 @@ def main() -> None:
 
     if n_timeout:
         print(f"note: {n_timeout} file(s) timed out (non-fatal)", file=sys.stderr)
+
+    if mode in ("slice-kb", "slice-ucr", "slice-scr"):
+        assert slice_dir is not None
+        _aggregate_dags(slice_dir, args.jobs)
 
     sys.exit(1 if fail else 0)
 

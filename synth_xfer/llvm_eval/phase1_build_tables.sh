@@ -33,10 +33,8 @@ TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
 echo ">>> [1/5] stub transformers -> dispatcher"
-python3 -m synth_xfer.llvm_eval.build_xfer \
-    --pat-list "$PAT_LIST" --output-dir "$TMP/xfer" -d KnownBits
-python3 -m synth_xfer.llvm_eval.generate_matcher \
-    --input-dir "$TMP/xfer" --llvm-dir "$LLVM_DIR"
+python3 -m synth_xfer.llvm_eval.generate_xfers stubs \
+    --patterns "$PAT_LIST" -d KnownBits --llvm-dir "$LLVM_DIR"
 
 echo ">>> [2/5] rebuild opt"
 ninja -C "$LLVM_DIR/build" opt
