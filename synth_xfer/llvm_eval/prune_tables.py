@@ -120,9 +120,7 @@ def row_int(row: Any, col: str) -> int:
     return int(cast(int, row[col]))
 
 
-def _prune_knownbits_group(
-    rows: list[Row], domain: AbstractDomain, bw: int
-) -> list[int]:
+def _prune_knownbits_group(rows: list[Row], domain: AbstractDomain, bw: int) -> list[int]:
     # Per-row masks: combined arg (zero/one) masks, ideal (zero/one) masks, and
     # the count of known arg bits (a dominator can only have <= as many).
     feats: list[KBFeature] = []
