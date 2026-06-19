@@ -107,7 +107,7 @@ def run_opt(input_file: Path) -> OptResult:
             cmd += ["-debug-only=dag-slicer", "-enable-sconstrange-pattern-mining"]
 
         ret = subprocess.run(
-            cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=600.0, env={}
+            cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=1800.0, env={}
         )
         if ret.returncode != 0:
             return (input_file, "fail", {}, ret.stderr.decode())

@@ -159,12 +159,28 @@ def _kb_masks(s: str, bw: int) -> tuple[int, int]:
 def build_stub_transformers(
     patterns: Path,
     domain: AbstractDomain,
+    top: int | None,
+    patterns_per_root: int | None,
 ) -> dict[str, str]:
     with patterns.open(newline="") as f:
         reader = csv.DictReader(f, delimiter="\t")
         if not reader.fieldnames or "pattern" not in reader.fieldnames:
             sys.exit(f"{patterns}: no 'pattern' column")
         dags = [PatternDag(row["pattern"].strip()) for row in reader]
+
+    if top is not None:
+        dags = dags[:top]
+
+    if patterns_per_root is not None:
+        root_counts: dict[PatternOp, int] = defaultdict(int)
+        capped_dags: list[PatternDag] = []
+        for dag in dags:
+            root = dag.nodes[dag.result.index].op
+            if root_counts[root] >= patterns_per_root:
+                continue
+            root_counts[root] += 1
+            capped_dags.append(dag)
+        dags = capped_dags
 
     if domain == AbstractDomain.KnownBits:
         return {dag.to_id(): render_kb_top(dag.to_id(), dag.num_args) for dag in dags}
@@ -868,6 +884,18 @@ def main() -> None:
         required=True,
         help="Path to LLVM project repo root",
     )
+    stubs.add_argument(
+        "--top",
+        type=int,
+        default=None,
+        help="generate stubs only for the first N pattern rows",
+    )
+    stubs.add_argument(
+        "--patterns-per-root",
+        type=int,
+        default=None,
+        help="maximum number of stubs to generate for each root op",
+    )
 
     tables = subcommands.add_parser("tables", help="generate lookup-table xfers")
     tables.add_argument(
@@ -892,7 +920,12 @@ def main() -> None:
     args = ap.parse_args()
     if args.mode == "stubs":
         d = AbstractDomain[args.domain]
-        transformers = build_stub_transformers(args.patterns, d)
+        transformers = build_stub_transformers(
+            args.patterns,
+            d,
+            args.top,
+            args.patterns_per_root,
+        )
         wire_transformers(args.llvm_dir, transformers, d)
     else:
         transformers_by_domain = build_table_transformers(

@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 from collections import Counter
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 import csv
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,25 +17,6 @@ from synth_xfer._util.pattern_dsl import (
     PatternNode,
     PatternRef,
 )
-
-
-@dataclass(frozen=True, slots=True)
-class LoadedPatterns:
-    counts: dict[str, int]
-    rows: int
-    canonical_collisions: int
-    canonical_collision_count_delta: int
-
-
-@dataclass(frozen=True, slots=True)
-class RefineStats:
-    total_refinement_results: int
-    changed_refinement_results: int
-    unchanged_refinement_results: int
-    sources_with_changed_refinements: int
-    sources_with_no_output: int
-    refined_patterns_already_in_input: int
-    refined_patterns_added: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,11 +39,8 @@ def _result_type(dag: PatternDag, ref: PatternRef) -> Attribute:
     return dag.nodes[ref.index].op.spec.result_type
 
 
-def read_pattern_counts(path: Path) -> LoadedPatterns:
+def read_pattern_counts(path: Path) -> dict[str, int]:
     counts: dict[str, int] = {}
-    rows = 0
-    canonical_collisions = 0
-    canonical_collision_count_delta = 0
 
     with path.open(newline="") as f:
         reader = csv.DictReader(f, delimiter="\t")
@@ -70,88 +48,109 @@ def read_pattern_counts(path: Path) -> LoadedPatterns:
         for row in reader:
             pattern = str(PatternDag(row["pattern"]))
             count = int(row["count"])
-            rows += 1
-            if pattern in counts:
-                canonical_collisions += 1
-                canonical_collision_count_delta += count
-                counts[pattern] += count
-            else:
-                counts[pattern] = count
+            counts[pattern] = counts.get(pattern, 0) + count
 
-    return LoadedPatterns(
-        counts=counts,
-        rows=rows,
-        canonical_collisions=canonical_collisions,
-        canonical_collision_count_delta=canonical_collision_count_delta,
-    )
-
-
-def enumerate_subpattern_counts(
-    dag_counts: dict[str, int],
-    min_size: int,
-    max_size: int,
-) -> Counter[str]:
-    counts: Counter[str] = Counter()
-    for pattern, count in dag_counts.items():
-        dag = PatternDag(pattern)
-        for subdag in subdags_of(dag, min_size, max_size):
-            counts[str(subdag)] += count
     return counts
 
 
-def refine_pattern_counts(
-    pattern_counts: dict[str, int] | Counter[str],
+def _cut_projection_texts(dag: PatternDag) -> set[str]:
+    projections: set[str] = set()
+    memo: dict[tuple[PatternRef, int], list[tuple[int, Subpattern]]] = {}
+    for _, sub in _subs(dag, dag.result, len(dag.nodes), memo):
+        if isinstance(sub, KeepSubpattern):
+            projections.add(str(_build_subdag(dag, sub)))
+    return projections
+
+
+def _accept_refinement(
+    source_text: str,
+    refined_text: str,
+    input_counts: dict[str, int],
+    projection_cache: dict[str, set[str]],
+    dag_of: Callable[[str], PatternDag],
+) -> bool:
+    if refined_text in input_counts:
+        return True
+    if refined_text == source_text:
+        return False
+
+    projections = projection_cache.get(source_text)
+    if projections is None:
+        projections = _cut_projection_texts(dag_of(source_text))
+        projection_cache[source_text] = projections
+    return refined_text in projections
+
+
+def process_pattern_counts(
+    input_counts: dict[str, int],
     domain: AbstractDomain,
-) -> tuple[dict[str, int], RefineStats]:
+    min_size: int,
+    max_size: int,
+) -> tuple[dict[str, int], int]:
+    dag_cache: dict[str, PatternDag] = {}
+    refine_cache: dict[str, tuple[str, ...]] = {}
+
+    def dag_of(pattern_text: str) -> PatternDag:
+        dag = dag_cache.get(pattern_text)
+        if dag is None:
+            dag = PatternDag(pattern_text)
+            dag_cache[pattern_text] = dag
+        return dag
+
+    def refined_texts(pattern_text: str) -> tuple[str, ...]:
+        refined = refine_cache.get(pattern_text)
+        if refined is None:
+            refined = tuple(
+                str(pattern) for pattern in refine_pattern(dag_of(pattern_text), domain)
+            )
+            refine_cache[pattern_text] = refined
+        return refined
+
+    subpattern_counts: Counter[str] = Counter()
+    source_subpatterns: dict[str, set[str]] = {}
+    for source_text, source_count in input_counts.items():
+        source_dag = dag_of(source_text)
+        source_counts: Counter[str] = Counter()
+        for subdag in subdags_of(source_dag, min_size, max_size):
+            source_counts[str(subdag)] += source_count
+        subpattern_counts.update(source_counts)
+        source_subpatterns[source_text] = set(source_counts)
+
     refined_counts: dict[str, int] = {}
-    added_patterns: set[str] = set()
-    existing_refined_patterns: set[str] = set()
-    total_refinement_results = 0
-    unchanged_refinement_results = 0
-    changed_refinement_results = 0
-    sources_with_changed_refinements = 0
-    sources_with_no_output = 0
+    accepted_by_subpattern: dict[str, tuple[str, ...]] = {}
+    projection_cache: dict[str, set[str]] = {}
 
-    for pattern_text, count in pattern_counts.items():
-        pattern = PatternDag(pattern_text)
-        refined_patterns = refine_pattern(pattern, domain)
-        if not refined_patterns:
-            sources_with_no_output += 1
+    for pattern_text, count in subpattern_counts.items():
+        accepted: list[str] = []
+        for refined_text in refined_texts(pattern_text):
+            if not _accept_refinement(
+                pattern_text,
+                refined_text,
+                input_counts,
+                projection_cache,
+                dag_of,
+            ):
+                continue
 
-        source_changed = False
-        for refined_pattern in refined_patterns:
-            total_refinement_results += 1
-            refined_text = str(refined_pattern)
-            if refined_text == pattern_text:
-                unchanged_refinement_results += 1
-            else:
-                changed_refinement_results += 1
-                source_changed = True
-
-            if refined_text not in pattern_counts:
-                refined_count = count
-                added_patterns.add(refined_text)
-            else:
-                existing_refined_patterns.add(refined_text)
-                refined_count = max(count, pattern_counts[refined_text])
-
+            refined_count = (
+                max(count, input_counts[refined_text])
+                if refined_text in input_counts
+                else count
+            )
             refined_counts[refined_text] = max(
                 refined_counts.get(refined_text, 0),
                 refined_count,
             )
+            accepted.append(refined_text)
+        accepted_by_subpattern[pattern_text] = tuple(accepted)
 
-        if source_changed:
-            sources_with_changed_refinements += 1
-
-    return refined_counts, RefineStats(
-        total_refinement_results=total_refinement_results,
-        changed_refinement_results=changed_refinement_results,
-        unchanged_refinement_results=unchanged_refinement_results,
-        sources_with_changed_refinements=sources_with_changed_refinements,
-        sources_with_no_output=sources_with_no_output,
-        refined_patterns_already_in_input=len(existing_refined_patterns),
-        refined_patterns_added=len(added_patterns),
+    dropped_patterns = sum(
+        1
+        for subpatterns in source_subpatterns.values()
+        if not any(accepted_by_subpattern.get(pattern) for pattern in subpatterns)
     )
+
+    return refined_counts, dropped_patterns
 
 
 def _build_subdag(dag: PatternDag, sub: Subpattern) -> PatternDag:
@@ -278,39 +277,26 @@ def main() -> None:
     sys.setrecursionlimit(100000)
     domain = AbstractDomain[args.domain]
 
-    loaded = read_pattern_counts(args.input)
-    subpattern_counts = enumerate_subpattern_counts(
-        loaded.counts,
+    input_counts = read_pattern_counts(args.input)
+    refined_counts, dropped_patterns = process_pattern_counts(
+        input_counts,
+        domain,
         args.min_size,
         args.max_size,
     )
-    refined_counts, refine_stats = refine_pattern_counts(subpattern_counts, domain)
     written = write_pattern_counts(args.output, refined_counts, args.top)
+    unique_inputs = len(input_counts)
+    percent_dropped = (
+        0.0 if unique_inputs == 0 else 100.0 * dropped_patterns / unique_inputs
+    )
+    percent_original = 0.0 if unique_inputs == 0 else 100.0 * written / unique_inputs
 
     print("Stats:")
-    print(f"  Input DAG rows: {loaded.rows}")
-    print(f"  Canonical input DAGs: {len(loaded.counts)}")
-    print(f"  Canonical input collisions: {loaded.canonical_collisions}")
-    print(
-        "  Counts added by canonical input collisions: "
-        f"{loaded.canonical_collision_count_delta}"
-    )
-    print(f"  Enumerated subpatterns: {len(subpattern_counts)}")
-    print(f"  Refined output patterns: {len(refined_counts)}")
-    print(f"  Output rows written: {written}")
-    print(f"  Total refinement results: {refine_stats.total_refinement_results}")
-    print(f"  Changed refinement results: {refine_stats.changed_refinement_results}")
-    print(f"  Unchanged refinement results: {refine_stats.unchanged_refinement_results}")
-    print(
-        "  Sources with changed refinements: "
-        f"{refine_stats.sources_with_changed_refinements}"
-    )
-    print(f"  Sources dropped by refinement: {refine_stats.sources_with_no_output}")
-    print(
-        "  Refined patterns already in input: "
-        f"{refine_stats.refined_patterns_already_in_input}"
-    )
-    print(f"  Refined patterns added: {refine_stats.refined_patterns_added}")
+    print(f"  Number of Unique inputs: {unique_inputs}")
+    print(f"  Number of Dropped patterns: {dropped_patterns}")
+    print(f"  Percent dropped by refinement: {percent_dropped:.2f}%")
+    print(f"  Number of patterns after refinement: {written}")
+    print(f"  Percent of original after refinement: {percent_original:.2f}%")
     print(f"  Wrote: {args.output}")
 
 
