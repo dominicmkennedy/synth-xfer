@@ -161,12 +161,18 @@ def build_stub_transformers(
     domain: AbstractDomain,
     top: int | None,
     patterns_per_root: int | None,
+    count_at_least: int | None,
 ) -> dict[str, str]:
     with patterns.open(newline="") as f:
         reader = csv.DictReader(f, delimiter="\t")
         if not reader.fieldnames or "pattern" not in reader.fieldnames:
             sys.exit(f"{patterns}: no 'pattern' column")
-        dags = [PatternDag(row["pattern"].strip()) for row in reader]
+
+        dags: list[PatternDag] = []
+        for row in reader:
+            if count_at_least is not None and int(row["count"]) < count_at_least:
+                continue
+            dags.append(PatternDag(row["pattern"].strip()))
 
     if patterns_per_root is not None:
         root_counts: dict[PatternOp, int] = defaultdict(int)
@@ -896,6 +902,12 @@ def main() -> None:
         default=None,
         help="maximum number of stubs to generate for each root op",
     )
+    stubs.add_argument(
+        "--count-at-least",
+        type=int,
+        default=None,
+        help="generate stubs only for patterns with count >= this value",
+    )
 
     tables = subcommands.add_parser("tables", help="generate lookup-table xfers")
     tables.add_argument(
@@ -925,6 +937,7 @@ def main() -> None:
             d,
             args.top,
             args.patterns_per_root,
+            args.count_at_least,
         )
         wire_transformers(args.llvm_dir, transformers, d)
     else:
