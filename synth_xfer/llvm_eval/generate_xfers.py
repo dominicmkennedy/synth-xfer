@@ -168,9 +168,6 @@ def build_stub_transformers(
             sys.exit(f"{patterns}: no 'pattern' column")
         dags = [PatternDag(row["pattern"].strip()) for row in reader]
 
-    if top is not None:
-        dags = dags[:top]
-
     if patterns_per_root is not None:
         root_counts: dict[PatternOp, int] = defaultdict(int)
         capped_dags: list[PatternDag] = []
@@ -181,6 +178,9 @@ def build_stub_transformers(
             root_counts[root] += 1
             capped_dags.append(dag)
         dags = capped_dags
+
+    if top is not None:
+        dags = dags[:top]
 
     if domain == AbstractDomain.KnownBits:
         return {dag.to_id(): render_kb_top(dag.to_id(), dag.num_args) for dag in dags}
