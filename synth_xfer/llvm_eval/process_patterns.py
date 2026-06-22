@@ -1,6 +1,6 @@
 from argparse import ArgumentParser
 from collections import Counter
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 import csv
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,17 +20,9 @@ from synth_xfer._util.pattern_dsl import (
 
 
 @dataclass(frozen=True, slots=True)
-class CutSubpattern:
-    ref: PatternRef
-
-
-@dataclass(frozen=True, slots=True)
-class KeepSubpattern:
-    node: PatternNode
-    children: tuple["Subpattern", ...]
-
-
-Subpattern = CutSubpattern | KeepSubpattern
+class _EnumState:
+    kept: frozenset[int]
+    cut: frozenset[int]
 
 
 def _result_type(dag: PatternDag, ref: PatternRef) -> Attribute:
@@ -54,12 +46,7 @@ def read_pattern_counts(path: Path) -> dict[str, int]:
 
 
 def _cut_projection_texts(dag: PatternDag) -> set[str]:
-    projections: set[str] = set()
-    memo: dict[tuple[PatternRef, int], list[tuple[int, Subpattern]]] = {}
-    for _, sub in _subs(dag, dag.result, len(dag.nodes), memo):
-        if isinstance(sub, KeepSubpattern):
-            projections.add(str(_build_subdag(dag, sub)))
-    return projections
+    return {str(subdag) for subdag in subdags_of(dag, 1, len(dag.nodes))}
 
 
 def _accept_refinement(
@@ -153,75 +140,98 @@ def process_pattern_counts(
     return refined_counts, dropped_patterns
 
 
-def _build_subdag(dag: PatternDag, sub: Subpattern) -> PatternDag:
-    """Materialise a sub-structure as a PatternDag. Cut points referring to the
-    same original ref share one ArgRef (shared-value identity); kept nodes each
-    get a fresh NodeRef (sharing is unfolded, matching the rendered pattern)."""
+def _build_subdag(dag: PatternDag, kept: frozenset[int]) -> PatternDag:
+    """Materialise a sub-DAG from global keep/cut decisions.
+
+    Each original NodeRef maps to exactly one rebuilt NodeRef when kept, or one
+    cut ArgRef when not kept. This preserves shared SSA identity.
+    """
     arg_types: list[Attribute] = []
     arg_of: dict[PatternRef, ArgRef] = {}
+    node_of: dict[NodeRef, NodeRef] = {}
     nodes: list[PatternNode] = []
 
-    def build(s: Subpattern) -> PatternRef:
-        if isinstance(s, CutSubpattern):
-            orig = s.ref
-            existing = arg_of.get(orig)
-            if existing is not None:
-                return existing
-            ref = ArgRef(len(arg_types))
-            arg_types.append(_result_type(dag, orig))
-            arg_of[orig] = ref
-            return ref
+    def cut_arg(orig: PatternRef) -> ArgRef:
+        existing = arg_of.get(orig)
+        if existing is not None:
+            return existing
+        ref = ArgRef(len(arg_types))
+        arg_types.append(_result_type(dag, orig))
+        arg_of[orig] = ref
+        return ref
 
-        operands = tuple(build(c) for c in s.children)
-        nr = NodeRef(len(nodes))
-        nodes.append(PatternNode(s.node.op, operands))
-        return nr
+    def build(ref: PatternRef) -> PatternRef:
+        if isinstance(ref, ArgRef):
+            return cut_arg(ref)
+        if ref.index not in kept:
+            return cut_arg(ref)
 
-    root = build(sub)
+        existing = node_of.get(ref)
+        if existing is not None:
+            return existing
+
+        node = dag.nodes[ref.index]
+        operands = tuple(build(operand) for operand in node.operands)
+        lowered = NodeRef(len(nodes))
+        node_of[ref] = lowered
+        nodes.append(PatternNode(node.op, operands))
+        return lowered
+
+    root = build(dag.result)
     assert isinstance(root, NodeRef)
     return PatternDag.from_parts(tuple(arg_types), tuple(nodes), root)
 
 
-def _subs(
-    dag: PatternDag,
-    ref: PatternRef,
-    cap: int,
-    memo: dict[tuple[PatternRef, int], list[tuple[int, Subpattern]]],
-) -> list[tuple[int, Subpattern]]:
-    """List of (n_ops, sub) for sub-structures rooted at ``ref`` with
-    ``n_ops <= cap``. Always includes the cut option. Memoised on (ref, cap)."""
-    key = (ref, cap)
-    if key in memo:
-        return memo[key]
-    out: list[tuple[int, Subpattern]] = [(0, CutSubpattern(ref))]
-    if isinstance(ref, NodeRef) and cap >= 1:
-        node = dag.nodes[ref.index]
-        child_opts = [_subs(dag, op, cap - 1, memo) for op in node.operands]
+def _enumerate_states(dag: PatternDag, max_size: int) -> set[_EnumState]:
+    root = dag.result.index
+    initial = _EnumState(frozenset((root,)), frozenset())
 
-        def combos(idx: int, used: int) -> Iterator[list[tuple[int, Subpattern]]]:
-            if idx == len(child_opts):
-                yield []
-                return
-            for s, sub in child_opts[idx]:
-                if used + s <= cap - 1:
-                    for rest in combos(idx + 1, used + s):
-                        rest.append((s, sub))
-                        yield rest
+    def expand_operands(
+        operands: tuple[PatternRef, ...],
+        state: _EnumState,
+    ) -> set[_EnumState]:
+        states = {state}
+        for operand in operands:
+            next_states: set[_EnumState] = set()
+            for current in states:
+                next_states.update(expand_ref(operand, current))
+            states = next_states
+        return states
 
-        for combo in combos(0, 0):
-            combo.reverse()
-            total = 1 + sum(s for s, _ in combo)
-            out.append((total, KeepSubpattern(node, tuple(sub for _, sub in combo))))
-    memo[key] = out
-    return out
+    def expand_ref(ref: PatternRef, state: _EnumState) -> set[_EnumState]:
+        if isinstance(ref, ArgRef):
+            return {state}
+
+        index = ref.index
+        if index in state.kept:
+            return expand_operands(dag.nodes[index].operands, state)
+        if index in state.cut:
+            return {state}
+
+        states = {_EnumState(state.kept, state.cut | frozenset((index,)))}
+        if len(state.kept) < max_size:
+            kept_state = _EnumState(state.kept | frozenset((index,)), state.cut)
+            states.update(expand_operands(dag.nodes[index].operands, kept_state))
+        return states
+
+    return expand_operands(dag.nodes[root].operands, initial)
 
 
 def subdags_of(dag: PatternDag, min_size: int, max_size: int) -> list[PatternDag]:
     result: list[PatternDag] = []
-    memo: dict[tuple[PatternRef, int], list[tuple[int, Subpattern]]] = {}
-    for size, sub in _subs(dag, dag.result, max_size, memo):
-        if isinstance(sub, KeepSubpattern) and size >= min_size:
-            result.append(_build_subdag(dag, sub))
+    seen: set[str] = set()
+
+    for state in _enumerate_states(dag, max_size):
+        if not min_size <= len(state.kept) <= max_size:
+            continue
+        subdag = _build_subdag(dag, state.kept)
+        text = str(subdag)
+        if text in seen:
+            continue
+        seen.add(text)
+        result.append(subdag)
+
+    result.sort(key=str)
     return result
 
 
