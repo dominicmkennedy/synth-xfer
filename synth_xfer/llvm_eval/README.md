@@ -53,13 +53,10 @@ OPT=$LLVM_DIR/build/bin/opt
 ```
 
 ```bash
-# 1. stub transformers -> dispatcher
-python3 -m synth_xfer.llvm_eval.build_xfer \
-    --pat-list llvm_results/test_patterns.tsv \
-    --output-dir outputs/test_pat/xfer \
-    -d KnownBits
-python3 -m synth_xfer.llvm_eval.generate_matcher \
-    --input-dir outputs/test_pat/xfer \
+# 1. stub transformers -> dispatcher (generated and wired into LLVM in one step)
+python3 -m synth_xfer.llvm_eval.generate_xfers stubs \
+    --patterns llvm_results/test_patterns.tsv \
+    -d KnownBits \
     --llvm-dir $LLVM_DIR
 
 # 2. rebuild opt
@@ -81,14 +78,10 @@ python3 -m synth_xfer.llvm_eval.prune_tables \
     --tsv-dir outputs/test_pat/tables \
     --out-dir outputs/test_pat/pruned
 
-# 6. table-backed transformers -> dispatcher (--include-helper needed for blobs) -> rebuild
-python3 -m synth_xfer.llvm_eval.build_xfer \
+# 6. table-backed transformers -> dispatcher (generated and wired in one step) -> rebuild
+python3 -m synth_xfer.llvm_eval.generate_xfers tables \
     --table-dir outputs/test_pat/pruned \
-    --output-dir outputs/test_pat/xfer
-python3 -m synth_xfer.llvm_eval.generate_matcher \
-    --input-dir outputs/test_pat/xfer \
-    --llvm-dir $LLVM_DIR \
-    --include-helper
+    --llvm-dir $LLVM_DIR
 ninja -C $LLVM_DIR/build opt
 
 # 7. benchmark -> optimization stats
