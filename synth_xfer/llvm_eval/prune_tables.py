@@ -6,6 +6,8 @@ import sys
 from typing import Any, Callable, Hashable, cast
 
 from synth_xfer._util.domain import AbstractDomain, get_bvs_from_abst, is_top
+from synth_xfer._util.max_precise import _concrete_width
+from synth_xfer._util.parse_mlir import HelperFuncs
 from synth_xfer._util.tsv import EnumData
 
 Row = tuple[tuple[str, ...], str]
@@ -72,17 +74,26 @@ class FileStats:
         )
 
 
-def prune_group(rows: list[Row], domain: AbstractDomain, bw: int) -> list[int]:
+def prune_group(
+    rows: list[Row],
+    domain: AbstractDomain,
+    arg_widths: list[int],
+    result_width: int,
+) -> list[int]:
     """Minimal-cover pruning for rows of one bitwidth.
     Row B is redundant if another row A matches every query B matches, and A's
     ideal is at least as precise as B's ideal under the domain's meet semantics.
     The returned list maps each input row to the row that should receive its
     count; kept rows map to themselves.
+
+    ``arg_widths`` / ``result_width`` give each operand and the ideal its own
+    bitwidth: an operand like a Select condition is ``i1`` regardless of the
+    group's data width, so it cannot be parsed at a single ``bw``.
     """
     if domain == AbstractDomain.KnownBits:
-        return _prune_knownbits_group(rows, domain, bw)
+        return _prune_knownbits_group(rows, domain, arg_widths, result_width)
     if domain in (AbstractDomain.UConstRange, AbstractDomain.SConstRange):
-        return _prune_const_range_group(rows, domain, bw)
+        return _prune_const_range_group(rows, domain, arg_widths, result_width)
     raise NotImplementedError(f"{domain} not supported yet")
 
 
@@ -120,18 +131,23 @@ def row_int(row: Any, col: str) -> int:
     return int(cast(int, row[col]))
 
 
-def _prune_knownbits_group(rows: list[Row], domain: AbstractDomain, bw: int) -> list[int]:
+def _prune_knownbits_group(
+    rows: list[Row],
+    domain: AbstractDomain,
+    arg_widths: list[int],
+    result_width: int,
+) -> list[int]:
     # Per-row masks: combined arg (zero/one) masks, ideal (zero/one) masks, and
     # the count of known arg bits (a dominator can only have <= as many).
     feats: list[KBFeature] = []
     for args, ideal in rows:
         aZ = aO = shift = 0
-        for s in args:
-            z, o = cast(tuple[int, int], get_bvs_from_abst(s, domain, bw))
+        for s, w in zip(args, arg_widths):
+            z, o = cast(tuple[int, int], get_bvs_from_abst(s, domain, w))
             aZ |= z << shift
             aO |= o << shift
-            shift += len(s)
-        output = get_bvs_from_abst(ideal, domain, bw)
+            shift += w
+        output = get_bvs_from_abst(ideal, domain, result_width)
         feats.append((aZ, aO, output, bin(aZ | aO).count("1")))
 
     def dominates(a: KBFeature, b: KBFeature) -> bool:
@@ -151,7 +167,10 @@ def _prune_knownbits_group(rows: list[Row], domain: AbstractDomain, bw: int) -> 
 
 
 def _prune_const_range_group(
-    rows: list[Row], domain: AbstractDomain, bw: int
+    rows: list[Row],
+    domain: AbstractDomain,
+    arg_widths: list[int],
+    result_width: int,
 ) -> list[int]:
     def contains(outer: AbsValue, inner: AbsValue) -> bool:
         if inner is None:
@@ -163,9 +182,10 @@ def _prune_const_range_group(
     feats: list[CRFeature] = []
     for args, ideal in rows:
         arg_ranges = tuple(
-            cast(Interval, get_bvs_from_abst(arg, domain, bw)) for arg in args
+            cast(Interval, get_bvs_from_abst(arg, domain, w))
+            for arg, w in zip(args, arg_widths)
         )
-        ideal_range = get_bvs_from_abst(ideal, domain, bw)
+        ideal_range = get_bvs_from_abst(ideal, domain, result_width)
         feats.append((arg_ranges, ideal_range))
 
     def dominates(a: CRFeature, b: CRFeature) -> bool:
@@ -184,9 +204,21 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
     frame = data.enumdata
 
     if "ideal" not in frame.columns:
+        if len(frame) == 0:
+            return FileStats.zero()
         sys.exit(f"{path.name}: no 'ideal' column; run max-precise first")
 
     arg_cols = [f"arg_{a}" for a in range(data.metadata.arity)]
+
+    # Per-operand types from the pattern's lowering: a Select condition is i1,
+    # an icmp result is i1, etc., independent of the group's data width. Reuse
+    # the same inference max-precise used to fill the table so each operand and
+    # the ideal are parsed at their true width rather than a single `bw`.
+    hlprs = HelperFuncs(data.metadata.op, data.metadata.domain)
+
+    def widths_for(bw: int) -> tuple[list[int], int]:
+        arg_widths = [_concrete_width(t, bw) for t in hlprs.conc_arg_ty]
+        return arg_widths, _concrete_width(hlprs.conc_ret_ty, bw)
 
     if options.drop_locally_complete and "sequential_ideal" not in frame.columns:
         sys.exit(f"{path.name}: no 'sequential_ideal' column")
@@ -215,7 +247,9 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
                 continue
             if options.drop_locally_complete and ideal == sequential_ideal:
                 continue
-            if options.drop_top and is_top(ideal, data.metadata.domain, bw):
+            if options.drop_top and is_top(
+                ideal, data.metadata.domain, widths_for(bw)[1]
+            ):
                 n_top += 1
                 continue
             groups[bw].append((pos, argvals, ideal))
@@ -227,8 +261,14 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
     merged_counts: dict[int, int] = {}
     has_count = "count" in frame.columns
     for bw, grp in groups.items():
+        arg_widths, result_width = widths_for(bw)
         targets = (
-            prune_group([(a, d) for _, a, d in grp], data.metadata.domain, bw)
+            prune_group(
+                [(a, d) for _, a, d in grp],
+                data.metadata.domain,
+                arg_widths,
+                result_width,
+            )
             if options.prune_subsumed
             else list(range(len(grp)))
         )
@@ -307,7 +347,7 @@ def main() -> None:
     ap.add_argument(
         "--drop-locally-complete",
         action=BooleanOptionalAction,
-        default=False,
+        default=True,
         help="Drop rows whose ideal output equals sequential_ideal",
     )
     ap.add_argument(

@@ -786,6 +786,9 @@ class DispatcherEmitter:
         out.append(f"  {arg_decl}\n")
         out.append(_emit_guard(matcher))
         out.append("  unsigned ResBW = I->getType()->getScalarSizeInBits();\n")
+        # Non-integer results (e.g. pointers) report bw 0; skip them so we never
+        # build a zero-width KnownBits.
+        out.append("  if (ResBW == 0)\n    return std::nullopt;\n")
         if any(node.op in WIDTH_CHANGING_OPS for node in spec.dag.nodes):
             out.append(_emit_bw_guard(spec.dag.num_args))
         out.append(f"  ++Num{_symbol_id(self.domain, spec.id)}Matches;\n")
