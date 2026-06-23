@@ -347,7 +347,7 @@ def main() -> None:
     ap.add_argument(
         "--drop-locally-complete",
         action=BooleanOptionalAction,
-        default=False,
+        default=True,
         help="Drop rows whose ideal output equals sequential_ideal",
     )
     ap.add_argument(
