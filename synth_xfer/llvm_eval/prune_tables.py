@@ -2,8 +2,9 @@ from argparse import ArgumentParser, BooleanOptionalAction
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
+from statistics import mean, median, stdev
 import sys
-from typing import Any, Callable, Hashable, cast
+from typing import Any, Callable, Hashable, Iterable, cast
 
 from synth_xfer._util.domain import AbstractDomain, get_bvs_from_abst, is_top
 from synth_xfer._util.max_precise import _concrete_width
@@ -30,47 +31,97 @@ class PruneOptions:
 class FileStats:
     rows_seen: int
     rows_kept: int
+    count_seen: int
+    count_kept: int
     top: int
+    top_count: int
     bottom: int
+    bottom_count: int
     sequential: int
+    sequential_count: int
     subsumed: int
+    subsumed_count: int
     capped: int
+    capped_count: int
     empty: bool
-    largest_bw: int | None
-    largest_bw_rows: int
+    count_per_row: tuple[int, ...]
+    kept_count_per_row: tuple[int, ...]
+    count_deltas_after_subsumption: tuple[int, ...]
 
     @classmethod
     def zero(cls) -> "FileStats":
         return cls(
             rows_seen=0,
             rows_kept=0,
+            count_seen=0,
+            count_kept=0,
             top=0,
+            top_count=0,
             bottom=0,
+            bottom_count=0,
             sequential=0,
+            sequential_count=0,
             subsumed=0,
+            subsumed_count=0,
             capped=0,
+            capped_count=0,
             empty=True,
-            largest_bw=None,
-            largest_bw_rows=0,
+            count_per_row=(),
+            kept_count_per_row=(),
+            count_deltas_after_subsumption=(),
         )
 
     def __add__(self, other: "FileStats") -> "FileStats":
-        largest_bw = self.largest_bw
-        largest_bw_rows = self.largest_bw_rows
-        if other.largest_bw_rows > largest_bw_rows:
-            largest_bw = other.largest_bw
-            largest_bw_rows = other.largest_bw_rows
         return FileStats(
             rows_seen=self.rows_seen + other.rows_seen,
             rows_kept=self.rows_kept + other.rows_kept,
+            count_seen=self.count_seen + other.count_seen,
+            count_kept=self.count_kept + other.count_kept,
             top=self.top + other.top,
+            top_count=self.top_count + other.top_count,
             bottom=self.bottom + other.bottom,
+            bottom_count=self.bottom_count + other.bottom_count,
             sequential=self.sequential + other.sequential,
+            sequential_count=self.sequential_count + other.sequential_count,
             subsumed=self.subsumed + other.subsumed,
+            subsumed_count=self.subsumed_count + other.subsumed_count,
             capped=self.capped + other.capped,
+            capped_count=self.capped_count + other.capped_count,
             empty=self.empty and other.empty,
-            largest_bw=largest_bw,
-            largest_bw_rows=largest_bw_rows,
+            count_per_row=self.count_per_row + other.count_per_row,
+            kept_count_per_row=self.kept_count_per_row + other.kept_count_per_row,
+            count_deltas_after_subsumption=(
+                self.count_deltas_after_subsumption + other.count_deltas_after_subsumption
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class Summary:
+    min: float
+    max: float
+    median: float
+    mean: float
+    stddev: float
+
+    @classmethod
+    def of(cls, values: Iterable[float]) -> "Summary | None":
+        xs = list(values)
+        if not xs:
+            return None
+        return cls(
+            min=min(xs),
+            max=max(xs),
+            median=median(xs),
+            mean=mean(xs),
+            stddev=stdev(xs) if len(xs) > 1 else 0.0,
+        )
+
+    def fmt(self, *, suffix: str = "") -> str:
+        return (
+            f"min={self.min:.2f}{suffix} max={self.max:.2f}{suffix} "
+            f"med={self.median:.2f}{suffix} mean={self.mean:.2f}{suffix} "
+            f"stddev={self.stddev:.2f}{suffix}"
         )
 
 
@@ -223,7 +274,21 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
     if options.drop_locally_complete and "sequential_ideal" not in frame.columns:
         sys.exit(f"{path.name}: no 'sequential_ideal' column")
 
+    has_count = "count" in frame.columns
+
+    def row_count(pos: int) -> int:
+        return row_int(frame.iloc[pos], "count") if has_count else 1
+
+    count_per_row = (
+        tuple(int(v) for v in frame["count"])
+        if has_count
+        else tuple(1 for _ in range(len(frame)))
+    )
+    count_seen = sum(count_per_row)
+
     n_seen = n_top = n_bottom = n_sequential = n_subsumed = n_capped = 0
+    top_count = bottom_count = sequential_count = subsumed_count = capped_count = 0
+
     # Drop top/bottom rows and bucket survivors by bitwidth (rows of
     # different widths never match the same query, so pruning is per-width).
     # Each entry keeps its original row position to slice the frame later.
@@ -235,31 +300,34 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
             str(row["sequential_ideal"]) if "sequential_ideal" in frame.columns else None
         )
         bw = row_int(row, "bw")
+        cnt = row_count(pos)
         n_seen += 1
-        if sequential_ideal is not None and ideal == sequential_ideal:
-            n_sequential += 1
         if any(v == "(bottom)" for v in argvals):
             n_bottom += 1
+            bottom_count += cnt
         else:
             if ideal == "(bottom)":
                 n_bottom += 1
+                bottom_count += cnt
             if ideal == "(bottom)" and options.drop_bottom:
-                continue
-            if options.drop_locally_complete and ideal == sequential_ideal:
                 continue
             if options.drop_top and is_top(
                 ideal, data.metadata.domain, widths_for(bw)[1]
             ):
                 n_top += 1
+                top_count += cnt
+                continue
+            if options.drop_locally_complete and ideal == sequential_ideal:
+                n_sequential += 1
+                sequential_count += cnt
                 continue
             groups[bw].append((pos, argvals, ideal))
 
     # Per bitwidth: subsumption-prune, then cap, collecting kept positions.
     cap = options.max_rows_per_bw
     keep_positions: list[int] = []
-    kept_by_bw: dict[int, int] = {}
     merged_counts: dict[int, int] = {}
-    has_count = "count" in frame.columns
+    count_deltas: list[int] = []
     for bw, grp in groups.items():
         arg_widths, result_width = widths_for(bw)
         targets = (
@@ -272,38 +340,67 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
             if options.prune_subsumed
             else list(range(len(grp)))
         )
+        subsumed_count_by_target: dict[int, int] = {}
         if has_count:
             for local_idx, target_idx in enumerate(targets):
                 if local_idx == target_idx:
                     continue
                 dst_pos = grp[target_idx][0]
                 src_pos = grp[local_idx][0]
+                src_count = row_count(src_pos)
                 if dst_pos not in merged_counts:
-                    merged_counts[dst_pos] = row_int(frame.iloc[dst_pos], "count")
-                merged_counts[dst_pos] += row_int(frame.iloc[src_pos], "count")
+                    merged_counts[dst_pos] = row_count(dst_pos)
+                merged_counts[dst_pos] += src_count
+                subsumed_count_by_target[dst_pos] = (
+                    subsumed_count_by_target.get(dst_pos, 0) + src_count
+                )
         kept = [pos for i, (pos, _, _) in enumerate(grp) if targets[i] == i]
-        n_subsumed += len(grp) - len(kept)
+        if not has_count:
+            for local_idx, target_idx in enumerate(targets):
+                if local_idx == target_idx:
+                    continue
+                dst_pos = grp[target_idx][0]
+                subsumed_count_by_target[dst_pos] = (
+                    subsumed_count_by_target.get(dst_pos, 0) + 1
+                )
+        bw_subsumed = len(grp) - len(kept)
+        bw_subsumed_count = sum(subsumed_count_by_target.values())
+        n_subsumed += bw_subsumed
+        subsumed_count += bw_subsumed_count
+        count_deltas.extend(subsumed_count_by_target.values())
         if cap and len(kept) > cap:
-            n_capped += len(kept) - cap
+            capped_positions = kept[cap:]
+            bw_capped = len(capped_positions)
+            bw_capped_count = sum(
+                merged_counts.get(pos, row_count(pos)) for pos in capped_positions
+            )
+            n_capped += bw_capped
+            capped_count += bw_capped_count
             kept = kept[:cap]
-        kept_by_bw[bw] = len(kept)
         keep_positions.extend(kept)
 
     pattern_kept = len(keep_positions)
-    top_bw, top_bw_rows = max(kept_by_bw.items(), key=lambda kv: kv[1], default=(None, 0))
 
     if pattern_kept == 0:
         return FileStats(
             rows_seen=n_seen,
             rows_kept=0,
+            count_seen=count_seen,
+            count_kept=0,
             top=n_top,
+            top_count=top_count,
             bottom=n_bottom,
+            bottom_count=bottom_count,
             sequential=n_sequential,
+            sequential_count=sequential_count,
             subsumed=n_subsumed,
+            subsumed_count=subsumed_count,
             capped=n_capped,
+            capped_count=capped_count,
             empty=True,
-            largest_bw=top_bw,
-            largest_bw_rows=top_bw_rows,
+            count_per_row=count_per_row,
+            kept_count_per_row=(),
+            count_deltas_after_subsumption=tuple(count_deltas),
         )
 
     if merged_counts:
@@ -313,18 +410,33 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
 
     kept_frame = frame.iloc[sorted(keep_positions)].reset_index(drop=True)
     EnumData(data.metadata, kept_frame).write_tsv(out_dir / path.name)
+    kept_count_per_row = (
+        tuple(int(v) for v in kept_frame["count"])
+        if has_count
+        else tuple(1 for _ in range(pattern_kept))
+    )
 
     return FileStats(
         rows_seen=n_seen,
         rows_kept=pattern_kept,
+        count_seen=count_seen,
+        count_kept=(
+            sum(int(v) for v in kept_frame["count"]) if has_count else pattern_kept
+        ),
         top=n_top,
+        top_count=top_count,
         bottom=n_bottom,
+        bottom_count=bottom_count,
         sequential=n_sequential,
+        sequential_count=sequential_count,
         subsumed=n_subsumed,
+        subsumed_count=subsumed_count,
         capped=n_capped,
+        capped_count=capped_count,
         empty=False,
-        largest_bw=top_bw,
-        largest_bw_rows=top_bw_rows,
+        count_per_row=count_per_row,
+        kept_count_per_row=kept_count_per_row,
+        count_deltas_after_subsumption=tuple(count_deltas),
     )
 
 
@@ -367,7 +479,7 @@ def main() -> None:
 
     tsv_files = sorted(args.tsv_dir.glob("*.tsv"))
     args.out_dir.mkdir(parents=True, exist_ok=True)
-    name_width = max(len(p.name) for p in tsv_files)
+    name_width = max((len(p.name) for p in tsv_files), default=0)
     options = PruneOptions(
         drop_top=args.drop_top,
         drop_bottom=args.drop_bottom,
@@ -378,28 +490,174 @@ def main() -> None:
 
     total = FileStats.zero()
     n_empty = 0
+    per_file: list[FileStats] = []
     for path in tsv_files:
         stats = prune_file(path, args.out_dir, options)
-        bw_label = "-" if stats.largest_bw is None else str(stats.largest_bw)
+        per_file.append(stats)
         print(
             f"{path.name:<{name_width}}  rows: {stats.rows_seen:>6}   "
-            f"kept: {stats.rows_kept:>5}   "
-            f"largest: {stats.largest_bw_rows:>5} (bw={bw_label})"
+            f"kept: {stats.rows_kept:>5}"
         )
         total += stats
         n_empty += int(stats.empty)
+
+    def pct(part: int, whole: int) -> float:
+        return 0.0 if whole == 0 else 100.0 * part / whole
+
+    def fmt_int(value: int) -> str:
+        return f"{value:,}"
+
+    def fmt_float(value: float, *, suffix: str = "") -> str:
+        return f"{value:,.2f}{suffix}"
+
+    def print_summary_table(title: str, rows: list[tuple[str, Summary]]) -> None:
+        if not rows:
+            return
+        print()
+        print(title)
+        print(
+            f"  {'metric':<42} {'min':>14} {'max':>14} {'med':>14} "
+            f"{'mean':>14} {'stddev':>14}"
+        )
+        for label, summary in rows:
+            print(
+                f"  {label:<42} {fmt_float(summary.min):>14} "
+                f"{fmt_float(summary.max):>14} {fmt_float(summary.median):>14} "
+                f"{fmt_float(summary.mean):>14} {fmt_float(summary.stddev):>14}"
+            )
+
+    def print_before_after_summary_table(
+        title: str, rows: list[tuple[str, Summary | None, Summary | None]]
+    ) -> None:
+        rows = [
+            (label, before, after)
+            for label, before, after in rows
+            if before is not None or after is not None
+        ]
+        if not rows:
+            return
+        print()
+        print(title)
+        print(
+            f"  {'metric':<34} {'phase':<7} {'min':>14} {'max':>14} "
+            f"{'med':>14} {'mean':>14} {'stddev':>14}"
+        )
+        for label, before, after in rows:
+            for phase, summary in (("before", before), ("after", after)):
+                if summary is None:
+                    continue
+                print(
+                    f"  {label:<34} {phase:<7} {fmt_float(summary.min):>14} "
+                    f"{fmt_float(summary.max):>14} "
+                    f"{fmt_float(summary.median):>14} "
+                    f"{fmt_float(summary.mean):>14} "
+                    f"{fmt_float(summary.stddev):>14}"
+                )
+
+    def print_drop_table(rows: list[tuple[str, int, int]]) -> None:
+        print()
+        print("Dropped Rows")
+        print(
+            f"  {'reason':<24} {'rows':>14} {'row %':>9} {'count':>18} {'weighted %':>12}"
+        )
+        for label, rows_dropped, count_dropped in rows:
+            print(
+                f"  {label:<24} {fmt_int(rows_dropped):>14} "
+                f"{fmt_float(pct(rows_dropped, total.rows_seen), suffix='%'):>9} "
+                f"{fmt_int(count_dropped):>18} "
+                f"{fmt_float(pct(count_dropped, total.count_seen), suffix='%'):>12}"
+            )
+
+    def print_overall_reduction() -> None:
+        empty_count = sum(s.count_seen for s in per_file if s.empty)
+        rows_dropped = total.rows_seen - total.rows_kept
+        count_dropped = total.count_seen - total.count_kept
+        print()
+        print("Overall Reduction")
+        print(f"  {'metric':<24} {'absolute':>18} {'percent':>10}")
+        print(
+            f"  {'tables dropped':<24} {fmt_int(n_empty):>18} "
+            f"{fmt_float(pct(n_empty, len(tsv_files)), suffix='%'):>10}"
+        )
+        print(
+            f"  {'tables dropped weight':<24} {fmt_int(empty_count):>18} "
+            f"{fmt_float(pct(empty_count, total.count_seen), suffix='%'):>10}"
+        )
+        print(
+            f"  {'rows dropped':<24} {fmt_int(rows_dropped):>18} "
+            f"{fmt_float(pct(rows_dropped, total.rows_seen), suffix='%'):>10}"
+        )
+        print(
+            f"  {'rows dropped weight':<24} {fmt_int(count_dropped):>18} "
+            f"{fmt_float(pct(count_dropped, total.count_seen), suffix='%'):>10}"
+        )
 
     print(
         f"Optimized {len(tsv_files) - n_empty} TSVs -> {args.out_dir} "
         f"({n_empty} empty patterns skipped)"
     )
     print(
-        f"Rows seen: {total.rows_seen}  kept: {total.rows_kept}  "
-        f"dropped: {total.rows_seen - total.rows_kept} "
-        f"(top: {total.top}, bottom: {total.bottom}, "
-        f"sequential: {total.sequential}, subsumed: {total.subsumed}, "
-        f"capped: {total.capped})"
+        f"Rows: {fmt_int(total.rows_seen)} seen, {fmt_int(total.rows_kept)} kept, "
+        f"{fmt_int(total.rows_seen - total.rows_kept)} dropped"
     )
+    print(f"Input tables: {fmt_int(len(tsv_files))}")
+    print_overall_reduction()
+
+    print_before_after_summary_table(
+        "Input/Output Distributions",
+        [
+            (
+                "rows per table",
+                Summary.of(s.rows_seen for s in per_file),
+                Summary.of(s.rows_kept for s in per_file),
+            ),
+            (
+                "count per row",
+                Summary.of(total.count_per_row),
+                Summary.of(total.kept_count_per_row),
+            ),
+            (
+                "count per table",
+                Summary.of(s.count_seen for s in per_file),
+                Summary.of(s.count_kept for s in per_file),
+            ),
+        ],
+    )
+
+    print_drop_table(
+        [
+            ("bottom", total.bottom, total.bottom_count),
+            ("ideal==top", total.top, total.top_count),
+            ("locally complete", total.sequential, total.sequential_count),
+            ("subsumed", total.subsumed, total.subsumed_count),
+            ("capped", total.capped, total.capped_count),
+        ]
+    )
+
+    print()
+    print(f"Tables dropped because all rows were dropped: {fmt_int(n_empty)}")
+
+    output_summaries: list[tuple[str, Summary]] = []
+    delta_summary = Summary.of(total.count_deltas_after_subsumption)
+    if delta_summary is not None:
+        output_summaries.append(
+            ("subsumption count delta per receiving row", delta_summary)
+        )
+    shrink_summary = Summary.of(
+        pct(s.rows_seen - s.rows_kept, s.rows_seen) for s in per_file if s.rows_seen > 0
+    )
+    if shrink_summary is not None:
+        output_summaries.append(("output row reduction by table (%)", shrink_summary))
+    count_shrink_summary = Summary.of(
+        pct(s.count_seen - s.count_kept, s.count_seen)
+        for s in per_file
+        if s.count_seen > 0
+    )
+    if count_shrink_summary is not None:
+        output_summaries.append(
+            ("output count reduction by table (%)", count_shrink_summary)
+        )
+    print_summary_table("Output Distributions", output_summaries)
 
 
 if __name__ == "__main__":
