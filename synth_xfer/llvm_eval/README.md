@@ -89,7 +89,53 @@ python3 -m synth_xfer.llvm_eval.run_opt_benchmark \
     --bench-path $BENCH_DIR \
     --opt-path $OPT \
     --stats outputs/test_stats.json
+
+# coarse per-input wall-clock opt compile time
+python3 -m synth_xfer.llvm_eval.run_opt_benchmark \
+    --bench-path $BENCH_DIR \
+    --opt-path $OPT \
+    --walltime outputs/walltime.json
+
+# benchmark per-input end-to-end opt compile time
+python3 -m synth_xfer.llvm_eval.run_opt_benchmark \
+    --bench-path $BENCH_DIR \
+    --opt-path $OPT \
+    --comptime outputs/comptime.json \
+    --comptime-repeat 5
 ```
+
+`--walltime` writes a coarse JSON mapping from benchmark-relative `.ll` path to
+one wall-clock seconds value. It uses the same `opt` flags as the other modes,
+does not use `perf`, and does not require the `cset` setup.
+
+`--comptime` is Linux-only. It enters the configured `cset shield` cpuset for
+the whole benchmark run, then runs each `opt` invocation under pinned `taskset`
+and `perf stat`. It writes JSON keyed by benchmark-relative `.ll` path:
+
+```json
+{
+  "foo/a.ll": {
+    "instructions": [12345678, 12345591, 12345602],
+    "task_clock_ms": [12.1, 12.0, 12.1]
+  }
+}
+```
+
+With `--comptime-repeat N`, each metric contains N samples. The default `--jobs`
+is the current CPU affinity count inside the shield, with one pinned worker per
+CPU. Configure a shield before running, for example:
+
+```bash
+sudo cset shield --cpu=1-15 --kthread=on
+python3 -m synth_xfer.llvm_eval.run_opt_benchmark \
+    --bench-path $BENCH_DIR \
+    --opt-path $OPT \
+    --comptime outputs/comptime.json \
+    --comptime-repeat 5
+```
+
+For lower-noise numbers, follow LLVM's benchmarking setup guidance: disable
+ASLR, enable userland `perf`, control CPU frequency, and avoid unrelated load.
 
 ## Cross-validation
 

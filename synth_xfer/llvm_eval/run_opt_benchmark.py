@@ -1,11 +1,15 @@
 import argparse
 import collections
+import csv
+import io
 import json
-from multiprocessing import Pool
+from multiprocessing import Pool, current_process
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
+import time
 from typing import Literal
 
 try:
@@ -38,9 +42,12 @@ STATS_NONDETER_KEYS = {
     "simplifycfg.NumSimpl",
 }
 
-RunMode = Literal["stats", "histogram", "slice-kb", "slice-ucr", "slice-scr"]
+RunMode = Literal[
+    "stats", "histogram", "slice-kb", "slice-ucr", "slice-scr", "comptime", "walltime"
+]
 RunStatus = Literal["success", "fail", "timeout", "crash"]
-OptResult = tuple[Path, RunStatus, dict[str, float], str]
+PerfMetric = int | float
+OptResult = tuple[Path, RunStatus, dict[str, PerfMetric | list[PerfMetric]], str]
 
 # Per-worker config, populated by _init_worker so it survives non-fork start
 # methods too.
@@ -49,6 +56,8 @@ _BENCH_DIR: Path | None = None
 _HIST_DIR: Path | None = None
 _SLICE_DIR: Path | None = None
 _MODE: RunMode | None = None
+_COMPTIME_REPEAT: int = 5
+_COMPTIME_CPUS: tuple[int, ...] = ()
 
 
 def _init_worker(
@@ -57,14 +66,21 @@ def _init_worker(
     hist_dir: Path | None,
     slice_dir: Path | None,
     mode: RunMode,
+    comptime_repeat: int,
+    comptime_cpus: tuple[int, ...],
 ) -> None:
     global _OPT, _BENCH_DIR, _HIST_DIR, _SLICE_DIR, _MODE
+    global _COMPTIME_REPEAT, _COMPTIME_CPUS
     _OPT, _BENCH_DIR, _HIST_DIR, _SLICE_DIR, _MODE = (
         opt,
         bench_dir,
         hist_dir,
         slice_dir,
         mode,
+    )
+    _COMPTIME_REPEAT, _COMPTIME_CPUS = (
+        comptime_repeat,
+        comptime_cpus,
     )
 
 
@@ -76,6 +92,48 @@ def _rel_stem(input_file: Path) -> Path:
     if "original" in parts:
         parts.remove("original")
     return Path(*parts).with_suffix("")
+
+
+def _parse_perf_stat(stderr: str) -> dict[str, PerfMetric]:
+    metrics: dict[str, PerfMetric] = {}
+    for row in csv.reader(io.StringIO(stderr), delimiter=","):
+        if not row:
+            continue
+
+        value = row[0].strip()
+        if not value or value.startswith("<"):
+            continue
+
+        unit = row[1].strip() if len(row) > 1 else ""
+        event = row[2].strip() if len(row) > 2 else ""
+        label = event or unit
+
+        try:
+            parsed = float(value)
+        except ValueError:
+            continue
+
+        if label == "instructions:u":
+            metrics["instructions"] = int(parsed)
+        elif label == "task-clock:u":
+            if unit.startswith("msec"):
+                metrics["task_clock_ms"] = parsed
+            elif unit.startswith("seconds"):
+                metrics["task_clock_ms"] = parsed * 1000.0
+            else:
+                metrics["task_clock_ms"] = parsed
+
+    missing = {"instructions", "task_clock_ms"} - metrics.keys()
+    if missing:
+        raise ValueError(f"perf stat output missing {sorted(missing)}")
+    return metrics
+
+
+def _worker_cpu() -> int:
+    if not _COMPTIME_CPUS:
+        raise RuntimeError("no CPUs available for comptime worker pinning")
+    worker_idx = int(current_process().name.rsplit("-", 1)[1]) - 1
+    return _COMPTIME_CPUS[worker_idx % len(_COMPTIME_CPUS)]
 
 
 def run_opt(input_file: Path) -> OptResult:
@@ -105,6 +163,50 @@ def run_opt(input_file: Path) -> OptResult:
             cmd += ["-debug-only=dag-slicer", "-enable-uconstrange-pattern-mining"]
         elif _MODE == "slice-scr":
             cmd += ["-debug-only=dag-slicer", "-enable-sconstrange-pattern-mining"]
+
+        if _MODE == "walltime":
+            start = time.perf_counter()
+            ret = subprocess.run(
+                cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=1800.0, env={}
+            )
+            elapsed = time.perf_counter() - start
+            if ret.returncode != 0:
+                return (input_file, "fail", {}, ret.stderr.decode())
+            return (input_file, "success", {"wall_time_s": elapsed}, "")
+
+        if _MODE == "comptime":
+            samples: dict[str, list[PerfMetric]] = collections.defaultdict(list)
+            perf_cmd = [
+                "taskset",
+                "-c",
+                str(_worker_cpu()),
+                "perf",
+                "stat",
+                "-x",
+                ",",
+                "-e",
+                "instructions:u,task-clock:u",
+                "--no-big-num",
+            ] + cmd
+            for _ in range(_COMPTIME_REPEAT):
+                ret = subprocess.run(
+                    perf_cmd,
+                    stdin=subprocess.DEVNULL,
+                    capture_output=True,
+                    timeout=1800.0,
+                    env={},
+                )
+                if ret.returncode != 0:
+                    return (input_file, "fail", {}, ret.stderr.decode())
+                metrics = _parse_perf_stat(ret.stderr.decode())
+                for k, v in metrics.items():
+                    samples[k].append(v)
+            return (
+                input_file,
+                "success",
+                {k: v for k, v in samples.items()},
+                "",
+            )
 
         ret = subprocess.run(
             cmd, stdin=subprocess.DEVNULL, capture_output=True, timeout=1800.0, env={}
@@ -145,6 +247,68 @@ def _format_benchmark_rel(input_file: Path, bench_dir: Path) -> str:
     if "original" in parts:
         parts.remove("original")
     return str(Path(*parts))
+
+
+def _read_proc_int(path: Path) -> int | None:
+    try:
+        return int(path.read_text().strip())
+    except OSError:
+        return None
+
+
+def _comptime_cpus() -> tuple[int, ...]:
+    if hasattr(os, "sched_getaffinity"):
+        return tuple(sorted(os.sched_getaffinity(0)))
+    return tuple(range(os.cpu_count() or 1))
+
+
+def _in_cset_shield() -> bool:
+    try:
+        cpuset = Path("/proc/self/cpuset").read_text().strip()
+    except OSError:
+        return False
+    return cpuset == "/user" or cpuset.endswith("/user")
+
+
+def _enter_cset_shield() -> None:
+    if os.environ.get("SYNTH_XFER_CSET_SHIELDED") == "1" or _in_cset_shield():
+        return
+
+    env = os.environ.copy()
+    env["SYNTH_XFER_CSET_SHIELDED"] = "1"
+    os.execvpe(
+        "cset",
+        ["cset", "shield", "--exec", "--", sys.executable, *sys.argv],
+        env,
+    )
+
+
+def _check_comptime_environment() -> tuple[int, ...]:
+    if sys.platform != "linux":
+        sys.exit("error: --comptime requires Linux perf/taskset/cset")
+    if shutil.which("cset") is None:
+        sys.exit("error: --comptime requires cset in PATH")
+    if shutil.which("perf") is None:
+        sys.exit("error: --comptime requires perf in PATH")
+    if shutil.which("taskset") is None:
+        sys.exit("error: --comptime requires taskset in PATH")
+
+    aslr = _read_proc_int(Path("/proc/sys/kernel/randomize_va_space"))
+    if aslr != 0:
+        sys.exit("error: disable ASLR first: sudo sysctl kernel.randomize_va_space=0")
+
+    perf_paranoid = _read_proc_int(Path("/proc/sys/kernel/perf_event_paranoid"))
+    if perf_paranoid != -1:
+        sys.exit(
+            "error: enable userland perf first: sudo sysctl kernel.perf_event_paranoid=-1"
+        )
+
+    _enter_cset_shield()
+
+    cpus = _comptime_cpus()
+    if not cpus:
+        sys.exit("error: no CPUs available for --comptime")
+    return cpus
 
 
 def _render_blocks(
@@ -314,6 +478,33 @@ def main() -> None:
         help="Aggregated stats JSON output path.",
     )
     p.add_argument(
+        "--comptime",
+        type=Path,
+        default=None,
+        help=(
+            "Per-input compile-time JSON output path. Values contain perf "
+            "measurement sample arrays."
+        ),
+    )
+    p.add_argument(
+        "--walltime",
+        type=Path,
+        default=None,
+        help=(
+            "Per-input coarse wall-clock compile-time JSON output path. Values "
+            "are seconds."
+        ),
+    )
+    p.add_argument(
+        "--comptime-repeat",
+        type=int,
+        default=5,
+        help=(
+            "Number of times to run each input in --comptime mode. The JSON "
+            "metrics are sample arrays."
+        ),
+    )
+    p.add_argument(
         "--slice-kb",
         action="store_true",
         help="Run pattern slicer over computeKnownBits",
@@ -340,13 +531,15 @@ def main() -> None:
     p.add_argument(
         "--jobs",
         type=int,
-        default=os.cpu_count() or 1,
-        help="Parallel worker processes. Default: %(default)s",
+        default=None,
+        help=("Parallel worker processes. Default: available CPU affinity count."),
     )
     args = p.parse_args()
 
     selected_modes = [
         args.stats is not None,
+        args.comptime is not None,
+        args.walltime is not None,
         args.pattern_hist is not None,
         args.slice_kb,
         args.slice_ucr,
@@ -354,11 +547,18 @@ def main() -> None:
     ]
     if sum(selected_modes) != 1:
         p.error(
-            "exactly one of --stats, --pattern-hist, --slice-kb, --slice-ucr, or --slice-scr is required"
+            "exactly one of --stats, --comptime, --walltime, --pattern-hist, "
+            "--slice-kb, --slice-ucr, or --slice-scr is required"
         )
+    if args.comptime_repeat < 1:
+        p.error("--comptime-repeat must be at least 1")
 
     if args.stats is not None:
         mode: RunMode = "stats"
+    elif args.comptime is not None:
+        mode = "comptime"
+    elif args.walltime is not None:
+        mode = "walltime"
     elif args.pattern_hist is not None:
         mode = "histogram"
     elif args.slice_kb:
@@ -375,6 +575,22 @@ def main() -> None:
         sys.exit(f"error: {bench_dir} not found; pass the llvm-opt-benchmark path")
     if not args.opt_path.is_file() or not os.access(args.opt_path, os.X_OK):
         sys.exit(f"error: opt binary {args.opt_path} not found or not executable")
+
+    comptime_cpus: tuple[int, ...] = ()
+    if mode == "comptime":
+        comptime_cpus = _check_comptime_environment()
+    else:
+        comptime_cpus = _comptime_cpus()
+
+    if args.jobs is None:
+        args.jobs = len(comptime_cpus)
+    elif args.jobs < 1:
+        p.error("--jobs must be at least 1")
+    elif mode == "comptime" and args.jobs > len(comptime_cpus):
+        p.error(
+            f"--jobs={args.jobs} exceeds available CPU affinity count "
+            f"({len(comptime_cpus)})"
+        )
 
     patterns_dir = (
         args.opt_path.parent.parent.parent
@@ -408,6 +624,10 @@ def main() -> None:
 
     if args.stats is not None:
         output_dir = args.stats.parent
+    elif args.comptime is not None:
+        output_dir = args.comptime.parent
+    elif args.walltime is not None:
+        output_dir = args.walltime.parent
     elif args.pattern_hist is not None:
         output_dir = args.pattern_hist
     else:
@@ -417,13 +637,23 @@ def main() -> None:
     test_log_path = output_dir / "test.log"
 
     stats_acc: dict[str, float] = {}
+    comptime_acc: dict[str, dict[str, PerfMetric | list[PerfMetric]]] = {}
+    walltime_acc: dict[str, float] = {}
     fail = False
     n_timeout = 0
 
     with Pool(
         processes=args.jobs,
         initializer=_init_worker,
-        initargs=(args.opt_path, bench_dir, hist_dir, slice_dir, mode),
+        initargs=(
+            args.opt_path,
+            bench_dir,
+            hist_dir,
+            slice_dir,
+            mode,
+            args.comptime_repeat,
+            comptime_cpus,
+        ),
     ) as pool:
         results = pool.imap_unordered(run_opt, work_list)
         if tqdm is not None:
@@ -445,15 +675,30 @@ def main() -> None:
                     else:
                         fail = True
                 else:
-                    for k, v in stats.items():
-                        if k in STATS_NONDETER_KEYS:
-                            continue
-                        stats_acc[k] = stats_acc.get(k, 0) + v
+                    if mode == "comptime":
+                        comptime_acc[rel] = stats
+                    elif mode == "walltime":
+                        walltime_acc[rel] = float(stats["wall_time_s"])
+                    else:
+                        for k, v in stats.items():
+                            if k in STATS_NONDETER_KEYS:
+                                continue
+                            stats_acc[k] = stats_acc.get(k, 0) + v
 
     if args.stats is not None:
         with args.stats.open("w") as f:
             json.dump(stats_acc, f, indent=2, sort_keys=True)
         print(f"aggregated stats written to {args.stats} ({len(stats_acc)} keys)")
+
+    if args.comptime is not None:
+        with args.comptime.open("w") as f:
+            json.dump(comptime_acc, f, indent=2, sort_keys=True)
+        print(f"compile times written to {args.comptime} ({len(comptime_acc)} files)")
+
+    if args.walltime is not None:
+        with args.walltime.open("w") as f:
+            json.dump(walltime_acc, f, indent=2, sort_keys=True)
+        print(f"wall times written to {args.walltime} ({len(walltime_acc)} files)")
 
     if hist_dir is not None:
         _merge_histograms(hist_dir, patterns_dir)
