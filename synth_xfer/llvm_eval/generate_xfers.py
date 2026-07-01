@@ -7,7 +7,13 @@ import sys
 from typing import cast
 
 from synth_xfer._util.domain import AbstractDomain, get_bvs_from_abst
-from synth_xfer._util.pattern_dsl import ArgRef, PatternDag, PatternOp, PatternRef
+from synth_xfer._util.pattern_dsl import (
+    COMMUTATIVE_OPS,
+    ArgRef,
+    PatternDag,
+    PatternOp,
+    PatternRef,
+)
 from synth_xfer._util.tsv import EnumData
 
 
@@ -20,6 +26,7 @@ class PatternSpec:
 
 
 TableRows = dict[int, list[tuple[list[str], str]]]
+StructuralKey = tuple[PatternOp | None, ...]
 
 
 NSW = "OverflowingBinaryOperator::NoSignedWrap"
@@ -577,8 +584,109 @@ def _emit_match_expr(
     return OP_MATCHER[node.op].format(*args)
 
 
+def _structural_key(spec: PatternSpec) -> StructuralKey:
+    root_node = spec.dag.nodes[spec.dag.result.index]
+    key: list[PatternOp | None] = []
+    for operand in root_node.operands:
+        if isinstance(operand, ArgRef):
+            key.append(None)
+        else:
+            key.append(spec.dag.nodes[operand.index].op)
+    return tuple(key)
+
+
+def _emit_match_call(
+    domain: AbstractDomain,
+    spec: PatternSpec,
+    match_args: str,
+    indent: str,
+) -> str:
+    return (
+        f"{indent}if (auto M = match{_symbol_id(domain, spec.id)}({match_args}))\n"
+        f"{indent}  Matches.push_back(std::move(*M));\n"
+    )
+
+
+def _op_check(var: str, op: PatternOp) -> str:
+    return f"{var} == PatternOp::{op.value}"
+
+
+def _emit_noncommutative_bucket_condition(key: StructuralKey) -> str:
+    checks = [_op_check(f"Op{i}", op) for i, op in enumerate(key) if op is not None]
+    return " && ".join(checks) if checks else "true"
+
+
+def _emit_commutative_binary_bucket_condition(key: StructuralKey) -> str:
+    lhs, rhs = key
+    if lhs is None and rhs is None:
+        return "true"
+    if lhs is None:
+        assert rhs is not None
+        return f"({_op_check('Op0', rhs)} || {_op_check('Op1', rhs)})"
+    if rhs is None:
+        return f"({_op_check('Op0', lhs)} || {_op_check('Op1', lhs)})"
+    if lhs == rhs:
+        return f"({_op_check('Op0', lhs)} && {_op_check('Op1', rhs)})"
+    direct = f"({_op_check('Op0', lhs)} && {_op_check('Op1', rhs)})"
+    swapped = f"({_op_check('Op0', rhs)} && {_op_check('Op1', lhs)})"
+    return f"({direct} || {swapped})"
+
+
+def _emit_bucket_condition(root: PatternOp, key: StructuralKey) -> str:
+    if root in COMMUTATIVE_OPS and len(key) == 2:
+        return _emit_commutative_binary_bucket_condition(key)
+    return _emit_noncommutative_bucket_condition(key)
+
+
+def _emit_prefiltered_root_case(
+    domain: AbstractDomain,
+    root: PatternOp,
+    specs: list[PatternSpec],
+    match_args: str,
+    classify_arg: str,
+    value_classifier: str,
+) -> str:
+    out: list[str] = []
+    arity = len(root.spec.operand_types)
+    out.append("    {\n")
+    for i in range(arity):
+        out.append(
+            f"      PatternOp Op{i} = {value_classifier}(I->getOperand({i}), {classify_arg});\n"
+        )
+
+    buckets: dict[StructuralKey, list[PatternSpec]] = defaultdict(list)
+    for spec in specs:
+        buckets[_structural_key(spec)].append(spec)
+
+    first_bucket = True
+    for key in sorted(
+        buckets.keys(),
+        key=lambda k: tuple("" if op is None else op.value for op in k),
+    ):
+        if not first_bucket:
+            out.append("\n")
+        first_bucket = False
+
+        condition = _emit_bucket_condition(root, key)
+        if condition == "true":
+            for spec in buckets[key]:
+                out.append(_emit_match_call(domain, spec, match_args, "      "))
+            continue
+
+        out.append(f"      if ({condition}) {{\n")
+        for spec in buckets[key]:
+            out.append(_emit_match_call(domain, spec, match_args, "        "))
+        out.append("      }\n")
+
+    out.append("      break;\n")
+    out.append("    }\n")
+    return "".join(out)
+
+
 def _emit_dispatch(
-    domain: AbstractDomain, roots: dict[PatternOp, list[PatternSpec]]
+    domain: AbstractDomain,
+    roots: dict[PatternOp, list[PatternSpec]],
+    structural_prefilter_threshold: int,
 ) -> str:
     out: list[str] = []
     if domain == AbstractDomain.KnownBits:
@@ -587,6 +695,7 @@ def _emit_dispatch(
         query_arg = ", const SimplifyQuery &Q"
         match_args = "I, Q, Depth + 1"
         classify_arg = "Q.IIQ"
+        value_classifier = "classifyKBValuePatternOp"
     elif domain == AbstractDomain.SConstRange:
         fn_name = "computePatternSCRMatches"
         match_ty = "PatternMatchCR"
@@ -596,6 +705,7 @@ def _emit_dispatch(
         )
         match_args = "I, UseInstrInfo, AC, CtxI, DT, Depth + 1"
         classify_arg = "InstrInfoQuery(UseInstrInfo)"
+        value_classifier = "classifySCRValuePatternOp"
     elif domain == AbstractDomain.UConstRange:
         fn_name = "computePatternUCRMatches"
         match_ty = "PatternMatchCR"
@@ -605,9 +715,19 @@ def _emit_dispatch(
         )
         match_args = "I, UseInstrInfo, AC, CtxI, DT, Depth + 1"
         classify_arg = "InstrInfoQuery(UseInstrInfo)"
+        value_classifier = "classifyUCRValuePatternOp"
     else:
         raise NotImplementedError(domain)
 
+    out.append(
+        f"static PatternOp {value_classifier}(const Value *V,\n"
+        "                                     const InstrInfoQuery &IIQ) {\n"
+        "  const auto *O = dyn_cast<Operator>(V);\n"
+        "  if (!O)\n"
+        "    return PatternOp::Other;\n"
+        "  return classifyPatternOp(O, IIQ);\n"
+        "}\n\n"
+    )
     out.append(f"static void {fn_name}(const Operator *I{query_arg}, unsigned Depth,\n")
     out.append(
         f"                                    SmallVectorImpl<{match_ty}> &Matches) {{\n"
@@ -615,12 +735,17 @@ def _emit_dispatch(
     out.append(f"  switch (classifyPatternOp(I, {classify_arg})) {{\n")
     for root in sorted(roots.keys()):
         out.append(f"  case PatternOp::{root.value}:\n")
-        for spec in roots[root]:
+        specs = roots[root]
+        if len(specs) > structural_prefilter_threshold:
             out.append(
-                f"    if (auto M = match{_symbol_id(domain, spec.id)}({match_args}))\n"
+                _emit_prefiltered_root_case(
+                    domain, root, specs, match_args, classify_arg, value_classifier
+                )
             )
-            out.append("      Matches.push_back(std::move(*M));\n")
-        out.append("    break;\n")
+        else:
+            for spec in specs:
+                out.append(_emit_match_call(domain, spec, match_args, "    "))
+            out.append("    break;\n")
     out.append("  default:\n")
     out.append("    break;\n")
     out.append("  }\n")
@@ -673,10 +798,14 @@ def _emit_pattern_impact_stats(specs: list[PatternSpec], domain: AbstractDomain)
 class DispatcherEmitter:
     specs: list[PatternSpec]
     domain: AbstractDomain
+    structural_prefilter_threshold: int
 
     @classmethod
     def from_transformers(
-        cls, transformers: dict[str, str], domain: AbstractDomain
+        cls,
+        transformers: dict[str, str],
+        domain: AbstractDomain,
+        structural_prefilter_threshold: int,
     ) -> "DispatcherEmitter":
         patterns = sorted((pid, PatternDag.from_id(pid)) for pid in transformers)
         specs = [
@@ -688,7 +817,7 @@ class DispatcherEmitter:
             )
             for i, (pid, dag) in enumerate(patterns)
         ]
-        return cls(specs, domain)
+        return cls(specs, domain, structural_prefilter_threshold)
 
     @property
     def roots(self) -> dict[PatternOp, list[PatternSpec]]:
@@ -756,7 +885,13 @@ class DispatcherEmitter:
 
         out.append(_emit_pattern_impact_stats(self.specs, self.domain))
         out.append("\n")
-        out.append(_emit_dispatch(self.domain, self.roots))
+        out.append(
+            _emit_dispatch(
+                self.domain,
+                self.roots,
+                self.structural_prefilter_threshold,
+            )
+        )
         return "".join(out)
 
     def emit_pattern_function(self, spec: PatternSpec) -> str:
@@ -839,10 +974,13 @@ def wire_transformers(
     llvm_dir: Path,
     transformers: dict[str, str],
     domain: AbstractDomain,
+    structural_prefilter_threshold: int,
 ) -> None:
     # write transformers into Generated/patterns, clearing any stale ones first
     # An empty pattern set is valid: it yields a no-op dispatcher
-    emitter = DispatcherEmitter.from_transformers(transformers, domain)
+    emitter = DispatcherEmitter.from_transformers(
+        transformers, domain, structural_prefilter_threshold
+    )
     generated_dir = llvm_dir / "llvm/lib/Analysis/Generated"
     generated_dir.mkdir(parents=True, exist_ok=True)
 
@@ -911,6 +1049,15 @@ def main() -> None:
         default=None,
         help="generate stubs only for patterns with count >= this value",
     )
+    stubs.add_argument(
+        "--structural-prefilter-threshold",
+        type=int,
+        default=8,
+        help=(
+            "emit shallow operand-structure prefilter dispatch for roots with "
+            "more than this many patterns"
+        ),
+    )
 
     tables = subcommands.add_parser("tables", help="generate lookup-table xfers")
     tables.add_argument(
@@ -931,6 +1078,15 @@ def main() -> None:
         default=16,
         help="row count <= this AND max bw <= 64 uses constexpr Entry[]",
     )
+    tables.add_argument(
+        "--structural-prefilter-threshold",
+        type=int,
+        default=8,
+        help=(
+            "emit shallow operand-structure prefilter dispatch for roots with "
+            "more than this many patterns"
+        ),
+    )
 
     args = ap.parse_args()
     if args.mode == "stubs":
@@ -942,13 +1098,20 @@ def main() -> None:
             args.patterns_per_root,
             args.count_at_least,
         )
-        wire_transformers(args.llvm_dir, transformers, d)
+        wire_transformers(
+            args.llvm_dir, transformers, d, args.structural_prefilter_threshold
+        )
     else:
         transformers_by_domain = build_table_transformers(
             args.table_dir, args.inline_threshold
         )
         for domain, transformers in sorted(transformers_by_domain.items(), key=str):
-            wire_transformers(args.llvm_dir, transformers, domain)
+            wire_transformers(
+                args.llvm_dir,
+                transformers,
+                domain,
+                args.structural_prefilter_threshold,
+            )
 
 
 if __name__ == "__main__":

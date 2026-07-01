@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
-from typing import Literal
+from typing import Callable, Literal, cast
 
 try:
     import tqdm
@@ -47,7 +47,10 @@ RunMode = Literal[
 ]
 RunStatus = Literal["success", "fail", "timeout", "crash"]
 PerfMetric = int | float
-OptResult = tuple[Path, RunStatus, dict[str, PerfMetric | list[PerfMetric]], str]
+ScalarStats = dict[str, float]
+PerfSamples = dict[str, list[PerfMetric]]
+OptPayload = ScalarStats | PerfSamples
+OptResult = tuple[Path, RunStatus, OptPayload, str]
 
 # Per-worker config, populated by _init_worker so it survives non-fork start
 # methods too.
@@ -257,8 +260,10 @@ def _read_proc_int(path: Path) -> int | None:
 
 
 def _comptime_cpus() -> tuple[int, ...]:
-    if hasattr(os, "sched_getaffinity"):
-        return tuple(sorted(os.sched_getaffinity(0)))
+    sched_getaffinity = getattr(os, "sched_getaffinity", None)
+    if sched_getaffinity is not None:
+        affinity = cast(Callable[[int], set[int]], sched_getaffinity)
+        return tuple(sorted(affinity(0)))
     return tuple(range(os.cpu_count() or 1))
 
 
@@ -637,7 +642,7 @@ def main() -> None:
     test_log_path = output_dir / "test.log"
 
     stats_acc: dict[str, float] = {}
-    comptime_acc: dict[str, dict[str, PerfMetric | list[PerfMetric]]] = {}
+    comptime_acc: dict[str, PerfSamples] = {}
     walltime_acc: dict[str, float] = {}
     fail = False
     n_timeout = 0
@@ -676,11 +681,12 @@ def main() -> None:
                         fail = True
                 else:
                     if mode == "comptime":
-                        comptime_acc[rel] = stats
+                        comptime_acc[rel] = cast(PerfSamples, stats)
                     elif mode == "walltime":
-                        walltime_acc[rel] = float(stats["wall_time_s"])
+                        walltime_acc[rel] = cast(ScalarStats, stats)["wall_time_s"]
                     else:
-                        for k, v in stats.items():
+                        scalar_stats = cast(ScalarStats, stats)
+                        for k, v in scalar_stats.items():
                             if k in STATS_NONDETER_KEYS:
                                 continue
                             stats_acc[k] = stats_acc.get(k, 0) + v
