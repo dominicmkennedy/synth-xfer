@@ -477,6 +477,20 @@ def main() -> None:
         help="Comma-separated benchmark dir names to include (default: all)",
     )
     p.add_argument(
+        "--filter-file",
+        type=Path,
+        default=None,
+        help="File listing bench-relative .ll paths (<proj>/original/<name>.ll), one "
+        "per line, to restrict the run to (default: all). Composes with --filter.",
+    )
+    p.add_argument(
+        "--slice-dir",
+        type=Path,
+        default=None,
+        help="Output directory for slice mode (holds the per-input .dag logs and the "
+        "aggregated dags.tsv). Default: <script>/outputs/<mode>.",
+    )
+    p.add_argument(
         "--stats",
         type=Path,
         default=None,
@@ -606,6 +620,7 @@ def main() -> None:
         / "patterns"
     )
     filt = set(args.filter.split(",")) if args.filter else None
+    file_filt = set(args.filter_file.read_text().split()) if args.filter_file else None
 
     work_list: list[Path] = []
     for bench in sorted(bench_dir.iterdir()):
@@ -616,6 +631,10 @@ def main() -> None:
         if not original_dir.is_dir():
             continue
         for input_file in original_dir.glob("*.ll"):
+            if file_filt is not None and (
+                str(input_file.relative_to(bench_dir)) not in file_filt
+            ):
+                continue
             work_list.append(input_file)
 
     hist_dir = args.pattern_hist
@@ -635,6 +654,8 @@ def main() -> None:
         output_dir = args.walltime.parent
     elif args.pattern_hist is not None:
         output_dir = args.pattern_hist
+    elif args.slice_dir is not None:
+        output_dir = args.slice_dir
     else:
         output_dir = Path(__file__).resolve().parent / "outputs" / mode
     output_dir.mkdir(parents=True, exist_ok=True)
