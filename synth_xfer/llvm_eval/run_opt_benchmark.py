@@ -59,8 +59,9 @@ _BENCH_DIR: Path | None = None
 _HIST_DIR: Path | None = None
 _SLICE_DIR: Path | None = None
 _MODE: RunMode | None = None
-_COMPTIME_REPEAT: int = 5
+_COMPTIME_REPEAT: int = 3
 _COMPTIME_CPUS: tuple[int, ...] = ()
+_COMPTIME_PERF_CPU: int | None = None
 
 
 def _init_worker(
@@ -71,9 +72,10 @@ def _init_worker(
     mode: RunMode,
     comptime_repeat: int,
     comptime_cpus: tuple[int, ...],
+    comptime_perf_cpu: int | None,
 ) -> None:
     global _OPT, _BENCH_DIR, _HIST_DIR, _SLICE_DIR, _MODE
-    global _COMPTIME_REPEAT, _COMPTIME_CPUS
+    global _COMPTIME_REPEAT, _COMPTIME_CPUS, _COMPTIME_PERF_CPU
     _OPT, _BENCH_DIR, _HIST_DIR, _SLICE_DIR, _MODE = (
         opt,
         bench_dir,
@@ -85,6 +87,7 @@ def _init_worker(
         comptime_repeat,
         comptime_cpus,
     )
+    _COMPTIME_PERF_CPU = comptime_perf_cpu
 
 
 def _rel_stem(input_file: Path) -> Path:
@@ -178,11 +181,13 @@ def run_opt(input_file: Path) -> OptResult:
             return (input_file, "success", {"wall_time_s": elapsed}, "")
 
         if _MODE == "comptime":
+            if _COMPTIME_PERF_CPU is None:
+                raise RuntimeError("no CPU available for perf worker pinning")
             samples: dict[str, list[PerfMetric]] = collections.defaultdict(list)
             perf_cmd = [
                 "taskset",
                 "-c",
-                str(_worker_cpu()),
+                str(_COMPTIME_PERF_CPU),
                 "perf",
                 "stat",
                 "-x",
@@ -190,6 +195,10 @@ def run_opt(input_file: Path) -> OptResult:
                 "-e",
                 "instructions:u,task-clock:u",
                 "--no-big-num",
+                "--",
+                "taskset",
+                "-c",
+                str(_worker_cpu()),
             ] + cmd
             for _ in range(_COMPTIME_REPEAT):
                 ret = subprocess.run(
@@ -267,32 +276,9 @@ def _comptime_cpus() -> tuple[int, ...]:
     return tuple(range(os.cpu_count() or 1))
 
 
-def _in_cset_shield() -> bool:
-    try:
-        cpuset = Path("/proc/self/cpuset").read_text().strip()
-    except OSError:
-        return False
-    return cpuset == "/user" or cpuset.endswith("/user")
-
-
-def _enter_cset_shield() -> None:
-    if os.environ.get("SYNTH_XFER_CSET_SHIELDED") == "1" or _in_cset_shield():
-        return
-
-    env = os.environ.copy()
-    env["SYNTH_XFER_CSET_SHIELDED"] = "1"
-    os.execvpe(
-        "cset",
-        ["cset", "shield", "--exec", "--", sys.executable, *sys.argv],
-        env,
-    )
-
-
-def _check_comptime_environment() -> tuple[int, ...]:
+def _check_comptime_environment() -> tuple[tuple[int, ...], int]:
     if sys.platform != "linux":
-        sys.exit("error: --comptime requires Linux perf/taskset/cset")
-    if shutil.which("cset") is None:
-        sys.exit("error: --comptime requires cset in PATH")
+        sys.exit("error: --comptime requires Linux perf/taskset")
     if shutil.which("perf") is None:
         sys.exit("error: --comptime requires perf in PATH")
     if shutil.which("taskset") is None:
@@ -308,12 +294,10 @@ def _check_comptime_environment() -> tuple[int, ...]:
             "error: enable userland perf first: sudo sysctl kernel.perf_event_paranoid=-1"
         )
 
-    _enter_cset_shield()
-
     cpus = _comptime_cpus()
-    if not cpus:
-        sys.exit("error: no CPUs available for --comptime")
-    return cpus
+    if len(cpus) < 2:
+        sys.exit("error: --comptime requires at least two CPUs in its affinity")
+    return cpus[:-1], cpus[-1]
 
 
 def _render_blocks(
@@ -503,7 +487,7 @@ def main() -> None:
     p.add_argument(
         "--comptime-repeat",
         type=int,
-        default=5,
+        default=3,
         help=(
             "Number of times to run each input in --comptime mode. The JSON "
             "metrics are sample arrays."
@@ -582,8 +566,9 @@ def main() -> None:
         sys.exit(f"error: opt binary {args.opt_path} not found or not executable")
 
     comptime_cpus: tuple[int, ...] = ()
+    comptime_perf_cpu: int | None = None
     if mode == "comptime":
-        comptime_cpus = _check_comptime_environment()
+        comptime_cpus, comptime_perf_cpu = _check_comptime_environment()
     else:
         comptime_cpus = _comptime_cpus()
 
@@ -658,6 +643,7 @@ def main() -> None:
             mode,
             args.comptime_repeat,
             comptime_cpus,
+            comptime_perf_cpu,
         ),
     ) as pool:
         results = pool.imap_unordered(run_opt, work_list)

@@ -1,14 +1,27 @@
 from argparse import ArgumentParser, BooleanOptionalAction
 from collections import defaultdict
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from statistics import mean, median, stdev
 import sys
 from typing import Any, Callable, Hashable, Iterable, cast
 
+from xdsl.ir import Attribute
+
 from synth_xfer._util.domain import AbstractDomain, get_bvs_from_abst, is_top
-from synth_xfer._util.max_precise import _concrete_width
+from synth_xfer._util.max_precise import _concrete_width, compute_max_precise
 from synth_xfer._util.parse_mlir import HelperFuncs
+from synth_xfer._util.pattern_dsl import (
+    ArgRef,
+    NodeRef,
+    PatternDag,
+    PatternNode,
+    PatternOp,
+    PatternRef,
+    canonicalize_pattern_operands,
+)
+from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.tsv import EnumData
 
 Row = tuple[tuple[str, ...], str]
@@ -16,6 +29,9 @@ Interval = tuple[int, int]
 AbsValue = Interval | None
 KBFeature = tuple[int, int, AbsValue, int]
 CRFeature = tuple[tuple[Interval, ...], AbsValue]
+NodeEvalCache = dict[tuple[AbstractDomain, PatternOp, int, tuple[str, ...]], str]
+RowValueCache = dict[tuple[int, tuple[str, ...]], dict[PatternRef, str]]
+_MAX_ARGUMENT_SPECIALIZATION_SPLITS = 14
 
 
 @dataclass(frozen=True)
@@ -39,6 +55,12 @@ class FileStats:
     bottom_count: int
     sequential: int
     sequential_count: int
+    timeout: int
+    timeout_count: int
+    argument_specialized: int
+    argument_specialized_count: int
+    subdag_specialized: int
+    subdag_specialized_count: int
     subsumed: int
     subsumed_count: int
     capped: int
@@ -61,6 +83,12 @@ class FileStats:
             bottom_count=0,
             sequential=0,
             sequential_count=0,
+            timeout=0,
+            timeout_count=0,
+            argument_specialized=0,
+            argument_specialized_count=0,
+            subdag_specialized=0,
+            subdag_specialized_count=0,
             subsumed=0,
             subsumed_count=0,
             capped=0,
@@ -83,6 +111,16 @@ class FileStats:
             bottom_count=self.bottom_count + other.bottom_count,
             sequential=self.sequential + other.sequential,
             sequential_count=self.sequential_count + other.sequential_count,
+            timeout=self.timeout + other.timeout,
+            timeout_count=self.timeout_count + other.timeout_count,
+            argument_specialized=(self.argument_specialized + other.argument_specialized),
+            argument_specialized_count=(
+                self.argument_specialized_count + other.argument_specialized_count
+            ),
+            subdag_specialized=self.subdag_specialized + other.subdag_specialized,
+            subdag_specialized_count=(
+                self.subdag_specialized_count + other.subdag_specialized_count
+            ),
             subsumed=self.subsumed + other.subsumed,
             subsumed_count=self.subsumed_count + other.subsumed_count,
             capped=self.capped + other.capped,
@@ -249,14 +287,532 @@ def _prune_const_range_group(
     return prune_by_dominance(feats, dominates)
 
 
-def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
+@dataclass(frozen=True)
+class Table:
+    path: Path
+    data: EnumData
+    pattern_id: str
+    domain: AbstractDomain
+    row_ideals: dict[tuple[int, tuple[str, ...]], set[str]]
+
+
+@dataclass(frozen=True)
+class SubdagSpecialization:
+    general_pattern_id: str
+    arg_sources: tuple[PatternRef, ...]
+
+
+@dataclass(frozen=True)
+class ArgumentSpecialization:
+    general_pattern_id: str
+    arg_sources: tuple[ArgRef, ...]
+
+
+@dataclass(frozen=True)
+class PostDropStats:
+    argument_rows: int
+    argument_count: int
+    subdag_rows: int
+    subdag_count: int
+    table_dropped: bool
+    kept_count_per_row: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class _EnumState:
+    kept: frozenset[int]
+    cut: frozenset[int]
+
+
+def _ref_type(dag: PatternDag, ref: PatternRef) -> Attribute:
+    if isinstance(ref, ArgRef):
+        return dag.arg_types[ref.index]
+    return dag.nodes[ref.index].op.spec.result_type
+
+
+def _enumerate_cut_states(dag: PatternDag) -> set[_EnumState]:
+    root = dag.result.index
+    initial = _EnumState(frozenset((root,)), frozenset())
+
+    def expand_operands(
+        operands: tuple[PatternRef, ...],
+        state: _EnumState,
+    ) -> set[_EnumState]:
+        states = {state}
+        for operand in operands:
+            next_states: set[_EnumState] = set()
+            for current in states:
+                next_states.update(expand_ref(operand, current))
+            states = next_states
+        return states
+
+    def expand_ref(ref: PatternRef, state: _EnumState) -> set[_EnumState]:
+        if isinstance(ref, ArgRef):
+            return {state}
+
+        index = ref.index
+        if index in state.kept:
+            return expand_operands(dag.nodes[index].operands, state)
+        if index in state.cut:
+            return {state}
+
+        cut_state = _EnumState(state.kept, state.cut | frozenset((index,)))
+        kept_state = _EnumState(state.kept | frozenset((index,)), state.cut)
+        return {cut_state} | expand_operands(dag.nodes[index].operands, kept_state)
+
+    return expand_operands(dag.nodes[root].operands, initial)
+
+
+def _build_subdag_with_sources(
+    dag: PatternDag,
+    kept: frozenset[int],
+) -> tuple[PatternDag, tuple[PatternRef, ...]]:
+    arg_types: list[Attribute] = []
+    arg_sources: list[PatternRef] = []
+    arg_of: dict[PatternRef, ArgRef] = {}
+    node_of: dict[NodeRef, NodeRef] = {}
+    nodes: list[PatternNode] = []
+
+    def cut_arg(orig: PatternRef) -> ArgRef:
+        existing = arg_of.get(orig)
+        if existing is not None:
+            return existing
+        ref = ArgRef(len(arg_types))
+        arg_types.append(_ref_type(dag, orig))
+        arg_sources.append(orig)
+        arg_of[orig] = ref
+        return ref
+
+    def build(ref: PatternRef) -> PatternRef:
+        if isinstance(ref, ArgRef):
+            return cut_arg(ref)
+        if ref.index not in kept:
+            return cut_arg(ref)
+
+        existing = node_of.get(ref)
+        if existing is not None:
+            return existing
+
+        node = dag.nodes[ref.index]
+        operands = tuple(build(operand) for operand in node.operands)
+        lowered = NodeRef(len(nodes))
+        node_of[ref] = lowered
+        nodes.append(PatternNode(node.op, operands))
+        return lowered
+
+    root = build(dag.result)
+    assert isinstance(root, NodeRef)
+    return PatternDag.from_parts(tuple(arg_types), tuple(nodes), root), tuple(arg_sources)
+
+
+def _canonicalize_sources(
+    dag: PatternDag,
+    arg_sources: tuple[PatternRef, ...],
+) -> tuple[str, tuple[PatternRef, ...]]:
+    def render_key(node: object) -> str:
+        if isinstance(node, ArgRef):
+            return f"arg{node.index}"
+        op, operands = cast(tuple[PatternOp, tuple[object, ...]], node)
+        return f"{op.value}({', '.join(render_key(operand) for operand in operands)})"
+
+    def canonicalize_ref(ref: PatternRef) -> object:
+        if isinstance(ref, ArgRef):
+            return ref
+        node = dag.nodes[ref.index]
+        operands = tuple(canonicalize_ref(operand) for operand in node.operands)
+        op, operands = canonicalize_pattern_operands(node.op, operands, key=render_key)
+        return op, operands
+
+    root = canonicalize_ref(dag.result)
+    source_order: list[PatternRef] = []
+    arg_map: dict[int, int] = {}
+
+    def render(node: object) -> str:
+        if isinstance(node, ArgRef):
+            new_index = arg_map.get(node.index)
+            if new_index is None:
+                new_index = len(source_order)
+                arg_map[node.index] = new_index
+                source_order.append(arg_sources[node.index])
+            return f"arg{new_index}"
+
+        op, operands = cast(tuple[PatternOp, tuple[object, ...]], node)
+        return f"{op.value}({', '.join(render(operand) for operand in operands)})"
+
+    canonical = PatternDag(render(root))
+    return canonical.to_id(), tuple(source_order)
+
+
+def enumerate_subdag_specializations(
+    specialized_dag: PatternDag,
+) -> list[SubdagSpecialization]:
+    specializations: dict[tuple[str, tuple[PatternRef, ...]], SubdagSpecialization] = {}
+    for state in _enumerate_cut_states(specialized_dag):
+        if not state.cut:
+            continue
+        general_dag, arg_sources = _build_subdag_with_sources(
+            specialized_dag,
+            state.kept,
+        )
+        general_pattern_id, canonical_sources = _canonicalize_sources(
+            general_dag,
+            arg_sources,
+        )
+        key = (general_pattern_id, canonical_sources)
+        specializations[key] = SubdagSpecialization(
+            general_pattern_id,
+            canonical_sources,
+        )
+    return sorted(
+        specializations.values(),
+        key=lambda e: (
+            e.general_pattern_id,
+            tuple(str(source) for source in e.arg_sources),
+        ),
+    )
+
+
+def _arg_occurrences(dag: PatternDag) -> tuple[ArgRef, ...]:
+    occurrences: list[ArgRef] = []
+
+    def visit(ref: PatternRef) -> None:
+        if isinstance(ref, ArgRef):
+            occurrences.append(ref)
+            return
+
+        for operand in dag.nodes[ref.index].operands:
+            visit(operand)
+
+    visit(dag.result)
+    return tuple(occurrences)
+
+
+def enumerate_argument_specializations(
+    specialized_dag: PatternDag,
+) -> list[ArgumentSpecialization]:
+    occurrences = _arg_occurrences(specialized_dag)
+    occurrence_counts: dict[ArgRef, int] = defaultdict(int)
+    repeated_positions: list[int] = []
+    for pos, occurrence in enumerate(occurrences):
+        occurrence_counts[occurrence] += 1
+        if occurrence_counts[occurrence] > 1:
+            repeated_positions.append(pos)
+
+    if not repeated_positions:
+        return []
+    if len(repeated_positions) > _MAX_ARGUMENT_SPECIALIZATION_SPLITS:
+        return []
+
+    specialized_pattern_id = specialized_dag.to_id()
+    specializations: dict[tuple[str, tuple[ArgRef, ...]], ArgumentSpecialization] = {}
+
+    def build_generalized(
+        split_positions: frozenset[int],
+    ) -> tuple[PatternDag, tuple[ArgRef, ...]]:
+        arg_sources = [ArgRef(index) for index in range(specialized_dag.num_args)]
+        occurrence_pos = 0
+
+        def render(ref: PatternRef) -> str:
+            nonlocal occurrence_pos
+            if isinstance(ref, ArgRef):
+                current_pos = occurrence_pos
+                occurrence_pos += 1
+                if current_pos not in split_positions:
+                    return f"arg{ref.index}"
+
+                new_arg = len(arg_sources)
+                arg_sources.append(ref)
+                return f"arg{new_arg}"
+
+            node = specialized_dag.nodes[ref.index]
+            operands = tuple(render(operand) for operand in node.operands)
+            return f"{node.op.value}({', '.join(operands)})"
+
+        return PatternDag(render(specialized_dag.result)), tuple(arg_sources)
+
+    for mask in range(1, 1 << len(repeated_positions)):
+        split_positions = frozenset(
+            pos for bit, pos in enumerate(repeated_positions) if mask & (1 << bit)
+        )
+        general_dag, arg_sources = build_generalized(split_positions)
+        try:
+            general_pattern_id, canonical_sources = _canonicalize_sources(
+                general_dag,
+                arg_sources,
+            )
+        except ValueError:
+            continue
+        if general_pattern_id == specialized_pattern_id:
+            continue
+        canonical_arg_sources = cast(tuple[ArgRef, ...], canonical_sources)
+        key = (general_pattern_id, canonical_arg_sources)
+        specializations[key] = ArgumentSpecialization(
+            general_pattern_id,
+            canonical_arg_sources,
+        )
+
+    return sorted(
+        specializations.values(),
+        key=lambda e: (
+            e.general_pattern_id,
+            tuple(str(source) for source in e.arg_sources),
+        ),
+    )
+
+
+def read_table(path: Path) -> Table:
     with path.open() as f:
         data = EnumData.read_tsv(f)
+    if "ideal" not in data.enumdata.columns:
+        raise ValueError(f"{path.name}: no 'ideal' column; run max-precise first")
+
+    arg_cols = [f"arg_{i}" for i in range(data.metadata.arity)]
+    row_ideals: dict[tuple[int, tuple[str, ...]], set[str]] = defaultdict(set)
+    records = cast(list[dict[str, Any]], data.enumdata.to_dict("records"))
+    for row in records:
+        bw = int(row["bw"])
+        args = tuple(str(row[col]) for col in arg_cols)
+        row_ideals[(bw, args)].add(str(row["ideal"]))
+
+    return Table(
+        path=path,
+        data=data,
+        pattern_id=data.metadata.op.to_id(),
+        domain=data.metadata.domain,
+        row_ideals=dict(row_ideals),
+    )
+
+
+def _compute_values_for_refs(
+    pattern: PatternDag,
+    domain: AbstractDomain,
+    bw: int,
+    args: tuple[str, ...],
+    refs: tuple[PatternRef, ...],
+    timeout: int,
+    solver_kind: SolverKind,
+    cache: NodeEvalCache,
+) -> dict[PatternRef, str]:
+    values: dict[PatternRef, str] = {ArgRef(index): arg for index, arg in enumerate(args)}
+
+    def value_of(ref: PatternRef) -> str:
+        existing = values.get(ref)
+        if existing is not None:
+            return existing
+
+        assert isinstance(ref, NodeRef)
+        node = pattern.nodes[ref.index]
+        node_args = tuple(value_of(operand) for operand in node.operands)
+        key = (domain, node.op, bw, node_args)
+        value = cache.get(key)
+        if value is None:
+            value = compute_max_precise(
+                PatternDag.single_node(node.op),
+                domain,
+                bw,
+                node_args,
+                timeout,
+                solver_kind,
+            )
+            cache[key] = value
+        values[ref] = value
+        return value
+
+    for ref in refs:
+        value_of(ref)
+
+    return values
+
+
+def drop_specialized_rows(
+    specialized_table: Table,
+    tables_by_key: dict[tuple[AbstractDomain, str], Table],
+    argument_specializations: list[ArgumentSpecialization],
+    subdag_specializations: list[SubdagSpecialization],
+    timeout: int,
+    solver_kind: SolverKind,
+    cache: NodeEvalCache,
+) -> PostDropStats:
+    arg_cols = [f"arg_{i}" for i in range(specialized_table.data.metadata.arity)]
+    subdag_specializations = sorted(
+        subdag_specializations,
+        key=lambda specialization: sum(
+            isinstance(source, NodeRef) for source in specialization.arg_sources
+        ),
+    )
+
+    frame = specialized_table.data.enumdata
+    records = cast(list[dict[str, Any]], frame.to_dict("records"))
+    if not argument_specializations and not subdag_specializations:
+        kept_count_per_row = (
+            tuple(int(row["count"]) for row in records)
+            if "count" in frame.columns
+            else tuple(1 for _ in records)
+        )
+        return PostDropStats(0, 0, 0, 0, False, kept_count_per_row)
+
+    keep_positions: list[int] = []
+    argument_rows = subdag_rows = 0
+    argument_count = subdag_count = 0
+    row_value_cache: RowValueCache = {}
+    for pos, row in enumerate(records):
+        count = int(row["count"]) if "count" in frame.columns else 1
+        bw = int(row["bw"])
+        args = tuple(str(row[col]) for col in arg_cols)
+        ideal = str(row["ideal"])
+
+        drop_reason: str | None = None
+        for specialization in argument_specializations:
+            general_table = tables_by_key[
+                (specialized_table.domain, specialization.general_pattern_id)
+            ]
+            projected_args = tuple(
+                args[source.index] for source in specialization.arg_sources
+            )
+            general_ideals = general_table.row_ideals.get((bw, projected_args))
+            if general_ideals is not None and ideal in general_ideals:
+                drop_reason = "argument"
+                break
+
+        for specialization in subdag_specializations:
+            if drop_reason is not None:
+                break
+
+            general_table = tables_by_key[
+                (specialized_table.domain, specialization.general_pattern_id)
+            ]
+            row_key = (bw, args)
+            values = row_value_cache.get(row_key)
+            if values is None:
+                values = cast(
+                    dict[PatternRef, str],
+                    {ArgRef(index): arg for index, arg in enumerate(args)},
+                )
+                row_value_cache[row_key] = values
+
+            missing_sources = tuple(
+                source for source in specialization.arg_sources if source not in values
+            )
+            if missing_sources:
+                values.update(
+                    _compute_values_for_refs(
+                        specialized_table.data.metadata.op,
+                        specialized_table.domain,
+                        bw,
+                        args,
+                        missing_sources,
+                        timeout,
+                        solver_kind,
+                        cache,
+                    )
+                )
+            projected_args = tuple(
+                values[source] for source in specialization.arg_sources
+            )
+            general_ideals = general_table.row_ideals.get((bw, projected_args))
+            if general_ideals is not None and ideal in general_ideals:
+                drop_reason = "subdag"
+                break
+
+        if drop_reason == "argument":
+            argument_rows += 1
+            argument_count += count
+        elif drop_reason == "subdag":
+            subdag_rows += 1
+            subdag_count += count
+        else:
+            keep_positions.append(pos)
+
+    table_dropped = not keep_positions
+    if table_dropped:
+        kept_count_per_row = ()
+    else:
+        kept = frame.iloc[keep_positions].reset_index(drop=True)
+        EnumData(specialized_table.data.metadata, kept).write_tsv(specialized_table.path)
+        kept_count_per_row = (
+            tuple(int(v) for v in kept["count"])
+            if "count" in kept.columns
+            else tuple(1 for _ in range(len(kept)))
+        )
+
+    return PostDropStats(
+        argument_rows,
+        argument_count,
+        subdag_rows,
+        subdag_count,
+        table_dropped,
+        kept_count_per_row,
+    )
+
+
+def leading_timeout_counts(lines: list[str]) -> tuple[int, ...]:
+    """Counts for max-precise rows commented out after timing out.
+
+    These rows are written after the frontmatter and before the TSV header as
+    commented data rows. They do not have ideal/sequential_ideal columns, but
+    they still end with the original count column.
+    """
+    if not lines:
+        return ()
+
+    assert lines[0].strip() == "# ---"
+    end = next(i for i in range(1, len(lines)) if lines[i].strip() == "# ---")
+
+    counts: list[int] = []
+    for line in lines[end + 1 :]:
+        if not line.startswith("# "):
+            break
+        fields = line[2:].split("\t")
+        if len(fields) < 2:
+            continue
+        try:
+            int(fields[0])
+            counts.append(int(fields[-1]))
+        except ValueError:
+            continue
+    return tuple(counts)
+
+
+def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
+    with path.open() as f:
+        lines = f.read().splitlines()
+    timeout_count_per_row = leading_timeout_counts(lines)
+    n_timeout = len(timeout_count_per_row)
+    timeout_count = sum(timeout_count_per_row)
+    data = EnumData.read_tsv(StringIO("\n".join(lines) + "\n"))
     frame = data.enumdata
 
     if "ideal" not in frame.columns:
         if len(frame) == 0:
-            return FileStats.zero()
+            (out_dir / path.name).unlink(missing_ok=True)
+            if not timeout_count_per_row:
+                return FileStats.zero()
+            return FileStats(
+                rows_seen=n_timeout,
+                rows_kept=0,
+                count_seen=timeout_count,
+                count_kept=0,
+                top=0,
+                top_count=0,
+                bottom=0,
+                bottom_count=0,
+                sequential=0,
+                sequential_count=0,
+                timeout=n_timeout,
+                timeout_count=timeout_count,
+                argument_specialized=0,
+                argument_specialized_count=0,
+                subdag_specialized=0,
+                subdag_specialized_count=0,
+                subsumed=0,
+                subsumed_count=0,
+                capped=0,
+                capped_count=0,
+                empty=True,
+                count_per_row=timeout_count_per_row,
+                kept_count_per_row=(),
+                count_deltas_after_subsumption=(),
+            )
         sys.exit(f"{path.name}: no 'ideal' column; run max-precise first")
 
     arg_cols = [f"arg_{a}" for a in range(data.metadata.arity)]
@@ -279,14 +835,16 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
     def row_count(pos: int) -> int:
         return row_int(frame.iloc[pos], "count") if has_count else 1
 
-    count_per_row = (
+    computed_count_per_row = (
         tuple(int(v) for v in frame["count"])
         if has_count
         else tuple(1 for _ in range(len(frame)))
     )
+    count_per_row = timeout_count_per_row + computed_count_per_row
     count_seen = sum(count_per_row)
 
-    n_seen = n_top = n_bottom = n_sequential = n_subsumed = n_capped = 0
+    n_seen = n_timeout
+    n_top = n_bottom = n_sequential = n_subsumed = n_capped = 0
     top_count = bottom_count = sequential_count = subsumed_count = capped_count = 0
 
     # Drop top/bottom rows and bucket survivors by bitwidth (rows of
@@ -382,6 +940,7 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
     pattern_kept = len(keep_positions)
 
     if pattern_kept == 0:
+        (out_dir / path.name).unlink(missing_ok=True)
         return FileStats(
             rows_seen=n_seen,
             rows_kept=0,
@@ -393,6 +952,12 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
             bottom_count=bottom_count,
             sequential=n_sequential,
             sequential_count=sequential_count,
+            timeout=n_timeout,
+            timeout_count=timeout_count,
+            argument_specialized=0,
+            argument_specialized_count=0,
+            subdag_specialized=0,
+            subdag_specialized_count=0,
             subsumed=n_subsumed,
             subsumed_count=subsumed_count,
             capped=n_capped,
@@ -429,6 +994,12 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
         bottom_count=bottom_count,
         sequential=n_sequential,
         sequential_count=sequential_count,
+        timeout=n_timeout,
+        timeout_count=timeout_count,
+        argument_specialized=0,
+        argument_specialized_count=0,
+        subdag_specialized=0,
+        subdag_specialized_count=0,
         subsumed=n_subsumed,
         subsumed_count=subsumed_count,
         capped=n_capped,
@@ -438,6 +1009,103 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
         kept_count_per_row=kept_count_per_row,
         count_deltas_after_subsumption=tuple(count_deltas),
     )
+
+
+def apply_post_drop_stats(stats: FileStats, post: PostDropStats) -> FileStats:
+    rows_dropped = post.argument_rows + post.subdag_rows
+    count_dropped = post.argument_count + post.subdag_count
+    return FileStats(
+        rows_seen=stats.rows_seen,
+        rows_kept=stats.rows_kept - rows_dropped,
+        count_seen=stats.count_seen,
+        count_kept=stats.count_kept - count_dropped,
+        top=stats.top,
+        top_count=stats.top_count,
+        bottom=stats.bottom,
+        bottom_count=stats.bottom_count,
+        sequential=stats.sequential,
+        sequential_count=stats.sequential_count,
+        timeout=stats.timeout,
+        timeout_count=stats.timeout_count,
+        argument_specialized=post.argument_rows,
+        argument_specialized_count=post.argument_count,
+        subdag_specialized=post.subdag_rows,
+        subdag_specialized_count=post.subdag_count,
+        subsumed=stats.subsumed,
+        subsumed_count=stats.subsumed_count,
+        capped=stats.capped,
+        capped_count=stats.capped_count,
+        empty=post.table_dropped,
+        count_per_row=stats.count_per_row,
+        kept_count_per_row=post.kept_count_per_row,
+        count_deltas_after_subsumption=stats.count_deltas_after_subsumption,
+    )
+
+
+def drop_specialized_rows_after_pruning(
+    tsv_files: list[Path],
+    out_dir: Path,
+    per_file: list[FileStats],
+    timeout: int,
+    solver_kind: SolverKind,
+) -> list[FileStats]:
+    output_by_name = {
+        path.name: out_dir / path.name
+        for path, stats in zip(tsv_files, per_file)
+        if not stats.empty
+    }
+    if not output_by_name:
+        return per_file
+
+    tables: list[Table] = []
+    table_indices: dict[str, int] = {}
+    for index, path in enumerate(tsv_files):
+        output_path = output_by_name.get(path.name)
+        if output_path is None:
+            continue
+        tables.append(read_table(output_path))
+        table_indices[path.name] = index
+
+    tables_by_key = {(table.domain, table.pattern_id): table for table in tables}
+    if len(tables_by_key) != len(tables):
+        sys.exit("error: duplicate domain/pattern TSVs in pruned output")
+
+    subdag_specializations_by_table: dict[str, list[SubdagSpecialization]] = {}
+    argument_specializations_by_table: dict[str, list[ArgumentSpecialization]] = {}
+    for table in tables:
+        subdag_specializations_by_table[table.pattern_id] = [
+            specialization
+            for specialization in enumerate_subdag_specializations(table.data.metadata.op)
+            if (table.domain, specialization.general_pattern_id) in tables_by_key
+            and specialization.general_pattern_id != table.pattern_id
+        ]
+        argument_specializations_by_table[table.pattern_id] = [
+            specialization
+            for specialization in enumerate_argument_specializations(
+                table.data.metadata.op
+            )
+            if (table.domain, specialization.general_pattern_id) in tables_by_key
+            and specialization.general_pattern_id != table.pattern_id
+        ]
+
+    updated = list(per_file)
+    cache: NodeEvalCache = {}
+    for table in tables:
+        post = drop_specialized_rows(
+            table,
+            tables_by_key,
+            argument_specializations_by_table[table.pattern_id],
+            subdag_specializations_by_table[table.pattern_id],
+            timeout,
+            solver_kind,
+            cache,
+        )
+        if post.table_dropped:
+            table.path.unlink()
+        index = table_indices[table.path.name]
+        updated[index] = apply_post_drop_stats(updated[index], post)
+
+    return updated
 
 
 def main() -> None:
@@ -475,9 +1143,30 @@ def main() -> None:
         metavar="N",
         help="Cap the number of kept rows per bitwidth",
     )
+    ap.add_argument(
+        "--specialization-timeout",
+        type=int,
+        default=60,
+        help="Per-query solver timeout for final subdag-specialization pruning",
+    )
+    ap.add_argument(
+        "--solver",
+        type=SolverKind,
+        choices=list(SolverKind),
+        default=SolverKind.bitwuzla,
+        help="SMT solver backend for final subdag-specialization pruning",
+    )
     args = ap.parse_args()
 
+    if args.specialization_timeout < 1:
+        ap.error("--specialization-timeout must be at least 1")
+    if not args.tsv_dir.is_dir():
+        sys.exit(f"error: {args.tsv_dir} is not a directory")
+
     tsv_files = sorted(args.tsv_dir.glob("*.tsv"))
+    if not tsv_files:
+        sys.exit(f"error: no *.tsv files found in {args.tsv_dir}")
+
     args.out_dir.mkdir(parents=True, exist_ok=True)
     name_width = max((len(p.name) for p in tsv_files), default=0)
     options = PruneOptions(
@@ -488,12 +1177,22 @@ def main() -> None:
         max_rows_per_bw=args.max_rows_per_bw,
     )
 
-    total = FileStats.zero()
-    n_empty = 0
     per_file: list[FileStats] = []
     for path in tsv_files:
         stats = prune_file(path, args.out_dir, options)
         per_file.append(stats)
+
+    per_file = drop_specialized_rows_after_pruning(
+        tsv_files,
+        args.out_dir,
+        per_file,
+        args.specialization_timeout,
+        args.solver,
+    )
+
+    total = FileStats.zero()
+    n_empty = 0
+    for path, stats in zip(tsv_files, per_file):
         print(
             f"{path.name:<{name_width}}  rows: {stats.rows_seen:>6}   "
             f"kept: {stats.rows_kept:>5}"
@@ -629,8 +1328,19 @@ def main() -> None:
             ("bottom", total.bottom, total.bottom_count),
             ("ideal==top", total.top, total.top_count),
             ("locally complete", total.sequential, total.sequential_count),
+            ("timeout", total.timeout, total.timeout_count),
             ("subsumed", total.subsumed, total.subsumed_count),
             ("capped", total.capped, total.capped_count),
+            (
+                "argument-specialized",
+                total.argument_specialized,
+                total.argument_specialized_count,
+            ),
+            (
+                "subdag-specialized",
+                total.subdag_specialized,
+                total.subdag_specialized_count,
+            ),
         ]
     )
 

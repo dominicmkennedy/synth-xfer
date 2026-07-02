@@ -275,9 +275,7 @@ class PatternDag:
     @classmethod
     def from_id(cls, pattern_id: str) -> "PatternDag":
         tokens = pattern_id.split("_")
-        if tokens[0].startswith(_SSA_ID_PREFIX) and len(tokens[0]) > len(
-            _SSA_ID_PREFIX
-        ):
+        if tokens[0].startswith(_SSA_ID_PREFIX) and len(tokens[0]) > len(_SSA_ID_PREFIX):
             return cls.from_ssa_id(pattern_id)
 
         pos = 0

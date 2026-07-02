@@ -108,9 +108,10 @@ python3 -m synth_xfer.llvm_eval.run_opt_benchmark \
 one wall-clock seconds value. It uses the same `opt` flags as the other modes,
 does not use `perf`, and does not require the `cset` setup.
 
-`--comptime` is Linux-only. It enters the configured `cset shield` cpuset for
-the whole benchmark run, then runs each `opt` invocation under pinned `taskset`
-and `perf stat`. It writes JSON keyed by benchmark-relative `.ll` path:
+`--comptime` is Linux-only. It uses the benchmark process's current CPU
+affinity for the whole run, then runs each `opt` invocation under pinned
+`taskset` and `perf stat`. It writes JSON keyed by benchmark-relative `.ll`
+path:
 
 ```json
 {
@@ -121,13 +122,19 @@ and `perf stat`. It writes JSON keyed by benchmark-relative `.ll` path:
 }
 ```
 
-With `--comptime-repeat N`, each metric contains N samples. The default `--jobs`
-is the current CPU affinity count inside the shield, with one pinned worker per
-CPU. Configure a shield before running, for example:
+With `--comptime-repeat N`, each metric contains N samples. Restrict normal
+system work to housekeeping CPUs, then run the benchmark in a separate scope on
+the reserved CPUs. In `--comptime` mode, the runner reserves the last CPU in its
+affinity for `perf` and uses the remaining CPUs as pinned `opt` workers. For
+example, with CPUs 8-9 reserved for system work and CPUs 0-7 reserved for the
+benchmark, the runner pins `perf` to CPU 7 and defaults to seven `opt` workers
+on CPUs 0-6:
 
 ```bash
-sudo cset shield --cpu=1-15 --kthread=on
-python3 -m synth_xfer.llvm_eval.run_opt_benchmark \
+sudo systemd-run --scope --slice=benchmark.slice \
+    -p AllowedCPUs=0-7 \
+    --uid "$USER" --same-dir \
+    python3 -m synth_xfer.llvm_eval.run_opt_benchmark \
     --bench-path $BENCH_DIR \
     --opt-path $OPT \
     --comptime outputs/comptime.json \
