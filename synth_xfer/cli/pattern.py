@@ -158,12 +158,10 @@ def main() -> None:
     if args.command == "analyze":
         domain = AbstractDomain[args.domain]
         report = analyze_pattern(args.op, domain)
-        refined_patterns = refine_pattern(args.op, domain)
+        refinement = refine_pattern(args.op, domain)
         sections = [format_pattern_report(report)]
-        if not report.coincides and tuple(
-            str(pattern) for pattern in refined_patterns
-        ) != (str(args.op),):
-            refined_section = format_refined_patterns(refined_patterns)
+        if not report.coincides and refinement.kind != "unchanged_incomplete":
+            refined_section = format_refined_patterns(refinement)
             if refined_section:
                 sections.append(refined_section)
         print("\n\n".join(sections))

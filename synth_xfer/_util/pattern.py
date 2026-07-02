@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from synth_xfer._util.domain import AbstractDomain
 from synth_xfer._util.eval import eval_pattern_exact, eval_pattern_norm
@@ -153,6 +154,14 @@ class PatternReport:
     nodes: tuple[PatternNodeReport, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class PatternRefinement:
+    source: PatternDag
+    kind: Literal["droppable", "unchanged_incomplete", "producer_cut", "split"]
+    kept: tuple[PatternDag, ...]
+    dropped: tuple[PatternDag, ...]
+
+
 def _consumer_counts(dag: PatternDag) -> dict[PatternRef, int]:
     consumers: dict[PatternRef, int] = {
         **{ArgRef(i): 0 for i in range(dag.num_args)},
@@ -247,47 +256,127 @@ def _split_pattern(
     return upstream, downstream
 
 
-def refine_pattern(dag: PatternDag, domain: AbstractDomain) -> tuple[PatternDag, ...]:
+def _complete_split_edges(
+    dag: PatternDag,
+    domain: AbstractDomain,
+) -> tuple[tuple[NodeRef, int], ...]:
+    report = analyze_pattern(dag, domain)
+    edges: list[tuple[NodeRef, int]] = []
+
+    for node_report in report.nodes:
+        consumer = NodeRef(node_report.index)
+        for operand_index, operand_report in enumerate(node_report.operand_reports):
+            if not isinstance(operand_report.ref, NodeRef):
+                continue
+            if not operand_report.complete:
+                continue
+            if _split_shares_args(dag, consumer, operand_index):
+                continue
+            edges.append((consumer, operand_index))
+
+    return tuple(edges)
+
+
+def is_root_preserving_cut_projection(
+    source: PatternDag,
+    candidate: PatternDag,
+) -> bool:
+    cut_map: dict[PatternRef, ArgRef] = {}
+    node_map: dict[NodeRef, NodeRef] = {}
+
+    def match(source_ref: PatternRef, candidate_ref: PatternRef) -> bool:
+        if existing := cut_map.get(source_ref):
+            return existing == candidate_ref
+        if isinstance(source_ref, NodeRef) and (existing := node_map.get(source_ref)):
+            return existing == candidate_ref
+
+        if isinstance(candidate_ref, ArgRef):
+            cut_map[source_ref] = candidate_ref
+            return True
+        if isinstance(source_ref, ArgRef):
+            return False
+
+        source_node = source.nodes[source_ref.index]
+        candidate_node = candidate.nodes[candidate_ref.index]
+        if source_node.op != candidate_node.op:
+            return False
+        if len(source_node.operands) != len(candidate_node.operands):
+            return False
+
+        node_map[source_ref] = candidate_ref
+        return all(
+            match(source_operand, candidate_operand)
+            for source_operand, candidate_operand in zip(
+                source_node.operands,
+                candidate_node.operands,
+                strict=True,
+            )
+        )
+
+    return match(source.result, candidate.result)
+
+
+def refine_pattern(dag: PatternDag, domain: AbstractDomain) -> PatternRefinement:
     # Refinement rules:
     # - Complete node-to-node edges are uninteresting composition boundaries, so
-    #   try splitting the DAG into the producer-side subpattern and the root-side
-    #   subpattern with that edge replaced by a fresh argument.
+    #   split them into the producer-side subpattern and the root-side subpattern
+    #   with that edge replaced by a fresh argument.
     # - Reused operands are never split because the shared value is semantically
     #   relevant to why the full pattern does not coincide.
     # - If the two split subpatterns would share any original argN, reject the
     #   split instead of duplicating correlated inputs across independent DAGs.
-    # - Recurse after every accepted split and return only final refined leaves;
-    #   drop leaves that are single ops or whose operand uses are all complete.
-    seen: dict[str, PatternDag] = {}
+    # - Recurse after every accepted split and return final kept and dropped
+    #   leaves separately, so callers can distinguish producer cuts from splits.
+    kept: dict[str, PatternDag] = {}
+    dropped: dict[str, PatternDag] = {}
+    visited: set[str] = set()
+    split_found = False
 
     def add_leaf(leaf: PatternDag) -> None:
         if _is_droppable_refinement(leaf, domain):
+            dropped.setdefault(str(leaf), leaf)
             return
-        seen.setdefault(str(leaf), leaf)
+        kept.setdefault(str(leaf), leaf)
 
     def visit(current: PatternDag) -> None:
-        report = analyze_pattern(current, domain)
-        split_found = False
+        nonlocal split_found
 
-        for node_report in report.nodes:
-            consumer = NodeRef(node_report.index)
-            for operand_index, operand_report in enumerate(node_report.operand_reports):
-                if not isinstance(operand_report.ref, NodeRef):
-                    continue
-                if not operand_report.complete:
-                    continue
-                if _split_shares_args(current, consumer, operand_index):
-                    continue
+        current_text = str(current)
+        if current_text in visited:
+            return
+        visited.add(current_text)
 
-                split_found = True
-                for subpattern in _split_pattern(current, consumer, operand_index):
-                    visit(subpattern)
-
-        if not split_found:
+        edges = _complete_split_edges(current, domain)
+        if not edges:
             add_leaf(current)
+            return
+
+        for consumer, operand_index in edges:
+            upstream, downstream = _split_pattern(current, consumer, operand_index)
+            split_found = True
+            visit(upstream)
+            visit(downstream)
 
     visit(dag)
-    return tuple(seen.values())
+
+    kept_leaves = tuple(kept.values())
+    dropped_leaves = tuple(dropped.values())
+    if not kept_leaves:
+        kind: Literal["droppable", "unchanged_incomplete", "producer_cut", "split"] = (
+            "droppable"
+        )
+    elif kept_leaves == (dag,) and not split_found:
+        kind = "unchanged_incomplete"
+    elif (
+        len(kept_leaves) == 1
+        and str(kept_leaves[0]) != str(dag)
+        and is_root_preserving_cut_projection(dag, kept_leaves[0])
+    ):
+        kind = "producer_cut"
+    else:
+        kind = "split"
+
+    return PatternRefinement(dag, kind, kept_leaves, dropped_leaves)
 
 
 def format_pattern_report(report: PatternReport) -> str:
@@ -347,12 +436,18 @@ def format_pattern_report(report: PatternReport) -> str:
     return "\n".join(lines)
 
 
-def format_refined_patterns(refined_patterns: tuple[PatternDag, ...]) -> str:
-    if not refined_patterns:
+def format_refined_patterns(refinement: PatternRefinement) -> str:
+    if not refinement.kept and not refinement.dropped:
         return ""
 
-    lines = ["Refined Patterns:"]
-    lines.extend(f"  {pattern}" for pattern in refined_patterns)
+    lines = [f"Refinement: {refinement.kind}", "Kept Patterns:"]
+    if refinement.kept:
+        lines.extend(f"  {pattern}" for pattern in refinement.kept)
+    else:
+        lines.append("  <none>")
+    if refinement.dropped:
+        lines.append("Dropped Patterns:")
+        lines.extend(f"  {pattern}" for pattern in refinement.dropped)
     return "\n".join(lines)
 
 

@@ -38,6 +38,9 @@ from xdsl_smt.dialects.transfer import (
     ZextBoolOp,
 )
 
+_MAX_PATTERN_ID_LEN = 251
+_SSA_ID_PREFIX = "s"
+
 
 class PatternOp(StrEnum):
     Add = "Add"
@@ -258,16 +261,25 @@ class PatternDag:
             expression = str(reparsed)
 
         ident = re.sub(r"[\s,()]+", "_", expression).strip("_")
-        if len(ident) > 251:
+        if len(ident) <= _MAX_PATTERN_ID_LEN:
+            return ident
+
+        ident = self.to_ssa_id()
+        if len(ident) > _MAX_PATTERN_ID_LEN:
             raise ValueError(
-                f"pattern too long to encode as a .inc filename "
-                f"({len(ident)} > 251 chars): {self!s}"
+                f"pattern too long to encode as a compact .inc filename "
+                f"({len(ident)} > {_MAX_PATTERN_ID_LEN} chars): {self!s}"
             )
         return ident
 
     @classmethod
     def from_id(cls, pattern_id: str) -> "PatternDag":
         tokens = pattern_id.split("_")
+        if tokens[0].startswith(_SSA_ID_PREFIX) and len(tokens[0]) > len(
+            _SSA_ID_PREFIX
+        ):
+            return cls.from_ssa_id(pattern_id)
+
         pos = 0
 
         if len(tokens) == 1 and re.fullmatch(r"arg\d+", tokens[0]) is None:
@@ -360,6 +372,119 @@ class PatternDag:
             )
 
         n = len(raw)
+
+        def remap(operand: PatternRef) -> PatternRef:
+            if isinstance(operand, ArgRef):
+                return operand
+            return NodeRef(n - 1 - operand.index)
+
+        forward = [
+            (raw[n - 1 - i][0], tuple(remap(o) for o in raw[n - 1 - i][1]))
+            for i in range(n)
+        ]
+        return cls._from_forward_nodes(forward, NodeRef(n - 1))
+
+    def _ssa_order(self) -> tuple[dict[NodeRef, int], list[NodeRef]]:
+        node_ids: dict[NodeRef, int] = {}
+        ordered: list[NodeRef] = []
+
+        def assign(ref: PatternRef) -> None:
+            if isinstance(ref, ArgRef):
+                return
+            if ref in node_ids:
+                return
+
+            node_ids[ref] = len(ordered)
+            ordered.append(ref)
+            for operand in self.nodes[ref.index].operands:
+                assign(operand)
+
+        assign(self.result)
+        return node_ids, ordered
+
+    def to_ssa(self) -> str:
+        """Render the DAG as compact SSA text with %0 as the result node."""
+        node_ids, ordered = self._ssa_order()
+
+        def render_ref(ref: PatternRef) -> str:
+            if isinstance(ref, ArgRef):
+                return f"arg{ref.index}"
+            return f"%{node_ids[ref]}"
+
+        stmts: list[str] = []
+        for ref in ordered:
+            node = self.nodes[ref.index]
+            operands = ", ".join(render_ref(operand) for operand in node.operands)
+            stmts.append(f"%{node_ids[ref]} = {node.op.value}({operands})")
+        return "; ".join(stmts)
+
+    def to_ssa_id(self) -> str:
+        """Render the DAG as a compact, reversible C++/filesystem-safe SSA ID."""
+        node_ids, ordered = self._ssa_order()
+        tokens: list[str] = []
+
+        for i, ref in enumerate(ordered):
+            node = self.nodes[ref.index]
+            if i == 0:
+                tokens.append(f"{_SSA_ID_PREFIX}{node.op.value}")
+            else:
+                tokens.append(node.op.value)
+            for operand in node.operands:
+                if isinstance(operand, ArgRef):
+                    tokens.append(f"a{operand.index}")
+                else:
+                    tokens.append(f"n{node_ids[operand]}")
+        return "_".join(tokens)
+
+    @classmethod
+    def from_ssa_id(cls, pattern_id: str) -> "PatternDag":
+        tokens = pattern_id.split("_")
+        if not tokens or not tokens[0].startswith(_SSA_ID_PREFIX):
+            raise ValueError(f"not an SSA pattern id: {pattern_id!r}")
+
+        tokens[0] = tokens[0][len(_SSA_ID_PREFIX) :]
+        if not tokens[0]:
+            raise ValueError(f"not an SSA pattern id: {pattern_id!r}")
+
+        pos = 0
+        raw: list[tuple[PatternOp, list[PatternRef]]] = []
+        while pos < len(tokens):
+            op_token = tokens[pos]
+            pos += 1
+            try:
+                op = PatternOp(op_token)
+            except ValueError as exc:
+                raise ValueError(
+                    f"unknown op token {op_token!r} in SSA pattern id {pattern_id!r}"
+                ) from exc
+
+            operands: list[PatternRef] = []
+            for _ in op.spec.operand_types:
+                if pos >= len(tokens):
+                    raise ValueError(f"truncated SSA pattern id: {pattern_id!r}")
+                token = tokens[pos]
+                pos += 1
+                if arg_match := re.fullmatch(r"a(\d+)", token):
+                    operands.append(ArgRef(int(arg_match.group(1))))
+                elif node_match := re.fullmatch(r"n(\d+)", token):
+                    operands.append(NodeRef(int(node_match.group(1))))
+                else:
+                    raise ValueError(
+                        f"malformed operand token {token!r} in SSA pattern id "
+                        f"{pattern_id!r}"
+                    )
+            raw.append((op, operands))
+
+        n = len(raw)
+        if n == 0:
+            raise ValueError(f"empty SSA pattern id: {pattern_id!r}")
+        for _, operands in raw:
+            for operand in operands:
+                if isinstance(operand, NodeRef) and operand.index >= n:
+                    raise ValueError(
+                        f"node reference n{operand.index} out of range in SSA "
+                        f"pattern id {pattern_id!r}"
+                    )
 
         def remap(operand: PatternRef) -> PatternRef:
             if isinstance(operand, ArgRef):

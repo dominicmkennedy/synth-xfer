@@ -195,9 +195,24 @@ def build_stub_transformers(
     if top is not None:
         dags = dags[:top]
 
-    if domain == AbstractDomain.KnownBits:
-        return {dag.to_id(): render_kb_top(dag.to_id(), dag.num_args) for dag in dags}
-    return {dag.to_id(): render_cr_top(dag.to_id(), dag.num_args, domain) for dag in dags}
+    transformers: dict[str, str] = {}
+    skipped = 0
+    for dag in dags:
+        try:
+            pid = dag.to_id()
+        except ValueError as exc:
+            skipped += 1
+            print(f"skipping pattern with oversized id: {exc}", file=sys.stderr)
+            continue
+
+        if domain == AbstractDomain.KnownBits:
+            transformers[pid] = render_kb_top(pid, dag.num_args)
+        else:
+            transformers[pid] = render_cr_top(pid, dag.num_args, domain)
+
+    if skipped:
+        print(f"skipped {skipped} patterns with oversized ids", file=sys.stderr)
+    return transformers
 
 
 def _read_table_tsv(path: Path) -> tuple[str, AbstractDomain, int, TableRows]:
