@@ -139,18 +139,28 @@ ASLR, enable userland `perf`, control CPU frequency, and avoid unrelated load.
 
 ## Cross-validation
 
-`cross_validate.sh` runs K-fold Cross-validation on llvm-opt-benchmark.
-
-`cv_split.py` partitions the benchmark dirs
-into K size-balanced folds (by `original/*.ll` bytes), then per fold
-it trains tables (phase 1) on the other folds and evals (phase 2) on the
-held-out fold.
+`cross_validate.py` runs file-level K-fold cross-validation on llvm-opt-benchmark
+(KnownBits). `cv_split.py` partitions the benchmark's `.ll` files into K
+size-balanced folds (by bytes, scattered so no project is confined to one fold).
+Mining is part of the loop, so nothing about a held-out fold leaks into its
+training: per fold it mines + refines a pattern list and builds tables (phase 1)
+on the other K-1 folds, then evals (phase 2) on the held-out fold. It shells out to
+`phase1_build_tables.sh` / `phase2_eval.sh` and the `run_opt_benchmark` mining mode;
+the DAG combining and cross-fold stats aggregation happen in-process.
 
 ```bash
-PAT_LIST=tests/data/pattern/test_patterns.tsv \
-    ./synth_xfer/llvm_eval/cross_validate.sh
+python3 -m synth_xfer.llvm_eval.cross_validate \
+    --llvm-dir /home/ubuntu/repos/llvm-project \
+    --bench-dir /home/ubuntu/repos/llvm-opt-benchmark \
+    --k 3 --top 100 --subset abc,zstd --cv-dir outputs/cv_test
 ```
 
-Requires `LLVM_DIR`, `BENCH_DIR`, `PAT_LIST`. Optional: `CV_DIR` (default
-`outputs/cv`), `K` (default `10`), `SUBSET` (restrict to comma-separated dirs).
-Per-fold outputs: `CV_DIR/fold_<i>/{dirs.txt, tables/, stats.json}`.
+Requires `--llvm-dir`, `--bench-dir` (a built `opt` with the dag-slicer must already
+exist at `<llvm-dir>/build/bin/opt`). Optional: `--cv-dir` (default `outputs/cv`),
+`--k` (default `5`), `--subset` (restrict to comma-separated project names),
+`--seed`, `--top` (keep only the top K patterns by count, default 10000). Each
+fold's pattern list is the refine-only (non-enumerated) output of `process_patterns`,
+with patterns too long to encode as a filename dropped (backfilled up to `--top`).
+Per-fold outputs:
+`CV_DIR/fold_<i>/{files.txt, slice/dags.tsv, patterns.tsv, work/pruned/, stats.json}`;
+the aggregate is written to `CV_DIR/summary.json`.

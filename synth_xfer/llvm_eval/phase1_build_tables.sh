@@ -19,6 +19,8 @@
 #               tables/, pruned/); pass
 #               WORK_DIR/pruned as TABLE_DIR to phase2
 #   FILTER      benchmark subdir filter, "" = all  (default "" = whole suite)
+#   FILES       file listing bench-relative .ll     (default "" = no file filter)
+#               paths to restrict to (--filter-file)
 set -euo pipefail
 
 : "${LLVM_DIR:?must be set to the llvm-project checkout (with build/bin/opt)}"
@@ -26,10 +28,12 @@ set -euo pipefail
 : "${PAT_LIST:?must be set to a TSV with a \`pattern\` column}"
 WORK_DIR="${WORK_DIR:-outputs/run}"
 FILTER="${FILTER:-}"
+FILES="${FILES:-}"
 
 OPT="$LLVM_DIR/build/bin/opt"
 filter_arg=()
-[[ -n "$FILTER" ]] && filter_arg=(--filter "$FILTER")
+[[ -n "$FILTER" ]] && filter_arg+=(--filter "$FILTER")
+[[ -n "$FILES" ]] && filter_arg+=(--filter-file "$FILES")
 
 mkdir -p "$WORK_DIR"
 
