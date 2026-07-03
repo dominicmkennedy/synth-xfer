@@ -15,6 +15,8 @@
 #   TABLE_DIR   pruned tables from phase 1         (default outputs/pruned)
 #   STATS       where the stats JSON goes          (default outputs/stats.json)
 #   FILTER      benchmark subdir filter, "" = all  (default "" = whole suite)
+#   FILES       file listing bench-relative .ll     (default "" = no file filter)
+#               paths to restrict to (--filter-file)
 set -euo pipefail
 
 : "${LLVM_DIR:?must be set to the llvm-project checkout (with build/bin/opt)}"
@@ -22,10 +24,12 @@ set -euo pipefail
 TABLE_DIR="${TABLE_DIR:-outputs/pruned}"
 STATS="${STATS:-outputs/stats.json}"
 FILTER="${FILTER:-}"
+FILES="${FILES:-}"
 
 OPT="$LLVM_DIR/build/bin/opt"
 filter_arg=()
-[[ -n "$FILTER" ]] && filter_arg=(--filter "$FILTER")
+[[ -n "$FILTER" ]] && filter_arg+=(--filter "$FILTER")
+[[ -n "$FILES" ]] && filter_arg+=(--filter-file "$FILES")
 
 mkdir -p "$(dirname "$STATS")"
 
