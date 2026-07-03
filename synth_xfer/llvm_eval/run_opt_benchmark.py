@@ -6,6 +6,7 @@ import json
 from multiprocessing import Pool, current_process
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -43,7 +44,14 @@ STATS_NONDETER_KEYS = {
 }
 
 RunMode = Literal[
-    "stats", "histogram", "slice-kb", "slice-ucr", "slice-scr", "comptime", "walltime"
+    "stats",
+    "histogram",
+    "slice-kb",
+    "slice-ucr",
+    "slice-scr",
+    "comptime",
+    "walltime",
+    "kbopt-log",
 ]
 RunStatus = Literal["success", "fail", "timeout", "crash"]
 PerfMetric = int | float
@@ -62,6 +70,7 @@ _MODE: RunMode | None = None
 _COMPTIME_REPEAT: int = 3
 _COMPTIME_CPUS: tuple[int, ...] = ()
 _COMPTIME_PERF_CPU: int | None = None
+KBOPT_RE = re.compile(r"KBOPT:(.+):(\d+)")
 
 
 def _init_worker(
@@ -169,6 +178,8 @@ def run_opt(input_file: Path) -> OptResult:
             cmd += ["-debug-only=dag-slicer", "-enable-uconstrange-pattern-mining"]
         elif _MODE == "slice-scr":
             cmd += ["-debug-only=dag-slicer", "-enable-sconstrange-pattern-mining"]
+        elif _MODE == "kbopt-log":
+            cmd += ["--LogKBOpts"]
 
         if _MODE == "walltime":
             start = time.perf_counter()
@@ -235,6 +246,12 @@ def run_opt(input_file: Path) -> OptResult:
 
         if _MODE == "histogram":
             return (input_file, "success", {}, "")
+
+        if _MODE == "kbopt-log":
+            counts: collections.Counter[str] = collections.Counter()
+            for match in KBOPT_RE.finditer(ret.stderr.decode()):
+                counts[f"{match.group(1)}:{match.group(2)}"] += 1
+            return (input_file, "success", dict(counts), "")
 
         err = ret.stderr.decode()
         stats = {}
@@ -485,6 +502,15 @@ def main() -> None:
         ),
     )
     p.add_argument(
+        "--kbopt-log",
+        type=Path,
+        default=None,
+        help=(
+            "Aggregated JSON output path for KBOPT:<file>:<line> logs emitted "
+            "by opt when --LogKBOpts is enabled."
+        ),
+    )
+    p.add_argument(
         "--comptime-repeat",
         type=int,
         default=3,
@@ -529,6 +555,7 @@ def main() -> None:
         args.stats is not None,
         args.comptime is not None,
         args.walltime is not None,
+        args.kbopt_log is not None,
         args.pattern_hist is not None,
         args.slice_kb,
         args.slice_ucr,
@@ -536,8 +563,8 @@ def main() -> None:
     ]
     if sum(selected_modes) != 1:
         p.error(
-            "exactly one of --stats, --comptime, --walltime, --pattern-hist, "
-            "--slice-kb, --slice-ucr, or --slice-scr is required"
+            "exactly one of --stats, --comptime, --walltime, --kbopt-log, "
+            "--pattern-hist, --slice-kb, --slice-ucr, or --slice-scr is required"
         )
     if args.comptime_repeat < 1:
         p.error("--comptime-repeat must be at least 1")
@@ -548,6 +575,8 @@ def main() -> None:
         mode = "comptime"
     elif args.walltime is not None:
         mode = "walltime"
+    elif args.kbopt_log is not None:
+        mode = "kbopt-log"
     elif args.pattern_hist is not None:
         mode = "histogram"
     elif args.slice_kb:
@@ -618,6 +647,8 @@ def main() -> None:
         output_dir = args.comptime.parent
     elif args.walltime is not None:
         output_dir = args.walltime.parent
+    elif args.kbopt_log is not None:
+        output_dir = args.kbopt_log.parent
     elif args.pattern_hist is not None:
         output_dir = args.pattern_hist
     else:
@@ -691,6 +722,11 @@ def main() -> None:
         with args.walltime.open("w") as f:
             json.dump(walltime_acc, f, indent=2, sort_keys=True)
         print(f"wall times written to {args.walltime} ({len(walltime_acc)} files)")
+
+    if args.kbopt_log is not None:
+        with args.kbopt_log.open("w") as f:
+            json.dump(stats_acc, f, indent=2, sort_keys=True)
+        print(f"KB opt logs written to {args.kbopt_log} ({len(stats_acc)} keys)")
 
     if hist_dir is not None:
         _merge_histograms(hist_dir, patterns_dir)
