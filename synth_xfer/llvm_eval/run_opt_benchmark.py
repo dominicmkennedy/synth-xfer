@@ -179,7 +179,7 @@ def run_opt(input_file: Path) -> OptResult:
         elif _MODE == "slice-scr":
             cmd += ["-debug-only=dag-slicer", "-enable-sconstrange-pattern-mining"]
         elif _MODE == "kbopt-log":
-            cmd += ["--LogKBOpts"]
+            cmd += ["--log-kbopt"]
 
         if _MODE == "walltime":
             start = time.perf_counter()
