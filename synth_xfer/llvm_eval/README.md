@@ -171,3 +171,21 @@ with patterns too long to encode as a filename dropped (backfilled up to `--top`
 Per-fold outputs:
 `CV_DIR/fold_<i>/{files.txt, slice/dags.tsv, patterns.tsv, work/pruned/, stats.json}`;
 the aggregate is written to `CV_DIR/summary.json`.
+
+### Train-on-all baseline
+
+`--train-all` trains ONE model on **all** folds and evaluates it on each fold (in-sample),
+instead of leave-one-out — a per-fold table comparable to the CV summary whose `sum` row
+is the whole-suite in-sample result. It reuses an existing split + mining (pass
+`--reuse-from` a prior CV dir; no re-mining) and writes to a separate `--cv-dir`, leaving
+the CV results untouched:
+
+```bash
+python3 -m synth_xfer.llvm_eval.cross_validate --train-all \
+    --reuse-from outputs/cv_full --cv-dir outputs/cv_full_trainall \
+    --llvm-dir "$LLVM_DIR" --bench-dir "$BENCH_DIR"
+```
+
+Reuses only `<reuse-from>/fold_*/{files.txt, slice/dags.tsv}`. Produces
+`<cv-dir>/{patterns_all.tsv, train_all.txt, work_all/pruned/, fold_<i>/stats.json,
+summary.json}`. Phase 1 runs once (train on all); phase 2 reruns per fold.

@@ -19,8 +19,8 @@ DOMAIN = AbstractDomain.KnownBits
 METRICS = [
     ("BitsAdded", "value-tracking.PatternKBBitsAdded"),
     ("BitsAddedTop", "value-tracking.PatternKBBitsAddedTopLevel"),
-    ("Matches", "value-tracking.NumKBPatternMatches"),
-    ("ImprovedQ", "value-tracking.NumPatternKBImprovedQueries"),
+    ("MatchesTop", "value-tracking.NumKBPatternMatchesTopLevel"),
+    ("ImprovedQTop", "value-tracking.NumPatternKBImprovedQueriesTopLevel"),
 ]
 
 
@@ -55,6 +55,19 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=10000,
         help="keep only the top K patterns by count (default 10000; pass a large N to keep all)",
+    )
+    ap.add_argument(
+        "--train-all",
+        action="store_true",
+        help="train ONE model on all folds and eval per fold (in-sample), instead of "
+        "leave-one-out. Reuses an existing split+mining; see --reuse-from.",
+    )
+    ap.add_argument(
+        "--reuse-from",
+        type=Path,
+        default=None,
+        help="dir holding an existing fold_*/files.txt + slice/dags.tsv to reuse as "
+        "inputs (default: --cv-dir). Only used with --train-all.",
     )
     return ap.parse_args()
 
@@ -110,15 +123,17 @@ def mine(args: argparse.Namespace, fold_files: list[Path], opt: Path) -> None:
         )
 
 
-def combine_pattern_list(args: argparse.Namespace, others: list[int], out: Path) -> int:
-    """Combine the training folds' mined DAG counts and refine to a pattern list.
+def combine_pattern_list(
+    args: argparse.Namespace, others: list[int], out: Path, src: Path
+) -> int:
+    """Combine the given folds' mined DAG counts (under `src`) and refine to a pattern list.
 
     Disjoint folds -> per-pattern counts are additive, so merging their count maps
-    equals mining the training union (process_patterns sums duplicates the same way).
+    equals mining the union (process_patterns sums duplicates the same way).
     """
     counts: dict[str, int] = {}
     for j in others:
-        dags = args.cv_dir / f"fold_{j}" / "slice" / "dags.tsv"
+        dags = src / f"fold_{j}" / "slice" / "dags.tsv"
         for pat, n in read_pattern_counts(dags).items():
             counts[pat] = counts.get(pat, 0) + n
     print(f">>> refine {len(counts)} training DAGs -> pattern list")
@@ -143,20 +158,36 @@ def combine_pattern_list(args: argparse.Namespace, others: list[int], out: Path)
     return n_pat
 
 
-def summarize(cv_dir: Path, k: int, fold_files: list[Path]) -> None:
+def summarize(
+    cv_dir: Path,
+    k: int,
+    fold_files: list[Path],
+    patterns_file: Path | None = None,
+    title: str = "cross-validation summary (KnownBits) — held-out folds",
+) -> None:
     keys = [key for _, key in METRICS]
+    # In train-all every fold shares one pattern list; otherwise it is per-fold.
+    shared_pat = (
+        len(patterns_file.read_text().splitlines()) - 1
+        if patterns_file is not None and patterns_file.exists()
+        else None
+    )
     rows: list[dict] = []
     for i in range(k):
         stats_path = cv_dir / f"fold_{i}" / "stats.json"
         stats = json.loads(stats_path.read_text()) if stats_path.exists() else {}
         pats = cv_dir / f"fold_{i}" / "patterns.tsv"
+        if shared_pat is not None:
+            n_pat = shared_pat
+        elif pats.exists():
+            n_pat = len(pats.read_text().splitlines()) - 1
+        else:
+            n_pat = 0
         rows.append(
             {
                 "fold": i,
                 "test_files": len(fold_files[i].read_text().split()),
-                "patterns": len(pats.read_text().splitlines()) - 1
-                if pats.exists()
-                else 0,
+                "patterns": n_pat,
                 "metrics": {key: int(stats.get(key, 0)) for key in keys},
             }
         )
@@ -165,7 +196,7 @@ def summarize(cv_dir: Path, k: int, fold_files: list[Path]) -> None:
     def line(cells: list[object]) -> str:
         return "  ".join(f"{c:>15}" for c in cells)
 
-    print("\n=== cross-validation summary (KnownBits) — held-out folds ===")
+    print(f"\n=== {title} ===")
     print(line(["fold", "test_files", "patterns", *(lbl for lbl, _ in METRICS)]))
     for r in rows:
         print(
@@ -202,6 +233,53 @@ def summarize(cv_dir: Path, k: int, fold_files: list[Path]) -> None:
     print(f"\n>>> wrote {out}")
 
 
+def train_all(args: argparse.Namespace, src: Path, base_env: dict[str, str]) -> None:
+    """Train one model on ALL folds (reusing the split+mining under `src`) and eval
+    each fold against it. Writes to args.cv_dir; never touches `src`."""
+    cv = args.cv_dir
+    cv.mkdir(parents=True, exist_ok=True)
+    fold_files = [src / f"fold_{i}" / "files.txt" for i in range(args.k)]
+
+    print(">>> train-on-all: combine ALL folds' DAGs -> one pattern list")
+    combine_pattern_list(args, list(range(args.k)), cv / "patterns_all.tsv", src)
+
+    train_manifest = cv / "train_all.txt"
+    train_manifest.write_text("".join(f.read_text() for f in fold_files))
+
+    print(">>> train (phase 1) on ALL folds")
+    run(
+        [str(HERE / "phase1_build_tables.sh")],
+        env=base_env
+        | {
+            "PAT_LIST": str(cv / "patterns_all.tsv"),
+            "FILES": str(train_manifest),
+            "WORK_DIR": str(cv / "work_all"),
+        },
+    )
+
+    for k in range(args.k):
+        fold = cv / f"fold_{k}"
+        fold.mkdir(parents=True, exist_ok=True)
+        print(f"\n>>> eval (phase 2) on fold {k} (in-sample)")
+        run(
+            [str(HERE / "phase2_eval.sh")],
+            env=base_env
+            | {
+                "TABLE_DIR": str(cv / "work_all" / "pruned"),
+                "FILES": str(fold_files[k]),
+                "STATS": str(fold / "stats.json"),
+            },
+        )
+
+    summarize(
+        cv,
+        args.k,
+        fold_files,
+        patterns_file=cv / "patterns_all.tsv",
+        title="train-on-all summary (KnownBits) — per-fold (in-sample)",
+    )
+
+
 def main() -> None:
     args = parse_args()
     opt = args.llvm_dir / "build" / "bin" / "opt"
@@ -211,6 +289,22 @@ def main() -> None:
     }
     sys.setrecursionlimit(100000)
 
+    if args.train_all:
+        src = args.reuse_from if args.reuse_from else args.cv_dir
+        for i in range(args.k):
+            for p in (
+                src / f"fold_{i}" / "files.txt",
+                src / f"fold_{i}" / "slice" / "dags.tsv",
+            ):
+                if not p.exists():
+                    sys.exit(
+                        f"error: {p} not found; --train-all reuses an existing "
+                        f"split+mining (run cross-validation first, or point "
+                        f"--reuse-from at one with {args.k} folds)"
+                    )
+        train_all(args, src, base_env)
+        return
+
     fold_files = split(args)
     mine(args, fold_files, opt)
 
@@ -219,7 +313,7 @@ def main() -> None:
         others = [j for j in range(args.k) if j != k]
         print(f"\n############ fold {k} / {args.k - 1} ############")
 
-        combine_pattern_list(args, others, fold / "patterns.tsv")
+        combine_pattern_list(args, others, fold / "patterns.tsv", args.cv_dir)
 
         train_manifest = fold / "train_files.txt"
         train_manifest.write_text("".join(fold_files[j].read_text() for j in others))
