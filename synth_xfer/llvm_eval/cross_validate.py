@@ -15,6 +15,9 @@ from synth_xfer.llvm_eval.process_patterns import (
 
 HERE = Path(__file__).resolve().parent
 DOMAIN = AbstractDomain.KnownBits
+# Drop patterns with >= this many nodes before refinement: refine_pattern cost
+# explodes on large DAGs (50+ nodes can take minutes each) and they are rare.
+NODE_CAP = 50
 
 METRICS = [
     ("BitsAdded", "value-tracking.PatternKBBitsAdded"),
@@ -22,6 +25,11 @@ METRICS = [
     ("MatchesTop", "value-tracking.NumKBPatternMatchesTopLevel"),
     ("ImprovedQTop", "value-tracking.NumPatternKBImprovedQueriesTopLevel"),
 ]
+
+
+def done(path: Path, args: argparse.Namespace) -> bool:
+    """True when `path` is a finished artifact we may skip recomputing."""
+    return not args.no_resume and path.exists() and bool(path.stat().st_size)
 
 
 def run(cmd: list[str], env: dict[str, str] | None = None) -> None:
@@ -51,6 +59,12 @@ def parse_args() -> argparse.Namespace:
     )
     ap.add_argument("--seed", type=int, default=0, help="cv_split shuffle seed")
     ap.add_argument(
+        "--by-project",
+        action="store_true",
+        help="split by whole project instead of by file, so no project spans folds "
+        "(held-out projects are unseen in training)",
+    )
+    ap.add_argument(
         "--top",
         type=int,
         default=10000,
@@ -63,6 +77,20 @@ def parse_args() -> argparse.Namespace:
         "leave-one-out. Reuses an existing split+mining; see --reuse-from.",
     )
     ap.add_argument(
+        "--table-timeout",
+        type=float,
+        default=1800.0,
+        help="per-table wall-clock cap (s) for the max-precise step; a table "
+        "over the cap is logged as FAIL instead of blocking the run forever "
+        "(default 1800; pass 0 to disable)",
+    )
+    ap.add_argument(
+        "--no-resume",
+        action="store_true",
+        help="recompute per-fold artifacts (pattern list, tables, stats) even "
+        "when they already exist, instead of skipping the finished steps",
+    )
+    ap.add_argument(
         "--reuse-from",
         type=Path,
         default=None,
@@ -73,9 +101,8 @@ def parse_args() -> argparse.Namespace:
 
 
 def split(args: argparse.Namespace) -> list[Path]:
-    print(
-        f">>> splitting benchmark files into {args.k} size-balanced folds under {args.cv_dir}"
-    )
+    unit = "whole projects" if args.by_project else "benchmark files"
+    print(f">>> splitting {unit} into {args.k} size-balanced folds under {args.cv_dir}")
     cmd = [
         sys.executable,
         "-m",
@@ -91,6 +118,8 @@ def split(args: argparse.Namespace) -> list[Path]:
     ]
     if args.subset:
         cmd += ["--include", args.subset]
+    if args.by_project:
+        cmd += ["--by-project"]
     run(cmd)
     return [args.cv_dir / f"fold_{i}" / "files.txt" for i in range(args.k)]
 
@@ -134,11 +163,11 @@ def combine_pattern_list(
     counts: dict[str, int] = {}
     for j in others:
         dags = src / f"fold_{j}" / "slice" / "dags.tsv"
-        for pat, n in read_pattern_counts(dags).items():
+        for pat, n in read_pattern_counts(dags, node_cap=NODE_CAP).items():
             counts[pat] = counts.get(pat, 0) + n
     print(f">>> refine {len(counts)} training DAGs -> pattern list")
     cache = PatternCache({})
-    result = process_pattern_counts(counts, DOMAIN, cache)
+    result = process_pattern_counts(counts, DOMAIN, cache, jobs=os.cpu_count() or 1)
 
     kept: dict[str, int] = {}
     dropped_long = 0
@@ -240,8 +269,25 @@ def train_all(args: argparse.Namespace, src: Path, base_env: dict[str, str]) -> 
     cv.mkdir(parents=True, exist_ok=True)
     fold_files = [src / f"fold_{i}" / "files.txt" for i in range(args.k)]
 
-    print(">>> train-on-all: combine ALL folds' DAGs -> one pattern list")
-    combine_pattern_list(args, list(range(args.k)), cv / "patterns_all.tsv", src)
+    # patterns_all.tsv marks a dir as train-all's. A dir holding fold stats but
+    # no such marker is a leave-one-out run, and its stats.json paths are the
+    # ones we are about to write: refuse rather than overwrite the comparison
+    # baseline (that is what --reuse-from with a fresh --cv-dir is for).
+    patterns_all = cv / "patterns_all.tsv"
+    resumable = patterns_all.exists()
+    stale = [k for k in range(args.k) if (cv / f"fold_{k}" / "stats.json").exists()]
+    if stale and not resumable:
+        sys.exit(
+            f"error: {cv} already holds leave-one-out results (fold "
+            f"{', '.join(map(str, stale))} stats.json) and would be overwritten. "
+            f"Point --cv-dir at a new directory and pass --reuse-from {cv}"
+        )
+
+    if done(patterns_all, args):
+        print(f">>> {patterns_all} exists, skipping refine")
+    else:
+        print(">>> train-on-all: combine ALL folds' DAGs -> one pattern list")
+        combine_pattern_list(args, list(range(args.k)), patterns_all, src)
 
     train_manifest = cv / "train_all.txt"
     train_manifest.write_text("".join(f.read_text() for f in fold_files))
@@ -251,7 +297,7 @@ def train_all(args: argparse.Namespace, src: Path, base_env: dict[str, str]) -> 
         [str(HERE / "phase1_build_tables.sh")],
         env=base_env
         | {
-            "PAT_LIST": str(cv / "patterns_all.tsv"),
+            "PAT_LIST": str(patterns_all),
             "FILES": str(train_manifest),
             "WORK_DIR": str(cv / "work_all"),
         },
@@ -260,6 +306,11 @@ def train_all(args: argparse.Namespace, src: Path, base_env: dict[str, str]) -> 
     for k in range(args.k):
         fold = cv / f"fold_{k}"
         fold.mkdir(parents=True, exist_ok=True)
+        stats = fold / "stats.json"
+        # Only a dir that was already train-all's may reuse its fold stats.
+        if resumable and done(stats, args):
+            print(f"\n>>> {stats} exists, skipping eval on fold {k}")
+            continue
         print(f"\n>>> eval (phase 2) on fold {k} (in-sample)")
         run(
             [str(HERE / "phase2_eval.sh")],
@@ -267,7 +318,7 @@ def train_all(args: argparse.Namespace, src: Path, base_env: dict[str, str]) -> 
             | {
                 "TABLE_DIR": str(cv / "work_all" / "pruned"),
                 "FILES": str(fold_files[k]),
-                "STATS": str(fold / "stats.json"),
+                "STATS": str(stats),
             },
         )
 
@@ -275,7 +326,7 @@ def train_all(args: argparse.Namespace, src: Path, base_env: dict[str, str]) -> 
         cv,
         args.k,
         fold_files,
-        patterns_file=cv / "patterns_all.tsv",
+        patterns_file=patterns_all,
         title="train-on-all summary (KnownBits) — per-fold (in-sample)",
     )
 
@@ -284,8 +335,16 @@ def main() -> None:
     args = parse_args()
     opt = args.llvm_dir / "build" / "bin" / "opt"
     base_env = os.environ | {
+        # phase1/phase2 invoke a bare `python3`, so put the interpreter running
+        # this script first on PATH: the scripts then hit the same venv we were
+        # started from instead of whatever python3 the launching shell had.
+        "PATH": os.pathsep.join(
+            [str(Path(sys.executable).parent), os.environ.get("PATH", "")]
+        ),
         "LLVM_DIR": str(args.llvm_dir),
         "BENCH_DIR": str(args.bench_dir),
+        "TABLE_TIMEOUT": str(args.table_timeout) if args.table_timeout else "",
+        "RESUME": "0" if args.no_resume else "1",
     }
     sys.setrecursionlimit(100000)
 
@@ -313,7 +372,13 @@ def main() -> None:
         others = [j for j in range(args.k) if j != k]
         print(f"\n############ fold {k} / {args.k - 1} ############")
 
-        combine_pattern_list(args, others, fold / "patterns.tsv", args.cv_dir)
+        # Each step writes one artifact and the next step reads it, so an
+        # interrupted run resumes by skipping whatever is already on disk.
+        patterns = fold / "patterns.tsv"
+        if done(patterns, args):
+            print(f">>> {patterns} exists, skipping refine")
+        else:
+            combine_pattern_list(args, others, patterns, args.cv_dir)
 
         train_manifest = fold / "train_files.txt"
         train_manifest.write_text("".join(fold_files[j].read_text() for j in others))
@@ -323,22 +388,26 @@ def main() -> None:
             [str(HERE / "phase1_build_tables.sh")],
             env=base_env
             | {
-                "PAT_LIST": str(fold / "patterns.tsv"),
+                "PAT_LIST": str(patterns),
                 "FILES": str(train_manifest),
                 "WORK_DIR": str(fold / "work"),
             },
         )
 
-        print(f">>> eval (phase 2) on held-out fold {k}")
-        run(
-            [str(HERE / "phase2_eval.sh")],
-            env=base_env
-            | {
-                "TABLE_DIR": str(fold / "work" / "pruned"),
-                "FILES": str(fold_files[k]),
-                "STATS": str(fold / "stats.json"),
-            },
-        )
+        stats = fold / "stats.json"
+        if done(stats, args):
+            print(f">>> {stats} exists, skipping eval")
+        else:
+            print(f">>> eval (phase 2) on held-out fold {k}")
+            run(
+                [str(HERE / "phase2_eval.sh")],
+                env=base_env
+                | {
+                    "TABLE_DIR": str(fold / "work" / "pruned"),
+                    "FILES": str(fold_files[k]),
+                    "STATS": str(stats),
+                },
+            )
 
     summarize(args.cv_dir, args.k, fold_files)
 

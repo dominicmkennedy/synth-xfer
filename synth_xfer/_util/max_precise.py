@@ -1,7 +1,9 @@
+from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from io import StringIO
-from multiprocessing import Pool
+from multiprocessing import Pool, TimeoutError as MPTimeoutError
+from multiprocessing.pool import Pool as PoolType
 
 import pandas as pd
 from xdsl.context import Context
@@ -527,10 +529,33 @@ def _comment_row(row: pd.Series, columns: list[str]) -> str:
     return "# " + "\t".join(str(row[column]) for column in columns)
 
 
+def warm_fork_imports() -> None:
+    """Import xdsl_smt's lazily-imported canonicalization patterns up front.
+
+    `HasCanonicalizationPatternsTrait.get_canonicalization_patterns` imports its
+    patterns inside the method body, so the first CanonicalizePass in a process
+    runs an import while holding importlib's per-module lock. fork() clones only
+    the calling thread, so forking at that instant hands every child a lock that
+    no thread in the child will ever release, and the children wedge forever in
+    `_lock_unlock_module`. Doing these imports before any fork closes the window.
+
+    Call this before creating a process pool (and before starting any threads).
+    """
+    import importlib
+    import pkgutil
+
+    import xdsl_smt.passes.canonicalization_patterns as patterns
+
+    for module in pkgutil.iter_modules(patterns.__path__):
+        importlib.import_module(f"{patterns.__name__}.{module.name}")
+
+
 def fill_hbw_rows(
     data: EnumData,
     timeout: int,
     solver_kind: SolverKind,
+    table_timeout: float | None = None,
+    pool: PoolType | None = None,
 ) -> tuple[EnumData, list[str]]:
     hbw_bws = {bw for bw, _, _ in data.metadata.hbw}
     arg_cols = [f"arg_{i}" for i in range(data.metadata.arity)]
@@ -545,11 +570,36 @@ def fill_hbw_rows(
     ]
 
     processor = RowProcessor(data.metadata.op, data.metadata.domain, timeout, solver_kind)
-    if len(tasks) <= 1:
-        results = [processor(task) for task in tasks]
+    if not tasks:
+        results = []
+    elif len(tasks) == 1 and table_timeout is None:
+        results = [processor(tasks[0])]
     else:
-        with Pool() as pool:
-            results = pool.map(processor, tasks)
+        # Bound the whole table by wall clock: plain pool.map() blocks forever if
+        # a worker dies or wedges, so cap it with map_async().get(timeout) and
+        # abandon the table instead of deadlocking the run.
+        #
+        # `pool` is normally supplied by the caller and shared across tables. Do
+        # NOT fork a pool per table from a multi-threaded caller: fork() clones
+        # only the calling thread, so a lock held by a sibling thread (notably
+        # importlib's, see warm_fork_imports) is inherited locked and ownerless
+        # and every child wedges. Callers that own the pool must create it while
+        # still single-threaded.
+        with ExitStack() as stack:
+            owned = pool is None
+            if pool is None:
+                pool = stack.enter_context(Pool())
+            async_result = pool.map_async(processor, tasks)
+            try:
+                results = async_result.get(table_timeout)
+            except MPTimeoutError:
+                # A shared pool is still running other callers' tables; killing
+                # it would take them down too. Only tear down a pool we own.
+                if owned:
+                    pool.terminate()
+                raise TimeoutError(
+                    f"table exceeded {table_timeout}s wall-clock cap ({len(tasks)} rows)"
+                )
 
     df = data.enumdata.copy()
     columns = list(df.columns)

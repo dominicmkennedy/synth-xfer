@@ -146,9 +146,11 @@ ASLR, enable userland `perf`, control CPU frequency, and avoid unrelated load.
 
 ## Cross-validation
 
-`cross_validate.py` runs file-level K-fold cross-validation on llvm-opt-benchmark
+`cross_validate.py` runs K-fold cross-validation on llvm-opt-benchmark
 (KnownBits). `cv_split.py` partitions the benchmark's `.ll` files into K
 size-balanced folds (by bytes, scattered so no project is confined to one fold).
+With `--by-project` it instead keeps each project whole in a single fold, so a
+held-out fold's projects are entirely unseen in training.
 Mining is part of the loop, so nothing about a held-out fold leaks into its
 training: per fold it mines + refines a pattern list and builds tables (phase 1)
 on the other K-1 folds, then evals (phase 2) on the held-out fold. It shells out to
@@ -165,12 +167,30 @@ python3 -m synth_xfer.llvm_eval.cross_validate \
 Requires `--llvm-dir`, `--bench-dir` (a built `opt` with the dag-slicer must already
 exist at `<llvm-dir>/build/bin/opt`). Optional: `--cv-dir` (default `outputs/cv`),
 `--k` (default `5`), `--subset` (restrict to comma-separated project names),
-`--seed`, `--top` (keep only the top K patterns by count, default 10000). Each
-fold's pattern list is the refine-only (non-enumerated) output of `process_patterns`,
+`--seed`, `--by-project`, `--top` (keep only the top K patterns by count, default
+10000). Each fold's pattern list is the refine-only (non-enumerated) output of `process_patterns`,
 with patterns too long to encode as a filename dropped (backfilled up to `--top`).
 Per-fold outputs:
 `CV_DIR/fold_<i>/{files.txt, slice/dags.tsv, patterns.tsv, work/pruned/, stats.json}`;
 the aggregate is written to `CV_DIR/summary.json`.
+
+### Project-level folds
+
+File-level splitting puts files from the same project in both training and test, so a
+pattern mined from one file of a project can be scored on its siblings. `--by-project`
+removes that leakage — each of the benchmark's 240 projects lands wholly in one fold:
+
+```bash
+python3 -m synth_xfer.llvm_eval.cross_validate --by-project \
+    --llvm-dir "$LLVM_DIR" --bench-dir "$BENCH_DIR" --cv-dir outputs/cv_proj
+```
+
+Projects are packed largest-first (LPT) rather than shuffled: `llvm` and `zed-rs` are
+~9.5% and ~7.8% of the corpus on their own, so random order leaves folds up to ~1.35x
+apart in bytes, while LPT balances them to 9312.6 MB each. `--seed` has no effect in
+this mode. File counts still vary (6,759-9,078 for k=5) since projects differ in
+file size. Everything downstream is unchanged, so the summary tables are directly
+comparable to a file-level run of the same k.
 
 ### Train-on-all baseline
 
