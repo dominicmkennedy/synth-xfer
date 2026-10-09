@@ -32,9 +32,13 @@ _COMPLETENESS_TABLE: dict[PatternOp, dict[AbstractDomain, tuple[bool, bool]]] = 
     # each tuple is (forward complete, backward complete)
     # binary ops
     PatternOp.Add: {_KB: (False, False), _UCR: (False, False), _SCR: (False, False)},
-    PatternOp.AddNsw: {_KB: (False, False), _UCR: (False, False), _SCR: (True, True)},
-    PatternOp.AddNuw: {_KB: (False, False), _UCR: (True, True), _SCR: (False, False)},
-    PatternOp.AddNswNuw: {_KB: (False, False), _UCR: (True, True), _SCR: (True, True)},
+    PatternOp.AddNsw: {_KB: (False, False), _UCR: (False, False), _SCR: (True, False)},
+    PatternOp.AddNuw: {_KB: (False, False), _UCR: (True, False), _SCR: (False, False)},
+    PatternOp.AddNswNuw: {
+        _KB: (False, False),
+        _UCR: (False, False),
+        _SCR: (False, False),
+    },
     PatternOp.And: {_KB: (True, True), _UCR: (False, False), _SCR: (False, False)},
     PatternOp.Ashr: {_KB: (False, False), _UCR: (False, False), _SCR: (False, False)},
     PatternOp.AshrExact: {
@@ -49,11 +53,19 @@ _COMPLETENESS_TABLE: dict[PatternOp, dict[AbstractDomain, tuple[bool, bool]]] = 
         _SCR: (False, False),
     },
     PatternOp.Mul: {_KB: (False, False), _UCR: (False, False), _SCR: (False, False)},
-    PatternOp.MulNsw: {_KB: (False, False), _UCR: (False, False), _SCR: (False, True)},
-    PatternOp.MulNuw: {_KB: (False, False), _UCR: (False, True), _SCR: (False, False)},
-    PatternOp.MulNswNuw: {_KB: (False, False), _UCR: (False, True), _SCR: (False, True)},
+    PatternOp.MulNsw: {_KB: (False, False), _UCR: (False, False), _SCR: (False, False)},
+    PatternOp.MulNuw: {_KB: (False, False), _UCR: (False, False), _SCR: (False, False)},
+    PatternOp.MulNswNuw: {
+        _KB: (False, False),
+        _UCR: (False, False),
+        _SCR: (False, False),
+    },
     PatternOp.Or: {_KB: (True, True), _UCR: (False, False), _SCR: (False, False)},
-    PatternOp.OrDisjoint: {_KB: (True, True), _UCR: (False, False), _SCR: (False, False)},
+    PatternOp.OrDisjoint: {
+        _KB: (True, False),
+        _UCR: (False, False),
+        _SCR: (False, False),
+    },
     PatternOp.Sdiv: {_KB: (False, False), _UCR: (False, False), _SCR: (False, False)},
     PatternOp.SdivExact: {
         _KB: (False, False),
@@ -70,9 +82,13 @@ _COMPLETENESS_TABLE: dict[PatternOp, dict[AbstractDomain, tuple[bool, bool]]] = 
     },
     PatternOp.Mods: {_KB: (False, False), _UCR: (False, False), _SCR: (False, False)},
     PatternOp.Sub: {_KB: (False, False), _UCR: (False, False), _SCR: (False, False)},
-    PatternOp.SubNsw: {_KB: (False, False), _UCR: (False, False), _SCR: (True, True)},
-    PatternOp.SubNuw: {_KB: (False, False), _UCR: (True, True), _SCR: (False, False)},
-    PatternOp.SubNswNuw: {_KB: (False, False), _UCR: (True, True), _SCR: (True, True)},
+    PatternOp.SubNsw: {_KB: (False, False), _UCR: (False, False), _SCR: (True, False)},
+    PatternOp.SubNuw: {_KB: (False, False), _UCR: (True, False), _SCR: (False, False)},
+    PatternOp.SubNswNuw: {
+        _KB: (False, False),
+        _UCR: (False, False),
+        _SCR: (False, False),
+    },
     PatternOp.Udiv: {_KB: (False, False), _UCR: (False, False), _SCR: (False, False)},
     PatternOp.UdivExact: {
         _KB: (False, False),
@@ -91,8 +107,8 @@ _COMPLETENESS_TABLE: dict[PatternOp, dict[AbstractDomain, tuple[bool, bool]]] = 
     PatternOp.UsubSat: {_KB: (False, False), _UCR: (True, True), _SCR: (False, False)},
     PatternOp.SmulSat: {_KB: (False, False), _UCR: (False, False), _SCR: (False, True)},
     PatternOp.UmulSat: {_KB: (False, False), _UCR: (False, True), _SCR: (False, False)},
-    PatternOp.SshlSat: {_KB: (False, False), _UCR: (False, True), _SCR: (False, False)},
-    PatternOp.UshlSat: {_KB: (False, False), _UCR: (False, True), _SCR: (False, False)},
+    PatternOp.SshlSat: {_KB: (False, False), _UCR: (False, False), _SCR: (False, False)},
+    PatternOp.UshlSat: {_KB: (False, False), _UCR: (False, False), _SCR: (False, False)},
     # unary ops
     PatternOp.Abs: {_KB: (False, False), _UCR: (True, False), _SCR: (False, False)},
     PatternOp.AbsUndef: {_KB: (False, False), _UCR: (True, False), _SCR: (True, False)},
