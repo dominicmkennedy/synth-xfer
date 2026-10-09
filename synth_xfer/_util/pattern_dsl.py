@@ -2,7 +2,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 import re
-from typing import cast
+from typing import Any
 
 from xdsl.dialects.arith import AndIOp
 from xdsl.dialects.builtin import i1
@@ -156,7 +156,7 @@ _CANONICAL_ICMP_SWAPS: dict[PatternOp, PatternOp] = {
 def canonicalize_pattern_operands[T](
     op: PatternOp,
     operands: tuple[T, ...],
-    key: Callable[[T], str],
+    key: Callable[[T], Any],
 ) -> tuple[PatternOp, tuple[T, ...]]:
     if op in COMMUTATIVE_OPS:
         return op, tuple(sorted(operands, key=key))
@@ -215,44 +215,63 @@ class PatternDag:
 
         return False
 
-    def __str__(self) -> str:
+    def canonical_form(self) -> tuple[str, tuple[ArgRef, ...]]:
         if self.is_op():
-            return self.nodes[self.result.index].op.value
-
-        def render_key(node: object) -> str:
-            if isinstance(node, ArgRef):
-                return f"arg{node.index}"
-            node = cast(tuple[PatternOp, tuple[object, ...]], node)
-            op, operands = node
-            return f"{op.value}({', '.join(render_key(operand) for operand in operands)})"
-
-        def canonicalize_ref(ref: PatternRef) -> object:
-            if isinstance(ref, ArgRef):
-                return ref
-            node = self.nodes[ref.index]
-            operands = tuple(canonicalize_ref(operand) for operand in node.operands)
-            op, operands = canonicalize_pattern_operands(
-                node.op,
-                operands,
-                key=render_key,
+            return (
+                self.nodes[self.result.index].op.value,
+                tuple(ArgRef(i) for i in range(self.num_args)),
             )
-
-            return op, operands
 
         arg_map: dict[int, int] = {}
+        order: list[ArgRef] = []
+        # arg_map only grows, so its size identifies the seen-set a key was built under.
+        key_cache: dict[tuple[int, int], object] = {}
 
-        def render_canonical(node: object) -> str:
-            if isinstance(node, ArgRef):
-                return _format_alpha_pattern_ref(node, arg_map)
+        def key(ref: PatternRef) -> object:
+            if isinstance(ref, ArgRef):
+                index = arg_map.get(ref.index)
+                return (1, index) if index is not None else (2,)
 
-            node = cast(tuple[PatternOp, tuple[object, ...]], node)
-            op, operands = node
-            return (
-                f"{op.value}"
-                f"({', '.join(render_canonical(operand) for operand in operands)})"
-            )
+            cache_key = (ref.index, len(arg_map))
+            cached = key_cache.get(cache_key)
+            if cached is None:
+                node = self.nodes[ref.index]
+                op, operands = canonicalize_pattern_operands(
+                    node.op, node.operands, key=key
+                )
+                cached = (0, op.value, tuple(key(operand) for operand in operands))
+                key_cache[cache_key] = cached
+            return cached
 
-        return render_canonical(canonicalize_ref(self.result))
+        def render(ref: PatternRef) -> str:
+            if isinstance(ref, ArgRef):
+                index = arg_map.get(ref.index)
+                if index is None:
+                    index = len(arg_map)
+                    arg_map[ref.index] = index
+                    order.append(ref)
+                return f"arg{index}"
+
+            node = self.nodes[ref.index]
+            op, operands = canonicalize_pattern_operands(node.op, node.operands, key=key)
+            return f"{op.value}({', '.join(render(operand) for operand in operands)})"
+
+        text = render(self.result)
+
+        # A single node over distinct args renders as the bare op name (see is_op),
+        # so the text round-trips through the parser unchanged.
+        root = self.nodes[self.result.index]
+        if (
+            len(self.nodes) == 1
+            and all(isinstance(operand, ArgRef) for operand in root.operands)
+            and len(set(root.operands)) == len(root.operands)
+        ):
+            op, _ = canonicalize_pattern_operands(root.op, root.operands, key=key)
+            return op.value, tuple(order)
+        return text, tuple(order)
+
+    def __str__(self) -> str:
+        return self.canonical_form()[0]
 
     def to_id(self) -> str:
         expression = str(self)

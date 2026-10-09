@@ -160,7 +160,7 @@ def main() -> None:
         report = analyze_pattern(args.op, domain)
         refinement = refine_pattern(args.op, domain)
         sections = [format_pattern_report(report)]
-        if not report.coincides and refinement.kind != "unchanged_incomplete":
+        if not report.coincides and refinement.kind != "unchanged":
             refined_section = format_refined_patterns(refinement)
             if refined_section:
                 sections.append(refined_section)

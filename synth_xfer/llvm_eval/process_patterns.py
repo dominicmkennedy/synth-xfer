@@ -6,23 +6,17 @@ import os
 from pathlib import Path
 import sys
 
-from xdsl.ir import Attribute
-
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.pattern import is_root_preserving_cut_projection, refine_pattern
-from synth_xfer._util.pattern_dsl import (
-    ArgRef,
-    NodeRef,
-    PatternDag,
-    PatternNode,
-    PatternRef,
-)
+from synth_xfer._util.pattern import RefinementKind, allows_root_split, refine_pattern
+from synth_xfer._util.pattern_dsl import PatternDag
 
 
 @dataclass(frozen=True, slots=True)
-class _EnumState:
-    kept: frozenset[int]
-    cut: frozenset[int]
+class PatternCounts:
+    counts: dict[str, int]
+    rows: int
+    merged: int
+    capped: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,39 +26,26 @@ class PatternStats:
 
 
 @dataclass(frozen=True, slots=True)
+class MergeStats:
+    added: int
+    collided: int
+
+
+@dataclass(frozen=True, slots=True)
 class ProcessResult:
-    non_enumerated: dict[str, int]
-    split_dropped: dict[str, int]
-    input_stats: PatternStats
-    droppable: PatternStats
+    refined: dict[str, int]
+    input: PatternStats
+    complete: PatternStats
+    unchanged: PatternStats
     producer_cut: PatternStats
-    split: PatternStats
-    unchanged_incomplete: PatternStats
+    root_split: PatternStats
+    middle_split: PatternStats
+    producer_cut_merge: MergeStats
+    split_merge: MergeStats
+    split_leaves_dropped: int
 
 
-@dataclass(slots=True)
-class PatternCache:
-    dags: dict[str, PatternDag]
-
-    def dag_of(self, pattern_text: str) -> PatternDag:
-        dag = self.dags.get(pattern_text)
-        if dag is None:
-            dag = PatternDag(pattern_text)
-            self.dags[pattern_text] = dag
-        return dag
-
-
-def _new_cache() -> PatternCache:
-    return PatternCache({})
-
-
-def _result_type(dag: PatternDag, ref: PatternRef) -> Attribute:
-    if isinstance(ref, ArgRef):
-        return dag.arg_types[ref.index]
-    return dag.nodes[ref.index].op.spec.result_type
-
-
-def read_pattern_counts(path: Path, node_cap: int | None = None) -> dict[str, int]:
+def read_pattern_counts(path: Path, node_cap: int | None = None) -> PatternCounts:
     """Read <count, pattern> rows, summing counts of canonically-equal patterns.
 
     node_cap drops any pattern with >= node_cap operation nodes. refine_pattern
@@ -72,119 +53,48 @@ def read_pattern_counts(path: Path, node_cap: int | None = None) -> dict[str, in
     rare giants otherwise dominate the wall time.
     """
     counts: dict[str, int] = {}
-    skipped = 0
+    rows = merged = capped = 0
 
     with path.open(newline="") as f:
-        reader = csv.DictReader(f, delimiter="\t")
-
-        for row in reader:
+        for row in csv.DictReader(f, delimiter="\t"):
+            rows += 1
             dag = PatternDag(row["pattern"])
             if node_cap is not None and len(dag.nodes) >= node_cap:
-                skipped += 1
+                capped += 1
                 continue
             pattern = str(dag)
-            count = int(row["count"])
-            counts[pattern] = counts.get(pattern, 0) + count
+            if pattern in counts:
+                merged += 1
+            counts[pattern] = counts.get(pattern, 0) + int(row["count"])
 
-    if skipped:
-        print(f"  {path}: dropped {skipped} patterns with >= {node_cap} nodes")
-    return counts
-
-
-def _max_insert(counts: dict[str, int], pattern: PatternDag, count: int) -> None:
-    pattern_text = str(pattern)
-    counts[pattern_text] = max(counts.get(pattern_text, 0), count)
+    if capped:
+        print(f"  {path}: dropped {capped} patterns with >= {node_cap} nodes")
+    return PatternCounts(counts, rows, merged, capped)
 
 
-def _stats_from_counts(counts: dict[str, int]) -> PatternStats:
-    return PatternStats(len(counts), sum(counts.values()))
+@dataclass(frozen=True, slots=True)
+class _Refined:
+    source: str
+    count: int
+    kind: RefinementKind
+    kept: tuple[str, ...]
+    dropped: int
 
 
-_Buckets = tuple[
-    dict[str, int],  # non_enumerated
-    dict[str, int],  # split_dropped
-    dict[str, int],  # droppable
-    dict[str, int],  # producer_cut
-    dict[str, int],  # split
-    dict[str, int],  # unchanged_incomplete
-]
-
-
-def _empty_buckets() -> _Buckets:
-    return {}, {}, {}, {}, {}, {}
-
-
-def _classify_source(
-    source_text: str,
-    source_count: int,
-    source_dag: PatternDag,
-    domain: AbstractDomain,
-    input_counts: dict[str, int],
-    buckets: _Buckets,
-) -> None:
-    """Refine one input pattern and record it into the six output buckets.
-
-    Pure w.r.t. `buckets` (only mutates them) and read-only w.r.t. `input_counts`,
-    so it is safe to run over disjoint slices in parallel and merge afterwards.
-    """
-    (
-        non_enumerated,
-        split_dropped,
-        droppable,
-        producer_cut,
-        split,
-        unchanged_incomplete,
-    ) = buckets
-    refinement = refine_pattern(source_dag, domain)
-
-    match refinement.kind:
-        case "droppable":
-            droppable[source_text] = source_count
-        case "unchanged_incomplete":
-            unchanged_incomplete[source_text] = source_count
-            _max_insert(non_enumerated, source_dag, source_count)
-        case "producer_cut":
-            if len(refinement.kept) != 1:
-                raise AssertionError(
-                    f"producer_cut produced {len(refinement.kept)} leaves: {source_dag}"
-                )
-            refined = refinement.kept[0]
-            if not is_root_preserving_cut_projection(source_dag, refined):
-                raise AssertionError(
-                    "producer_cut was not root-preserving:\n"
-                    f"  source:  {source_dag}\n"
-                    f"  refined: {refined}"
-                )
-            producer_cut[source_text] = source_count
-            _max_insert(non_enumerated, refined, source_count)
-        case "split":
-            if not refinement.kept:
-                raise AssertionError(f"split produced no kept leaves: {source_dag}")
-            split[source_text] = source_count
-            for leaf in refinement.kept:
-                leaf_text = str(leaf)
-                if leaf_text in input_counts:
-                    _max_insert(
-                        non_enumerated,
-                        leaf,
-                        max(source_count, input_counts[leaf_text]),
-                    )
-                else:
-                    _max_insert(split_dropped, leaf, source_count)
-        case _:
-            raise AssertionError(
-                "unexpected refinement kind:\n"
-                f"  kind:   {refinement.kind}\n"
-                f"  source: {source_dag}\n"
-                f"  kept:   {tuple(str(leaf) for leaf in refinement.kept)}\n"
-                f"  drop:   {tuple(str(leaf) for leaf in refinement.dropped)}"
-            )
+def _refine_one(source: str, count: int, domain: AbstractDomain) -> _Refined:
+    refinement = refine_pattern(PatternDag(source), domain)
+    return _Refined(
+        source,
+        count,
+        refinement.kind,
+        tuple(str(leaf) for leaf in refinement.kept),
+        len(refinement.dropped),
+    )
 
 
 # Worker state, populated in the parent before the pool forks and inherited by
-# each worker (avoids pickling the full input_counts to every process).
+# each worker (avoids pickling the full input to every process).
 _WORKER_ITEMS: list[tuple[str, int]] = []
-_WORKER_INPUTS: dict[str, int] = {}
 _WORKER_DOMAIN: AbstractDomain | None = None
 
 
@@ -192,200 +102,102 @@ def _worker_setup() -> None:
     sys.setrecursionlimit(100000)
 
 
-def _worker_refine(rng: tuple[int, int]) -> _Buckets:
+def _worker_refine(rng: tuple[int, int]) -> list[_Refined]:
     assert _WORKER_DOMAIN is not None
-    cache = _new_cache()
-    buckets = _empty_buckets()
-    for source_text, source_count in _WORKER_ITEMS[rng[0] : rng[1]]:
-        _classify_source(
-            source_text,
-            source_count,
-            cache.dag_of(source_text),
-            _WORKER_DOMAIN,
-            _WORKER_INPUTS,
-            buckets,
-        )
-    return buckets
+    return [
+        _refine_one(source, count, _WORKER_DOMAIN)
+        for source, count in _WORKER_ITEMS[rng[0] : rng[1]]
+    ]
 
 
-def _merge_max(dst: dict[str, int], src: dict[str, int]) -> None:
-    for key, value in src.items():
-        if value > dst.get(key, 0):
-            dst[key] = value
+def _refine_all(
+    input_counts: dict[str, int],
+    domain: AbstractDomain,
+    jobs: int,
+) -> list[_Refined]:
+    items = list(input_counts.items())
+    if jobs <= 1 or len(items) < 2 * jobs:
+        return [_refine_one(source, count, domain) for source, count in items]
+
+    global _WORKER_ITEMS, _WORKER_DOMAIN
+    _WORKER_ITEMS = items
+    _WORKER_DOMAIN = domain
+    n = len(items)
+    step = -(-n // (jobs * 4))  # ceil; ~4 tasks per worker for load balance
+    ranges = [(i, min(i + step, n)) for i in range(0, n, step)]
+    try:
+        ctx = mp.get_context("fork")
+        with ctx.Pool(jobs, initializer=_worker_setup) as pool:
+            parts = pool.map(_worker_refine, ranges)
+    finally:
+        _WORKER_ITEMS = []
+        _WORKER_DOMAIN = None
+    return [record for part in parts for record in part]
+
+
+def _max_insert(counts: dict[str, int], text: str, count: int) -> None:
+    counts[text] = max(counts.get(text, 0), count)
+
+
+def _stats(records: list[_Refined]) -> PatternStats:
+    return PatternStats(len(records), sum(record.count for record in records))
 
 
 def process_pattern_counts(
     input_counts: dict[str, int],
     domain: AbstractDomain,
-    cache: PatternCache,
     jobs: int = 1,
 ) -> ProcessResult:
-    buckets = _empty_buckets()
-    (
-        non_enumerated,
-        split_dropped,
-        droppable,
-        producer_cut,
-        split,
-        unchanged_incomplete,
-    ) = buckets
+    records = _refine_all(input_counts, domain, jobs)
+    by_kind: dict[RefinementKind, list[_Refined]] = {
+        "complete": [],
+        "unchanged": [],
+        "producer_cut": [],
+        "root_split": [],
+        "middle_split": [],
+    }
+    for record in records:
+        by_kind[record.kind].append(record)
 
-    if jobs <= 1 or len(input_counts) < 2 * jobs:
-        for source_text, source_count in input_counts.items():
-            _classify_source(
-                source_text,
-                source_count,
-                cache.dag_of(source_text),
-                domain,
-                input_counts,
-                buckets,
-            )
-    else:
-        # Refine disjoint slices in parallel, then merge. non_enumerated /
-        # split_dropped use max across workers (a refined pattern can come from
-        # several inputs); the per-source buckets have disjoint keys, so update().
-        global _WORKER_ITEMS, _WORKER_INPUTS, _WORKER_DOMAIN
-        _WORKER_ITEMS = list(input_counts.items())
-        _WORKER_INPUTS = input_counts
-        _WORKER_DOMAIN = domain
-        n = len(_WORKER_ITEMS)
-        step = -(-n // (jobs * 4))  # ceil; ~4 tasks per worker for load balance
-        ranges = [(i, min(i + step, n)) for i in range(0, n, step)]
-        try:
-            ctx = mp.get_context("fork")
-            with ctx.Pool(jobs, initializer=_worker_setup) as pool:
-                parts = pool.map(_worker_refine, ranges)
-        finally:
-            _WORKER_ITEMS = []
-            _WORKER_INPUTS = {}
-            _WORKER_DOMAIN = None
-        for part in parts:
-            _merge_max(non_enumerated, part[0])
-            _merge_max(split_dropped, part[1])
-            for dst, src in zip(buckets[2:], part[2:]):
-                dst.update(src)
+    # Unchanged inputs seed the output; refinement results then merge in by max.
+    # Collisions are counted against everything seeded before that stage.
+    refined: dict[str, int] = {}
+    for record in by_kind["unchanged"]:
+        refined[record.source] = record.count
+    seeded = set(refined)
+
+    cut_texts: set[str] = set()
+    for record in by_kind["producer_cut"]:
+        (text,) = record.kept
+        _max_insert(refined, text, record.count)
+        cut_texts.add(text)
+    cut_added = len(cut_texts - seeded)
+    producer_cut_merge = MergeStats(cut_added, len(by_kind["producer_cut"]) - cut_added)
+    seeded |= cut_texts
+
+    leaf_texts: set[str] = set()
+    leaves = dropped = 0
+    for record in by_kind["root_split"] + by_kind["middle_split"]:
+        dropped += record.dropped
+        for text in record.kept:
+            leaves += 1
+            _max_insert(refined, text, record.count)
+            leaf_texts.add(text)
+    leaf_added = len(leaf_texts - seeded)
+    split_merge = MergeStats(leaf_added, leaves - leaf_added)
 
     return ProcessResult(
-        non_enumerated,
-        split_dropped,
-        _stats_from_counts(input_counts),
-        _stats_from_counts(droppable),
-        _stats_from_counts(producer_cut),
-        _stats_from_counts(split),
-        _stats_from_counts(unchanged_incomplete),
+        refined,
+        PatternStats(len(input_counts), sum(input_counts.values())),
+        _stats(by_kind["complete"]),
+        _stats(by_kind["unchanged"]),
+        _stats(by_kind["producer_cut"]),
+        _stats(by_kind["root_split"]),
+        _stats(by_kind["middle_split"]),
+        producer_cut_merge,
+        split_merge,
+        dropped,
     )
-
-
-def _build_subdag(dag: PatternDag, kept: frozenset[int]) -> PatternDag:
-    """Materialise a sub-DAG from global keep/cut decisions.
-
-    Each original NodeRef maps to exactly one rebuilt NodeRef when kept, or one
-    cut ArgRef when not kept. This preserves shared SSA identity.
-    """
-    arg_types: list[Attribute] = []
-    arg_of: dict[PatternRef, ArgRef] = {}
-    node_of: dict[NodeRef, NodeRef] = {}
-    nodes: list[PatternNode] = []
-
-    def cut_arg(orig: PatternRef) -> ArgRef:
-        existing = arg_of.get(orig)
-        if existing is not None:
-            return existing
-        ref = ArgRef(len(arg_types))
-        arg_types.append(_result_type(dag, orig))
-        arg_of[orig] = ref
-        return ref
-
-    def build(ref: PatternRef) -> PatternRef:
-        if isinstance(ref, ArgRef):
-            return cut_arg(ref)
-        if ref.index not in kept:
-            return cut_arg(ref)
-
-        existing = node_of.get(ref)
-        if existing is not None:
-            return existing
-
-        node = dag.nodes[ref.index]
-        operands = tuple(build(operand) for operand in node.operands)
-        lowered = NodeRef(len(nodes))
-        node_of[ref] = lowered
-        nodes.append(PatternNode(node.op, operands))
-        return lowered
-
-    root = build(dag.result)
-    assert isinstance(root, NodeRef)
-    return PatternDag.from_parts(tuple(arg_types), tuple(nodes), root)
-
-
-def _enumerate_states(dag: PatternDag, max_size: int) -> set[_EnumState]:
-    root = dag.result.index
-    initial = _EnumState(frozenset((root,)), frozenset())
-
-    def expand_operands(
-        operands: tuple[PatternRef, ...],
-        state: _EnumState,
-    ) -> set[_EnumState]:
-        states = {state}
-        for operand in operands:
-            next_states: set[_EnumState] = set()
-            for current in states:
-                next_states.update(expand_ref(operand, current))
-            states = next_states
-        return states
-
-    def expand_ref(ref: PatternRef, state: _EnumState) -> set[_EnumState]:
-        if isinstance(ref, ArgRef):
-            return {state}
-
-        index = ref.index
-        if index in state.kept:
-            return expand_operands(dag.nodes[index].operands, state)
-        if index in state.cut:
-            return {state}
-
-        states = {_EnumState(state.kept, state.cut | frozenset((index,)))}
-        if len(state.kept) < max_size:
-            kept_state = _EnumState(state.kept | frozenset((index,)), state.cut)
-            states.update(expand_operands(dag.nodes[index].operands, kept_state))
-        return states
-
-    return expand_operands(dag.nodes[root].operands, initial)
-
-
-def subdags_of(dag: PatternDag, min_size: int, max_size: int) -> list[PatternDag]:
-    result: list[PatternDag] = []
-    seen: set[str] = set()
-
-    for state in _enumerate_states(dag, max_size):
-        if not min_size <= len(state.kept) <= max_size:
-            continue
-        subdag = _build_subdag(dag, state.kept)
-        text = str(subdag)
-        if text in seen:
-            continue
-        seen.add(text)
-        result.append(subdag)
-
-    result.sort(key=str)
-    return result
-
-
-def enumerate_output_pool(
-    input_counts: dict[str, int],
-    min_size: int,
-    max_size: int,
-    cache: PatternCache,
-) -> dict[str, int]:
-    enumerated_in: dict[str, int] = {}
-
-    for pattern_text, count in input_counts.items():
-        for subdag in subdags_of(cache.dag_of(pattern_text), min_size, max_size):
-            sub_text = str(subdag)
-            if sub_text in input_counts:
-                _max_insert(enumerated_in, subdag, max(count, input_counts[sub_text]))
-
-    return enumerated_in
 
 
 def write_pattern_counts(
@@ -427,103 +239,64 @@ def _format_stats(label: str, stats: PatternStats, denominator: PatternStats) ->
 
 
 def main() -> None:
-    p = ArgumentParser()
-    p.add_argument("-i", "--input", type=Path, required=True)
-    p.add_argument("-o", "--output", type=Path, required=True)
+    p = ArgumentParser(description=__doc__)
+    p.add_argument(
+        "-i", "--input", type=Path, required=True, help="mined <count, pattern> TSV"
+    )
+    p.add_argument(
+        "-o", "--output", type=Path, required=True, help="refined <count, pattern> TSV"
+    )
     p.add_argument(
         "-d",
         "--domain",
         type=str,
         choices=[str(domain) for domain in AbstractDomain],
         required=True,
+        help="abstract domain: selects the completeness table and whether a leaf "
+        "may drop the root (KnownBits only)",
     )
     p.add_argument(
-        "--min-size",
-        type=int,
-        default=2,
-        help="when --enumerate is used, drop subpatterns with fewer than this many operation nodes",
+        "--top", type=int, default=None, help="keep only the N highest-count rows"
     )
-    p.add_argument(
-        "--max-size",
-        type=int,
-        default=6,
-        help="when --enumerate is used, only enumerate subpatterns with at most this many operation nodes",
-    )
-    p.add_argument("--top", type=int, default=None, help="keep only the top N rows")
     p.add_argument(
         "--jobs",
         type=int,
         default=os.cpu_count() or 1,
         help="parallel worker processes for refinement (default: all cores)",
     )
-    p.add_argument(
-        "--enumerate",
-        action="store_true",
-        dest="enumerate",
-        help="also generate enumerated_in.tsv",
-    )
-    p.add_argument(
-        "--split-dropped-output",
-        type=Path,
-        default=None,
-        help="write split-refined patterns dropped because they were not in the input",
-    )
     args = p.parse_args()
 
     sys.setrecursionlimit(100000)
     domain = AbstractDomain[args.domain]
 
-    input_counts = read_pattern_counts(args.input)
-    cache = _new_cache()
-    result = process_pattern_counts(input_counts, domain, cache, jobs=args.jobs)
-
-    output_written = write_pattern_counts(args.output, result.non_enumerated, args.top)
-    split_dropped_written = None
-    if args.split_dropped_output is not None:
-        split_dropped_written = write_pattern_counts(
-            args.split_dropped_output, result.split_dropped, args.top
-        )
+    inputs = read_pattern_counts(args.input)
+    result = process_pattern_counts(inputs.counts, domain, jobs=args.jobs)
+    written = write_pattern_counts(args.output, result.refined, args.top)
+    output = PatternStats(len(result.refined), sum(result.refined.values()))
+    cuts = result.producer_cut_merge
+    splits = result.split_merge
 
     print("Stats:")
+    print(f"  Input rows: {inputs.rows} ({inputs.merged} merged as canonical duplicates)")
     print(
-        f"  Canonical inputs: {result.input_stats.unique} unique, "
-        f"{result.input_stats.weighted} weighted"
+        f"  Canonical inputs: {result.input.unique} unique, "
+        f"{result.input.weighted} weighted"
     )
-    print(_format_stats("Fully complete / dropped", result.droppable, result.input_stats))
-    print(_format_stats("Producer-cut refined", result.producer_cut, result.input_stats))
-    print(_format_stats("Split refined", result.split, result.input_stats))
+    print(_format_stats("Fully complete / dropped", result.complete, result.input))
+    print(_format_stats("Unchanged incomplete", result.unchanged, result.input))
+    print(_format_stats("Producer cut", result.producer_cut, result.input))
+    print(f"    results: {cuts.added} added to output, {cuts.collided} collided")
+    print(_format_stats("Root split", result.root_split, result.input))
+    print(_format_stats("Middle split", result.middle_split, result.input))
     print(
-        _format_stats(
-            "Unchanged incomplete",
-            result.unchanged_incomplete,
-            result.input_stats,
-        )
+        f"    leaves: {splits.added + splits.collided} kept "
+        f"({splits.added} added, {splits.collided} collided), "
+        f"{result.split_leaves_dropped} complete pieces dropped"
     )
-    print(f"  Wrote: {args.output} ({output_written} rows)")
-    if split_dropped_written is not None:
-        print(f"  Wrote: {args.split_dropped_output} ({split_dropped_written} rows)")
-
-    if args.enumerate:
-        enumerated_in = enumerate_output_pool(
-            result.non_enumerated,
-            args.min_size,
-            args.max_size,
-            cache,
-        )
-        enumerated_in_path = Path("enumerated_in.tsv")
-        enumerated_in_written = write_pattern_counts(
-            enumerated_in_path, enumerated_in, args.top
-        )
-        denominator = _stats_from_counts(result.non_enumerated)
-        print("Enumeration Stats:")
-        print(
-            _format_stats(
-                "Enumerated in non_enumerated",
-                _stats_from_counts(enumerated_in),
-                denominator,
-            )
-        )
-        print(f"  Wrote: {enumerated_in_path} ({enumerated_in_written} rows)")
+    if not allows_root_split(domain):
+        print("    (splits that drop the root are disabled for this domain)")
+    print(f"  Output: {output.unique} unique, {output.weighted} weighted")
+    print(f"  Wrote: {args.output} ({written} rows)")
 
 
 if __name__ == "__main__":

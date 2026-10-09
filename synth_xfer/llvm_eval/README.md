@@ -168,7 +168,7 @@ Requires `--llvm-dir`, `--bench-dir` (a built `opt` with the dag-slicer must alr
 exist at `<llvm-dir>/build/bin/opt`). Optional: `--cv-dir` (default `outputs/cv`),
 `--k` (default `5`), `--subset` (restrict to comma-separated project names),
 `--seed`, `--by-project`, `--top` (keep only the top K patterns by count, default
-10000). Each fold's pattern list is the refine-only (non-enumerated) output of `process_patterns`,
+10000). Each fold's pattern list is the refined output of `process_patterns`,
 with patterns too long to encode as a filename dropped (backfilled up to `--top`).
 Per-fold outputs:
 `CV_DIR/fold_<i>/{files.txt, slice/dags.tsv, patterns.tsv, work/pruned/, stats.json}`;

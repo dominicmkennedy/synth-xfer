@@ -19,7 +19,6 @@ from synth_xfer._util.pattern_dsl import (
     PatternNode,
     PatternOp,
     PatternRef,
-    canonicalize_pattern_operands,
 )
 from synth_xfer._util.smt_solver import SolverKind
 from synth_xfer._util.tsv import EnumData
@@ -410,38 +409,8 @@ def _canonicalize_sources(
     dag: PatternDag,
     arg_sources: tuple[PatternRef, ...],
 ) -> tuple[str, tuple[PatternRef, ...]]:
-    def render_key(node: object) -> str:
-        if isinstance(node, ArgRef):
-            return f"arg{node.index}"
-        op, operands = cast(tuple[PatternOp, tuple[object, ...]], node)
-        return f"{op.value}({', '.join(render_key(operand) for operand in operands)})"
-
-    def canonicalize_ref(ref: PatternRef) -> object:
-        if isinstance(ref, ArgRef):
-            return ref
-        node = dag.nodes[ref.index]
-        operands = tuple(canonicalize_ref(operand) for operand in node.operands)
-        op, operands = canonicalize_pattern_operands(node.op, operands, key=render_key)
-        return op, operands
-
-    root = canonicalize_ref(dag.result)
-    source_order: list[PatternRef] = []
-    arg_map: dict[int, int] = {}
-
-    def render(node: object) -> str:
-        if isinstance(node, ArgRef):
-            new_index = arg_map.get(node.index)
-            if new_index is None:
-                new_index = len(source_order)
-                arg_map[node.index] = new_index
-                source_order.append(arg_sources[node.index])
-            return f"arg{new_index}"
-
-        op, operands = cast(tuple[PatternOp, tuple[object, ...]], node)
-        return f"{op.value}({', '.join(render(operand) for operand in operands)})"
-
-    canonical = PatternDag(render(root))
-    return canonical.to_id(), tuple(source_order)
+    _, order = dag.canonical_form()
+    return dag.to_id(), tuple(arg_sources[ref.index] for ref in order)
 
 
 def enumerate_subdag_specializations(

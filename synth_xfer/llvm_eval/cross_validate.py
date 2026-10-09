@@ -6,8 +6,8 @@ import subprocess
 import sys
 
 from synth_xfer._util.domain import AbstractDomain
+from synth_xfer._util.pattern_dsl import PatternDag
 from synth_xfer.llvm_eval.process_patterns import (
-    PatternCache,
     process_pattern_counts,
     read_pattern_counts,
     write_pattern_counts,
@@ -163,17 +163,16 @@ def combine_pattern_list(
     counts: dict[str, int] = {}
     for j in others:
         dags = src / f"fold_{j}" / "slice" / "dags.tsv"
-        for pat, n in read_pattern_counts(dags, node_cap=NODE_CAP).items():
+        for pat, n in read_pattern_counts(dags, node_cap=NODE_CAP).counts.items():
             counts[pat] = counts.get(pat, 0) + n
     print(f">>> refine {len(counts)} training DAGs -> pattern list")
-    cache = PatternCache({})
-    result = process_pattern_counts(counts, DOMAIN, cache, jobs=os.cpu_count() or 1)
+    result = process_pattern_counts(counts, DOMAIN, jobs=os.cpu_count() or 1)
 
     kept: dict[str, int] = {}
     dropped_long = 0
-    for text, n in result.non_enumerated.items():
+    for text, n in result.refined.items():
         try:
-            cache.dag_of(text).to_id()
+            PatternDag(text).to_id()
         except ValueError:
             dropped_long += 1
             continue
@@ -182,7 +181,7 @@ def combine_pattern_list(
     n_pat = write_pattern_counts(out, kept, args.top)
     print(
         f"    {n_pat} patterns (top {args.top}; dropped {dropped_long} over-length; "
-        f"from {result.input_stats.unique} canonical inputs)"
+        f"from {result.input.unique} canonical inputs)"
     )
     return n_pat
 

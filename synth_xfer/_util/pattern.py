@@ -170,10 +170,15 @@ class PatternReport:
     nodes: tuple[PatternNodeReport, ...]
 
 
+RefinementKind = Literal[
+    "complete", "unchanged", "producer_cut", "root_split", "middle_split"
+]
+
+
 @dataclass(frozen=True, slots=True)
 class PatternRefinement:
     source: PatternDag
-    kind: Literal["droppable", "unchanged_incomplete", "producer_cut", "split"]
+    kind: RefinementKind
     kept: tuple[PatternDag, ...]
     dropped: tuple[PatternDag, ...]
 
@@ -332,21 +337,33 @@ def is_root_preserving_cut_projection(
     return match(source.result, candidate.result)
 
 
+def _first_split_edge(
+    dag: PatternDag,
+    domain: AbstractDomain,
+    root_split: bool,
+) -> tuple[NodeRef, int] | None:
+    for consumer, operand_index in _complete_split_edges(dag, domain):
+        if root_split or _is_droppable_refinement(
+            _split_pattern(dag, consumer, operand_index)[0], domain
+        ):
+            return consumer, operand_index
+    return None
+
+
 def refine_pattern(dag: PatternDag, domain: AbstractDomain) -> PatternRefinement:
     # Refinement rules:
-    # - Complete node-to-node edges are uninteresting composition boundaries, so
-    #   split them into the producer-side subpattern and the root-side subpattern
-    #   with that edge replaced by a fresh argument.
-    # - Reused operands are never split because the shared value is semantically
-    #   relevant to why the full pattern does not coincide.
-    # - If the two split subpatterns would share any original argN, reject the
-    #   split instead of duplicating correlated inputs across independent DAGs.
-    # - Recurse after every accepted split and return final kept and dropped
-    #   leaves separately, so callers can distinguish producer cuts from splits.
+    # - A complete, unshared node-to-node edge whose two sides share no original
+    #   arg is a composition boundary: cut it, replacing the edge by a fresh
+    #   argument on the root side.
+    # - Reused values are never cut: the sharing is why the pattern is imprecise.
+    # - Outside KnownBits an edge is only cut when its producer side is fully
+    #   complete, so every leaf keeps the root.
+    # - Fully complete leaves (or single nodes) are dropped; the rest are kept.
+    root_split = domain is _KB
     kept: dict[str, PatternDag] = {}
     dropped: dict[str, PatternDag] = {}
     visited: set[str] = set()
-    split_found = False
+    root_texts: set[str] = set()  # DAGs that still contain the original root
 
     def add_leaf(leaf: PatternDag) -> None:
         if _is_droppable_refinement(leaf, domain):
@@ -354,43 +371,42 @@ def refine_pattern(dag: PatternDag, domain: AbstractDomain) -> PatternRefinement
             return
         kept.setdefault(str(leaf), leaf)
 
-    def visit(current: PatternDag) -> None:
-        nonlocal split_found
-
+    def visit(current: PatternDag, has_root: bool) -> None:
         current_text = str(current)
+        if has_root:
+            root_texts.add(current_text)
         if current_text in visited:
             return
         visited.add(current_text)
 
-        edges = _complete_split_edges(current, domain)
-        if not edges:
+        edge = _first_split_edge(current, domain, root_split)
+        if edge is None:
             add_leaf(current)
             return
 
-        for consumer, operand_index in edges:
-            upstream, downstream = _split_pattern(current, consumer, operand_index)
-            split_found = True
-            visit(upstream)
-            visit(downstream)
+        # Cutting one boundary never changes which other edges are boundaries, so
+        # one cut per level reaches the same leaves as exploring every cut order,
+        # which is exponential in the number of boundaries.
+        upstream, downstream = _split_pattern(current, *edge)
+        visit(upstream, False)
+        visit(downstream, has_root)
 
-    visit(dag)
+    visit(dag, True)
 
     kept_leaves = tuple(kept.values())
     dropped_leaves = tuple(dropped.values())
+    root_kept = any(text in root_texts for text in kept)
+    kind: RefinementKind
     if not kept_leaves:
-        kind: Literal["droppable", "unchanged_incomplete", "producer_cut", "split"] = (
-            "droppable"
-        )
-    elif kept_leaves == (dag,) and not split_found:
-        kind = "unchanged_incomplete"
-    elif (
-        len(kept_leaves) == 1
-        and str(kept_leaves[0]) != str(dag)
-        and is_root_preserving_cut_projection(dag, kept_leaves[0])
-    ):
+        kind = "complete"
+    elif len(kept_leaves) == 1 and str(dag) in kept:
+        kind = "unchanged"
+    elif not root_kept:
+        kind = "root_split"
+    elif len(kept_leaves) == 1:
         kind = "producer_cut"
     else:
-        kind = "split"
+        kind = "middle_split"
 
     return PatternRefinement(dag, kind, kept_leaves, dropped_leaves)
 
