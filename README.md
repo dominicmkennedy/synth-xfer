@@ -13,6 +13,7 @@ Publication: [Nice to Meet You: Synthesizing Practical MLIR Abstract Transformer
 
 - Python == 3.13
 - Clang >= 18
+- Optional: [elan](https://github.com/leanprover/elan) for the Lean formalization
 
 ## Setup
 
@@ -28,6 +29,13 @@ pip install -e ".[dev]"
 3. Run tests to confirm the C++ bindings built correctly:
 ```bash
 pytest -vv
+```
+4. Optional: kernel-check the Lean formalization see [`lean/README.md`](lean/README.md):
+```bash
+cd lean 
+lake exe cache get 
+lake build
+lake env lean SynthXfer/Certification.lean
 ```
 
 ## Usage
