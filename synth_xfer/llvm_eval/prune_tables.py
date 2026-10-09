@@ -293,7 +293,8 @@ class Table:
     data: EnumData
     pattern_id: str
     domain: AbstractDomain
-    row_ideals: dict[tuple[int, tuple[str, ...]], set[str]]
+    row_targets: dict[tuple[int, tuple[str, ...], str], int]
+    base_counts: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -315,7 +316,7 @@ class PostDropStats:
     subdag_rows: int
     subdag_count: int
     table_dropped: bool
-    kept_count_per_row: tuple[int, ...]
+    keep_positions: tuple[int, ...]
 
 
 @dataclass(frozen=True)
@@ -567,19 +568,23 @@ def read_table(path: Path) -> Table:
         raise ValueError(f"{path.name}: no 'ideal' column; run max-precise first")
 
     arg_cols = [f"arg_{i}" for i in range(data.metadata.arity)]
-    row_ideals: dict[tuple[int, tuple[str, ...]], set[str]] = defaultdict(set)
+    row_targets: dict[tuple[int, tuple[str, ...], str], int] = {}
+    base_counts: list[int] = []
     records = cast(list[dict[str, Any]], data.enumdata.to_dict("records"))
-    for row in records:
+    for pos, row in enumerate(records):
         bw = int(row["bw"])
         args = tuple(str(row[col]) for col in arg_cols)
-        row_ideals[(bw, args)].add(str(row["ideal"]))
+        ideal = str(row["ideal"])
+        row_targets.setdefault((bw, args, ideal), pos)
+        base_counts.append(int(row["count"]) if "count" in data.enumdata.columns else 1)
 
     return Table(
         path=path,
         data=data,
         pattern_id=data.metadata.op.to_id(),
         domain=data.metadata.domain,
-        row_ideals=dict(row_ideals),
+        row_targets=row_targets,
+        base_counts=tuple(base_counts),
     )
 
 
@@ -624,6 +629,13 @@ def _compute_values_for_refs(
     return values
 
 
+def add_count_to_table_row(table: Table, pos: int, count: int) -> None:
+    frame = table.data.enumdata
+    if "count" not in frame.columns:
+        frame["count"] = 1
+    frame.at[pos, "count"] = int(frame.at[pos, "count"]) + count
+
+
 def drop_specialized_rows(
     specialized_table: Table,
     tables_by_key: dict[tuple[AbstractDomain, str], Table],
@@ -644,24 +656,21 @@ def drop_specialized_rows(
     frame = specialized_table.data.enumdata
     records = cast(list[dict[str, Any]], frame.to_dict("records"))
     if not argument_specializations and not subdag_specializations:
-        kept_count_per_row = (
-            tuple(int(row["count"]) for row in records)
-            if "count" in frame.columns
-            else tuple(1 for _ in records)
-        )
-        return PostDropStats(0, 0, 0, 0, False, kept_count_per_row)
+        return PostDropStats(0, 0, 0, 0, False, tuple(range(len(records))))
 
     keep_positions: list[int] = []
     argument_rows = subdag_rows = 0
     argument_count = subdag_count = 0
     row_value_cache: RowValueCache = {}
     for pos, row in enumerate(records):
-        count = int(row["count"]) if "count" in frame.columns else 1
+        base_count = specialized_table.base_counts[pos]
+        transfer_count = int(frame.at[pos, "count"]) if "count" in frame.columns else 1
         bw = int(row["bw"])
         args = tuple(str(row[col]) for col in arg_cols)
         ideal = str(row["ideal"])
 
         drop_reason: str | None = None
+        drop_target: tuple[Table, int] | None = None
         for specialization in argument_specializations:
             general_table = tables_by_key[
                 (specialized_table.domain, specialization.general_pattern_id)
@@ -669,9 +678,10 @@ def drop_specialized_rows(
             projected_args = tuple(
                 args[source.index] for source in specialization.arg_sources
             )
-            general_ideals = general_table.row_ideals.get((bw, projected_args))
-            if general_ideals is not None and ideal in general_ideals:
+            target_pos = general_table.row_targets.get((bw, projected_args, ideal))
+            if target_pos is not None:
                 drop_reason = "argument"
+                drop_target = (general_table, target_pos)
                 break
 
         for specialization in subdag_specializations:
@@ -709,39 +719,33 @@ def drop_specialized_rows(
             projected_args = tuple(
                 values[source] for source in specialization.arg_sources
             )
-            general_ideals = general_table.row_ideals.get((bw, projected_args))
-            if general_ideals is not None and ideal in general_ideals:
+            target_pos = general_table.row_targets.get((bw, projected_args, ideal))
+            if target_pos is not None:
                 drop_reason = "subdag"
+                drop_target = (general_table, target_pos)
                 break
 
         if drop_reason == "argument":
             argument_rows += 1
-            argument_count += count
+            argument_count += base_count
+            assert drop_target is not None
+            add_count_to_table_row(*drop_target, transfer_count)
         elif drop_reason == "subdag":
             subdag_rows += 1
-            subdag_count += count
+            subdag_count += base_count
+            assert drop_target is not None
+            add_count_to_table_row(*drop_target, transfer_count)
         else:
             keep_positions.append(pos)
 
     table_dropped = not keep_positions
-    if table_dropped:
-        kept_count_per_row = ()
-    else:
-        kept = frame.iloc[keep_positions].reset_index(drop=True)
-        EnumData(specialized_table.data.metadata, kept).write_tsv(specialized_table.path)
-        kept_count_per_row = (
-            tuple(int(v) for v in kept["count"])
-            if "count" in kept.columns
-            else tuple(1 for _ in range(len(kept)))
-        )
-
     return PostDropStats(
         argument_rows,
         argument_count,
         subdag_rows,
         subdag_count,
         table_dropped,
-        kept_count_per_row,
+        tuple(keep_positions),
     )
 
 
@@ -1011,14 +1015,17 @@ def prune_file(path: Path, out_dir: Path, options: PruneOptions) -> FileStats:
     )
 
 
-def apply_post_drop_stats(stats: FileStats, post: PostDropStats) -> FileStats:
+def apply_post_drop_stats(
+    stats: FileStats,
+    post: PostDropStats,
+    kept_count_per_row: tuple[int, ...],
+) -> FileStats:
     rows_dropped = post.argument_rows + post.subdag_rows
-    count_dropped = post.argument_count + post.subdag_count
     return FileStats(
         rows_seen=stats.rows_seen,
         rows_kept=stats.rows_kept - rows_dropped,
         count_seen=stats.count_seen,
-        count_kept=stats.count_kept - count_dropped,
+        count_kept=sum(kept_count_per_row),
         top=stats.top,
         top_count=stats.top_count,
         bottom=stats.bottom,
@@ -1037,7 +1044,7 @@ def apply_post_drop_stats(stats: FileStats, post: PostDropStats) -> FileStats:
         capped_count=stats.capped_count,
         empty=post.table_dropped,
         count_per_row=stats.count_per_row,
-        kept_count_per_row=post.kept_count_per_row,
+        kept_count_per_row=kept_count_per_row,
         count_deltas_after_subsumption=stats.count_deltas_after_subsumption,
     )
 
@@ -1088,9 +1095,17 @@ def drop_specialized_rows_after_pruning(
             and specialization.general_pattern_id != table.pattern_id
         ]
 
-    updated = list(per_file)
+    processing_order = sorted(
+        tables,
+        key=lambda table: (
+            -len(table.data.metadata.op.nodes),
+            table.data.metadata.arity,
+            table.pattern_id,
+        ),
+    )
+    posts_by_name: dict[str, PostDropStats] = {}
     cache: NodeEvalCache = {}
-    for table in tables:
+    for table in processing_order:
         post = drop_specialized_rows(
             table,
             tables_by_key,
@@ -1100,10 +1115,30 @@ def drop_specialized_rows_after_pruning(
             solver_kind,
             cache,
         )
+        posts_by_name[table.path.name] = post
+
+    updated = list(per_file)
+    for table in tables:
+        post = posts_by_name[table.path.name]
         if post.table_dropped:
             table.path.unlink()
+            kept_count_per_row = ()
+        else:
+            kept = table.data.enumdata.iloc[list(post.keep_positions)].reset_index(
+                drop=True
+            )
+            EnumData(table.data.metadata, kept).write_tsv(table.path)
+            kept_count_per_row = (
+                tuple(int(v) for v in kept["count"])
+                if "count" in kept.columns
+                else tuple(1 for _ in range(len(kept)))
+            )
         index = table_indices[table.path.name]
-        updated[index] = apply_post_drop_stats(updated[index], post)
+        updated[index] = apply_post_drop_stats(
+            updated[index],
+            post,
+            kept_count_per_row,
+        )
 
     return updated
 
