@@ -485,13 +485,6 @@ def main() -> None:
         "per line, to restrict the run to (default: all). Composes with --filter.",
     )
     p.add_argument(
-        "--slice-dir",
-        type=Path,
-        default=None,
-        help="Output directory for slice mode (holds the per-input .dag logs and the "
-        "aggregated dags.tsv). Default: <script>/outputs/<mode>.",
-    )
-    p.add_argument(
         "--stats",
         type=Path,
         default=None,
@@ -535,18 +528,27 @@ def main() -> None:
     )
     p.add_argument(
         "--slice-kb",
-        action="store_true",
-        help="Run pattern slicer over computeKnownBits",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="Run pattern slicer over computeKnownBits; write the per-input .dag "
+        "logs, test.log and the aggregated dags.tsv under DIR.",
     )
     p.add_argument(
         "--slice-ucr",
-        action="store_true",
-        help="Run pattern slicer over computeConstantRange",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="Run pattern slicer over computeConstantRange (unsigned); write the "
+        "per-input .dag logs, test.log and the aggregated dags.tsv under DIR.",
     )
     p.add_argument(
         "--slice-scr",
-        action="store_true",
-        help="Run pattern slicer over computeConstantRange",
+        type=Path,
+        default=None,
+        metavar="DIR",
+        help="Run pattern slicer over computeConstantRange (signed); write the "
+        "per-input .dag logs, test.log and the aggregated dags.tsv under DIR.",
     )
     p.add_argument(
         "--pattern-hist",
@@ -571,9 +573,9 @@ def main() -> None:
         args.walltime is not None,
         args.kbopt_log is not None,
         args.pattern_hist is not None,
-        args.slice_kb,
-        args.slice_ucr,
-        args.slice_scr,
+        args.slice_kb is not None,
+        args.slice_ucr is not None,
+        args.slice_scr is not None,
     ]
     if sum(selected_modes) != 1:
         p.error(
@@ -593,11 +595,11 @@ def main() -> None:
         mode = "kbopt-log"
     elif args.pattern_hist is not None:
         mode = "histogram"
-    elif args.slice_kb:
+    elif args.slice_kb is not None:
         mode = "slice-kb"
-    elif args.slice_ucr:
+    elif args.slice_ucr is not None:
         mode = "slice-ucr"
-    elif args.slice_scr:
+    elif args.slice_scr is not None:
         mode = "slice-scr"
     else:
         assert False
@@ -670,10 +672,14 @@ def main() -> None:
         output_dir = args.kbopt_log.parent
     elif args.pattern_hist is not None:
         output_dir = args.pattern_hist
-    elif args.slice_dir is not None:
-        output_dir = args.slice_dir
+    elif args.slice_kb is not None:
+        output_dir = args.slice_kb
+    elif args.slice_ucr is not None:
+        output_dir = args.slice_ucr
+    elif args.slice_scr is not None:
+        output_dir = args.slice_scr
     else:
-        output_dir = Path(__file__).resolve().parent / "outputs" / mode
+        assert False
     output_dir.mkdir(parents=True, exist_ok=True)
     slice_dir = output_dir if mode in ("slice-kb", "slice-ucr", "slice-scr") else None
     test_log_path = output_dir / "test.log"
