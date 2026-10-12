@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 
 from synth_xfer._util.domain import AbstractDomain
-from synth_xfer._util.pattern import RefinementKind, allows_root_split, refine_pattern
+from synth_xfer._util.pattern import RefinementKind, refine_pattern
 from synth_xfer._util.pattern_dsl import PatternDag
 
 
@@ -293,7 +293,7 @@ def main() -> None:
         f"({splits.added} added, {splits.collided} collided), "
         f"{result.split_leaves_dropped} complete pieces dropped"
     )
-    if not allows_root_split(domain):
+    if domain is not AbstractDomain.KnownBits:
         print("    (splits that drop the root are disabled for this domain)")
     print(f"  Output: {output.unique} unique, {output.weighted} weighted")
     print(f"  Wrote: {args.output} ({written} rows)")
