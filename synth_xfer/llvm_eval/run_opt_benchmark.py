@@ -57,7 +57,8 @@ RunStatus = Literal["success", "fail", "timeout", "crash"]
 PerfMetric = int | float
 ScalarStats = dict[str, float]
 PerfSamples = dict[str, list[PerfMetric]]
-OptPayload = ScalarStats | PerfSamples
+DagCounts = dict[str, int]  # raw dag-slicer record line -> occurrences
+OptPayload = ScalarStats | PerfSamples | DagCounts
 OptResult = tuple[Path, RunStatus, OptPayload, str]
 
 # Per-worker config, populated by _init_worker so it survives non-fork start
@@ -65,7 +66,6 @@ OptResult = tuple[Path, RunStatus, OptPayload, str]
 _OPT: Path | None = None
 _BENCH_DIR: Path | None = None
 _HIST_DIR: Path | None = None
-_SLICE_DIR: Path | None = None
 _MODE: RunMode | None = None
 _COMPTIME_REPEAT: int = 3
 _COMPTIME_CPUS: tuple[int, ...] = ()
@@ -77,21 +77,14 @@ def _init_worker(
     opt: Path,
     bench_dir: Path,
     hist_dir: Path | None,
-    slice_dir: Path | None,
     mode: RunMode,
     comptime_repeat: int,
     comptime_cpus: tuple[int, ...],
     comptime_perf_cpu: int | None,
 ) -> None:
-    global _OPT, _BENCH_DIR, _HIST_DIR, _SLICE_DIR, _MODE
+    global _OPT, _BENCH_DIR, _HIST_DIR, _MODE
     global _COMPTIME_REPEAT, _COMPTIME_CPUS, _COMPTIME_PERF_CPU
-    _OPT, _BENCH_DIR, _HIST_DIR, _SLICE_DIR, _MODE = (
-        opt,
-        bench_dir,
-        hist_dir,
-        slice_dir,
-        mode,
-    )
+    _OPT, _BENCH_DIR, _HIST_DIR, _MODE = opt, bench_dir, hist_dir, mode
     _COMPTIME_REPEAT, _COMPTIME_CPUS = (
         comptime_repeat,
         comptime_cpus,
@@ -238,11 +231,7 @@ def run_opt(input_file: Path) -> OptResult:
             return (input_file, "fail", {}, ret.stderr.decode())
 
         if _MODE in ("slice-kb", "slice-ucr", "slice-scr"):
-            assert _SLICE_DIR is not None
-            debug_output = _SLICE_DIR / _rel_stem(input_file).with_suffix(".dag")
-            debug_output.parent.mkdir(parents=True, exist_ok=True)
-            debug_output.write_bytes(ret.stderr)
-            return (input_file, "success", {}, "")
+            return (input_file, "success", _count_blocks(ret.stderr.decode()), "")
 
         if _MODE == "histogram":
             return (input_file, "success", {}, "")
@@ -331,30 +320,17 @@ def _render_blocks(
     return counts, size
 
 
-def _count_blocks(path: str) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    with open(path, "r") as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("%0"):
-                counts[line] = counts.get(line, 0) + 1
+def _count_blocks(text: str) -> DagCounts:
+    counts: DagCounts = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("%0"):
+            counts[line] = counts.get(line, 0) + 1
     return counts
 
 
-def _aggregate_dags(slice_dir: Path, jobs: int) -> None:
-    """Collapse the per-file .dag logs under `slice_dir` into distinct DAGs and write dags.tsv
-
-    Two-pass for speed
-    1) count records by raw line text (count_blocks)
-    2) cannoncal renderings (render_blocks)
-    """
-    dag_files = [str(p) for p in slice_dir.rglob("*.dag")]
-    print(f"aggregating {len(dag_files)} .dag logs with {jobs} workers ...")
-
-    raw: collections.Counter = collections.Counter()
-    with Pool(jobs) as pool:
-        for local in pool.imap_unordered(_count_blocks, dag_files, chunksize=16):
-            raw.update(local)
+def _aggregate_dags(raw: collections.Counter, out: Path, jobs: int) -> None:
+    """Canonicalise the raw dag-slicer records in `raw` and write distinct DAGs to `out`."""
     print(f"counted {sum(raw.values())} records, {len(raw)} distinct DAG lines")
 
     dag_counts: collections.Counter = collections.Counter()
@@ -367,7 +343,6 @@ def _aggregate_dags(slice_dir: Path, jobs: int) -> None:
             dag_counts.update(counts)
             dag_size.update(size)
 
-    out = slice_dir / "dags.tsv"
     with out.open("w") as o:
         o.write("count\tsize\tpattern\n")
         for pat, n in sorted(dag_counts.items(), key=lambda kv: (-kv[1], kv[0])):
@@ -530,25 +505,25 @@ def main() -> None:
         "--slice-kb",
         type=Path,
         default=None,
-        metavar="DIR",
-        help="Run pattern slicer over computeKnownBits; write the per-input .dag "
-        "logs, test.log and the aggregated dags.tsv under DIR.",
+        metavar="FILE",
+        help="Run pattern slicer over computeKnownBits; write the aggregated "
+        "DAG count TSV to FILE.",
     )
     p.add_argument(
         "--slice-ucr",
         type=Path,
         default=None,
-        metavar="DIR",
-        help="Run pattern slicer over computeConstantRange (unsigned); write the "
-        "per-input .dag logs, test.log and the aggregated dags.tsv under DIR.",
+        metavar="FILE",
+        help="Run pattern slicer over computeConstantRange (unsigned); write the aggregated "
+        "DAG count TSV to FILE.",
     )
     p.add_argument(
         "--slice-scr",
         type=Path,
         default=None,
-        metavar="DIR",
-        help="Run pattern slicer over computeConstantRange (signed); write the "
-        "per-input .dag logs, test.log and the aggregated dags.tsv under DIR.",
+        metavar="FILE",
+        help="Run pattern slicer over computeConstantRange (signed); write the aggregated "
+        "DAG count TSV to FILE.",
     )
     p.add_argument(
         "--pattern-hist",
@@ -585,6 +560,7 @@ def main() -> None:
     if args.comptime_repeat < 1:
         p.error("--comptime-repeat must be at least 1")
 
+    slice_out: Path | None = None
     if args.stats is not None:
         mode: RunMode = "stats"
     elif args.comptime is not None:
@@ -596,11 +572,11 @@ def main() -> None:
     elif args.pattern_hist is not None:
         mode = "histogram"
     elif args.slice_kb is not None:
-        mode = "slice-kb"
+        mode, slice_out = "slice-kb", args.slice_kb
     elif args.slice_ucr is not None:
-        mode = "slice-ucr"
+        mode, slice_out = "slice-ucr", args.slice_ucr
     elif args.slice_scr is not None:
-        mode = "slice-scr"
+        mode, slice_out = "slice-scr", args.slice_scr
     else:
         assert False
 
@@ -672,21 +648,17 @@ def main() -> None:
         output_dir = args.kbopt_log.parent
     elif args.pattern_hist is not None:
         output_dir = args.pattern_hist
-    elif args.slice_kb is not None:
-        output_dir = args.slice_kb
-    elif args.slice_ucr is not None:
-        output_dir = args.slice_ucr
-    elif args.slice_scr is not None:
-        output_dir = args.slice_scr
+    elif slice_out is not None:
+        output_dir = slice_out.parent
     else:
         assert False
     output_dir.mkdir(parents=True, exist_ok=True)
-    slice_dir = output_dir if mode in ("slice-kb", "slice-ucr", "slice-scr") else None
     test_log_path = output_dir / "test.log"
 
     stats_acc: dict[str, float] = {}
     comptime_acc: dict[str, PerfSamples] = {}
     walltime_acc: dict[str, float] = {}
+    dag_acc: collections.Counter = collections.Counter()
     fail = False
     n_timeout = 0
 
@@ -697,7 +669,6 @@ def main() -> None:
             args.opt_path,
             bench_dir,
             hist_dir,
-            slice_dir,
             mode,
             args.comptime_repeat,
             comptime_cpus,
@@ -728,6 +699,8 @@ def main() -> None:
                         comptime_acc[rel] = cast(PerfSamples, stats)
                     elif mode == "walltime":
                         walltime_acc[rel] = cast(ScalarStats, stats)["wall_time_s"]
+                    elif slice_out is not None:
+                        dag_acc.update(cast(DagCounts, stats))
                     else:
                         scalar_stats = cast(ScalarStats, stats)
                         for k, v in scalar_stats.items():
@@ -761,9 +734,8 @@ def main() -> None:
     if n_timeout:
         print(f"note: {n_timeout} file(s) timed out (non-fatal)", file=sys.stderr)
 
-    if mode in ("slice-kb", "slice-ucr", "slice-scr"):
-        assert slice_dir is not None
-        _aggregate_dags(slice_dir, args.jobs)
+    if slice_out is not None:
+        _aggregate_dags(dag_acc, slice_out, args.jobs)
 
     sys.exit(1 if fail else 0)
 

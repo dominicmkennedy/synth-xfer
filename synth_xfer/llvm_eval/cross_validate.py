@@ -144,7 +144,7 @@ def mine(args: argparse.Namespace, fold_files: list[Path], opt: Path) -> None:
                 "--opt-path",
                 str(opt),
                 "--slice-kb",
-                str(dags.parent),
+                str(dags),
                 "--filter-file",
                 str(fold_files[i]),
             ]
