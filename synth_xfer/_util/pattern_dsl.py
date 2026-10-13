@@ -38,7 +38,9 @@ from xdsl_smt.dialects.transfer import (
     ZextBoolOp,
 )
 
-_MAX_PATTERN_ID_LEN = 251
+# 255-byte file name limit, minus the ".inc" suffix and the "UCR"/"SCR" prefix
+# that generate_xfers adds for the ConstantRange domains.
+_MAX_PATTERN_ID_LEN = 248
 _SSA_ID_PREFIX = "s"
 
 
